@@ -18,7 +18,8 @@ import logging
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import entity_registry as er
 
 from .coordinator import KohlerAnthemPlusCoordinator
 from .const import DOMAIN
@@ -35,9 +36,69 @@ PLATFORMS: list[Platform] = [
     Platform.SWITCH,
 ]
 
+# ---------------------------------------------------------------------------
+# Removed 2026-08-15 — valve reboot counter, controller ping, outage counter
+# ---------------------------------------------------------------------------
+# Config-entry keys the old diagnostics persisted. They are dead weight now, and leaving
+# them would make `_async_update_listener` see a spurious difference on the first load.
+_REMOVED_ENTRY_KEYS = (
+    "gcs_reboot_count",
+    "gcs_reboot_last",
+    "hub_local_host",
+    "hub_outage_count",
+    "hub_outage_last",
+    "hub_outage_last_seconds",
+)
+
+# Unique-ID suffixes of the entities those diagnostics created. Home Assistant keeps a
+# registry row for every entity it has ever seen, so without this the three would linger as
+# permanently unavailable rows that only a manual delete would clear.
+_REMOVED_UNIQUE_ID_SUFFIXES = (
+    "_reboot_count",
+    "_local_outages",
+    "_local_reachable",
+)
+
+
+@callback
+def _async_purge_removed_diagnostics(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Strip the removed diagnostics' stored state from Home Assistant.
+
+    Covers both halves of "removed": the config-entry keys they persisted, and the entity
+    registry rows they own. Runs on every setup and is a no-op once clean, so a downgrade
+    followed by an upgrade cannot leave orphans behind.
+    """
+    stale = {key: entry.data[key] for key in _REMOVED_ENTRY_KEYS if key in entry.data}
+    if stale:
+        hass.config_entries.async_update_entry(
+            entry,
+            data={k: v for k, v in entry.data.items() if k not in _REMOVED_ENTRY_KEYS},
+            options={
+                k: v for k, v in entry.options.items() if k not in _REMOVED_ENTRY_KEYS
+            },
+        )
+        _LOGGER.info(
+            "Removed stale diagnostic keys from the config entry: %s",
+            ", ".join(sorted(stale)),
+        )
+    elif any(key in entry.options for key in _REMOVED_ENTRY_KEYS):
+        hass.config_entries.async_update_entry(
+            entry,
+            options={
+                k: v for k, v in entry.options.items() if k not in _REMOVED_ENTRY_KEYS
+            },
+        )
+
+    registry = er.async_get(hass)
+    for row in list(er.async_entries_for_config_entry(registry, entry.entry_id)):
+        if row.unique_id.endswith(_REMOVED_UNIQUE_ID_SUFFIXES):
+            registry.async_remove(row.entity_id)
+            _LOGGER.info("Removed retired diagnostic entity %s", row.entity_id)
+
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Kohler Anthem Plus from a config entry."""
+    _async_purge_removed_diagnostics(hass, entry)
     coordinator = KohlerAnthemPlusCoordinator(hass, entry)
     await coordinator.async_setup()
     await coordinator.async_config_entry_first_refresh()

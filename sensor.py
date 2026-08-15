@@ -15,12 +15,10 @@ hex sensor, where a zero reads as data rather than as a broken entity.
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timezone
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
-    SensorStateClass,
     SensorEntity,
 )
 from homeassistant.config_entries import ConfigEntry
@@ -64,7 +62,6 @@ async def async_setup_entry(
             ValveStatusSensor(coordinator),
             ValveLastUpdateSensor(coordinator),
             ValveHexSensor(coordinator, 1),
-            ValveRebootCountSensor(coordinator),
             OutletMaxRunTimeSensor(coordinator, 1),
         ]
         if coordinator.model.uses_valve2:
@@ -83,10 +80,6 @@ async def async_setup_entry(
         # Diagnostic, and about the controller's *reporting* rather than the water, so it is
         # created on every account that has a controller — unlike everything gated below.
         entities.append(ControllerLastUpdateSensor(coordinator))
-        # Only meaningful when the local probe is running; it reports unavailable otherwise,
-        # which is honest and costs one row rather than hiding a diagnostic behind a reload.
-        if coordinator.hub_probe is not None:
-            entities.append(ControllerLocalOutageSensor(coordinator))
 
     if controller_water:
         entities += [
@@ -288,54 +281,6 @@ class ValveHexSensor(ValveDiagnosticSensor):
         }
 
 
-class ValveRebootCountSensor(KohlerValveEntity, SensorEntity):
-    """How many times the valve has announced its own restart.
-
-    **A healthy valve does not reboot.** This exists because one on the reference system does
-    — 25+ times in a week, accelerating, surviving two factory resets — and until 2026-08-14
-    nothing in Home Assistant reported it. `DEVICE_REBOOT_STS` was recognised and discarded,
-    so the fault was visible only in a raw MQTT capture that happened to be running.
-
-    Diagnostic but **enabled by default**: an entity nobody switches on cannot warn anybody.
-    A count that never moves costs one row on the device page; a count that climbs is the
-    single most useful number on this integration.
-
-    `TOTAL_INCREASING` so a long-run history graph shows the rate rather than a flat line,
-    and persisted in the config entry so it survives Home Assistant restarts — otherwise it
-    would reset exactly when a reboot storm made somebody restart Home Assistant.
-    """
-
-    _attr_name = "Valve reboots"
-    _attr_icon = "mdi:restart-alert"
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _attr_state_class = SensorStateClass.TOTAL_INCREASING
-
-    def __init__(self, coordinator: KohlerAnthemPlusCoordinator) -> None:
-        super().__init__(coordinator)
-        self._attr_unique_id = f"{self._device_id}_reboot_count"
-
-    @property
-    def available(self) -> bool:
-        """A counter, not a reading — meaningful even before any valve state arrives."""
-        return self.coordinator.last_update_success
-
-    @property
-    def native_value(self) -> int:
-        return self.coordinator.valve_reboot_count
-
-    @property
-    def extra_state_attributes(self) -> dict[str, object]:
-        last = self.coordinator.valve_reboot_last
-        return {
-            "last_reboot": (
-                datetime.fromtimestamp(last, tz=timezone.utc).isoformat() if last else None
-            ),
-            "seconds_since_last_reboot": (
-                round(time.time() - last, 1) if last else None
-            ),
-        }
-
-
 class OutletMaxRunTimeSensor(ValveDiagnosticSensor):
     """The `maximumRunTime` the valve has announced for one outlet.
 
@@ -376,66 +321,6 @@ class OutletMaxRunTimeSensor(ValveDiagnosticSensor):
     @property
     def native_value(self) -> int | None:
         return self.coordinator.outlet_run_times.get(self._outlet)
-
-
-class ControllerLocalOutageSensor(KohlerControllerEntity, SensorEntity):
-    """How many times the controller's local HTTP server has stopped answering.
-
-    Paired with the valve reboot counter, this answers the question the cloud stream cannot:
-    **when the valve reboots, does the controller go down with it?** See
-    `anthem_plus/hub_local.py` — it is a reachability probe, nothing more, and the response
-    body is discarded.
-
-    Only created when a local host is configured; absent otherwise.
-    """
-
-    _attr_name = "Controller local outages"
-    _attr_icon = "mdi:lan-disconnect"
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _attr_state_class = SensorStateClass.TOTAL_INCREASING
-
-    def __init__(self, coordinator: KohlerAnthemPlusCoordinator) -> None:
-        super().__init__(coordinator)
-        self._attr_unique_id = f"{self._device_id}_local_outages"
-
-    @property
-    def available(self) -> bool:
-        return self.coordinator.hub_probe is not None
-
-    @property
-    def native_value(self) -> int | None:
-        probe = self.coordinator.hub_probe
-        return None if probe is None else probe.outage_count
-
-    @property
-    def extra_state_attributes(self) -> dict[str, object]:
-        probe = self.coordinator.hub_probe
-        if probe is None:
-            return {}
-        return {
-            "host": probe.host,
-            "reachable": probe.reachable,
-            "poll_interval_seconds": probe.interval,
-            "current_outage_seconds": (
-                None if probe.current_outage_seconds is None
-                else round(probe.current_outage_seconds, 1)
-            ),
-            "last_outage_seconds": (
-                None if probe.last_outage_seconds is None
-                else round(probe.last_outage_seconds, 1)
-            ),
-            "last_outage_ended": (
-                None if probe.last_outage_ended is None
-                else datetime.fromtimestamp(
-                    probe.last_outage_ended, tz=timezone.utc
-                ).isoformat()
-            ),
-            # Outages carried over from before this Home Assistant run. The total is what the
-            # sensor reports; this says how much of it predates the current process, so a
-            # rising count can be told from a restored one.
-            "outages_before_restart": probe.baseline_outages,
-            "consecutive_failed_probes": probe.consecutive_failures,
-        }
 
 
 class ControllerDiagnosticSensor(KohlerControllerEntity, SensorEntity):

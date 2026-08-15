@@ -232,6 +232,23 @@ ice-shower: `Beginner Ice Shower(22) Advanced Ice Shower(23)`.
 
 ## 5. LIGHTING — pairing & control
 
+> ## ❌ Pairing was live-tested 2026-08-15 and it does not work — see [`lighting.md`](lighting.md)
+>
+> Everything in this section is accurate as an *endpoint* reference, but bypassing the
+> §5.6 bug is **not** sufficient to pair a bulb. A Philips Hue Zigbee 3.0 bulb was never
+> admitted by the coordinator across two controlled experiments, while the same bulb
+> joined Zigbee2MQTT in 13 seconds with the hub's own scan window still open.
+>
+> Three corrections to §5.5's open unknowns, from reading the live JS bundle:
+> the "accept the risk" prompt is **client-side only and makes no API call**, so it cannot
+> flip the network to unsecured; **no `req_command` anywhere in the bundle changes Zigbee
+> security mode**; and in unsecured mode the UI's intended payload is an **empty** `bulbs`
+> list, which was tested and also failed.
+>
+> The local API exposes **no error surface** for the radio layer, and `get_error_log`
+> times out at 170 s, so the cause cannot be determined from the hub. Full evidence,
+> ruled-out hypotheses and next steps: [`lighting.md`](lighting.md).
+
 Bulbs are **Zigbee**, joined to a coordinator on the **System Controller's
 lighting card** (`get_lightcard_info` → `channel:11, status:"Connected"`; this is
 *not* a separate "light bridge" — `connected_dev_info.lightbridge:false`).

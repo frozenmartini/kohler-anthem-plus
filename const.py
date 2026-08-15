@@ -197,45 +197,20 @@ ACT_ON_LEARNED_LIMITS = False
 CONF_OUTLET_RUN_TIMES = "outlet_run_times"
 
 # ---------------------------------------------------------------------------
-# GCS reboot counter
+# REMOVED 2026-08-15 — valve reboot counter, controller ping, outage counter
 # ---------------------------------------------------------------------------
-# The valve announces its own restarts with `DEVICE_REBOOT_STS`, and until 2026-08-14 the
-# integration recognised the code and did nothing with it. That is how an accelerating
-# reboot fault went unnoticed for a week — it is invisible in Home Assistant, and the raw
-# capture is the only place it appears.
+# `CONF_GCS_REBOOT_COUNT` / `CONF_GCS_REBOOT_LAST` / `CONF_HUB_LOCAL_HOST` /
+# `CONF_HUB_OUTAGE_COUNT` / `CONF_HUB_OUTAGE_LAST` / `CONF_HUB_OUTAGE_LAST_SECONDS` /
+# `HUB_LOCAL_POLL_SECONDS` all lived here, alongside `anthem_plus/hub_local.py`.
 #
-# Counted, logged at WARNING, and persisted so the figure survives restarts and means
-# "reboots since this was first seen" rather than "since Home Assistant last started".
-CONF_GCS_REBOOT_COUNT = "gcs_reboot_count"
-CONF_GCS_REBOOT_LAST = "gcs_reboot_last"
-
-# ---------------------------------------------------------------------------
-# HUB LOCAL PROBE — is the controller answering? (off unless a host is set)
-# ---------------------------------------------------------------------------
-# Full rationale: `anthem_plus/hub_local.py`. In one line: the cloud stream cannot tell you
-# whether the *controller* went down when the valve rebooted, and this can.
+# They existed to diagnose the valve reboot fault, and that investigation is closed: the
+# cause was a failing Moes smart outlet, not the Kohler hardware
+# (`docs/gcs/valve_reboot_fault.md`). With both devices moved off it, the counters had no
+# remaining question to answer — and the probe was the integration's **only** polling loop
+# in an otherwise push-only design, at 1 Hz against the controller.
 #
-# Set the controller's LAN address to enable it — Settings -> the integration -> Configure.
-# Empty means the probe never starts, which is the default.
-CONF_HUB_LOCAL_HOST = "hub_local_host"
-
-# Outages are persisted for the same reason the valve reboot count is: the figure that
-# matters is "outages since this was first seen", and the confirming test for the smart-outlet
-# hypothesis (docs/gcs/valve_reboot_fault.md) is *whether the count stops rising* — which an
-# in-memory counter cannot answer, because every Home Assistant restart resets it to zero and
-# the next single outage puts it back at 1. Session 7 hit exactly that: two real outages read
-# as "1" because a restart fell between them.
-CONF_HUB_OUTAGE_COUNT = "hub_outage_count"
-CONF_HUB_OUTAGE_LAST = "hub_outage_last"
-CONF_HUB_OUTAGE_LAST_SECONDS = "hub_outage_last_seconds"
-
-# 1 s, as requested by the owner. This is the only polling loop in an otherwise push-only
-# integration, and it is a local HTTP GET on the LAN — the controller's own web UI fires the
-# same endpoint before every POST it makes. Raise it if that ever proves too eager; the
-# thing being caught is a reboot, which lasts a minute or more, so even 5 s would not miss
-# one. The fine granularity is about pinning down *when* it started.
-HUB_LOCAL_POLL_SECONDS = 1.0
-
+# Stale keys may remain in the config entry on installations that ran the old code; they are
+# ignored. `_async_migrate_entry_data` in `__init__.py` strips them on load.
 # ---------------------------------------------------------------------------
 # Temperature slider bounds (Home Assistant side only)
 # ---------------------------------------------------------------------------

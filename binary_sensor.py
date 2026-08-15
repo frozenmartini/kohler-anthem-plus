@@ -66,8 +66,6 @@ async def async_setup_entry(
         # The controller's own copy of the stream-health diagnostic. Same stream as the
         # valve's, deliberately duplicated per device — see `MqttConnectionMixin`.
         entities.append(ControllerMqttConnectionSensor(coordinator))
-        if coordinator.hub_probe is not None:
-            entities.append(ControllerLocalReachableSensor(coordinator))
 
         capabilities = coordinator.hub_capabilities
 
@@ -406,57 +404,6 @@ class ValvePresetActiveSensor(KohlerValveEntity, BinarySensorEntity):
             # ids are slots, and an experience run from the controller shares the id space
             # without appearing in `presets` at all.
             "preset_name": preset.name if preset else None,
-        }
-
-
-class ControllerLocalReachableSensor(KohlerControllerEntity, BinarySensorEntity):
-    """Whether the controller's local HTTP server is answering.
-
-    **Reachability, not health.** The probe sends one pre-auth GET and throws the body away —
-    the payload describes the shower, which the cloud already reports better. What matters is
-    whether anything answered: a controller that is rebooting cannot serve HTTP.
-
-    It exists to answer one question nothing else can: **when the valve reboots, does the
-    controller go down with it?** Pair it with `sensor.anthem_valve_reboots` and compare
-    timestamps. Both transitions are logged at WARNING with the outage duration, so the
-    correlation is readable straight from `home-assistant.log`.
-
-    Enabled by default, unlike the other controller diagnostics — a probe nobody switches on
-    cannot catch anything. Created only when a local host is configured.
-    """
-
-    _attr_name = "Controller local API"
-    _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-
-    def __init__(self, coordinator: KohlerAnthemPlusCoordinator) -> None:
-        super().__init__(coordinator)
-        self._attr_unique_id = f"{self._device_id}_local_reachable"
-
-    @property
-    def available(self) -> bool:
-        """Available as soon as the probe exists — before its first result it reads unknown."""
-        return self.coordinator.hub_probe is not None
-
-    @property
-    def is_on(self) -> bool | None:
-        probe = self.coordinator.hub_probe
-        return None if probe is None else probe.reachable
-
-    @property
-    def extra_state_attributes(self) -> dict[str, object]:
-        probe = self.coordinator.hub_probe
-        if probe is None:
-            return {}
-        return {
-            "host": probe.host,
-            "outages": probe.outage_count,
-            "current_outage_seconds": (
-                None if probe.current_outage_seconds is None
-                else round(probe.current_outage_seconds, 1)
-            ),
-            "consecutive_failed_probes": probe.consecutive_failures,
-            "valve_reboots": self.coordinator.valve_reboot_count,
         }
 
 

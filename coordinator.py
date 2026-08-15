@@ -18,7 +18,6 @@ Three things this has to get right:
 from __future__ import annotations
 
 import logging
-import time
 import uuid
 from typing import Any
 
@@ -48,8 +47,6 @@ from .anthem_plus import (
     KohlerClient,
     KohlerError,
     CutoffDebugLog,
-    HubLocalProbe,
-    HubOutage,
     RawMqttLog,
     ZoneCutoff,
     ZoneCutoffDetector,
@@ -58,7 +55,6 @@ from .anthem_plus import (
     model_for_topology,
     unit_to_celsius,
 )
-from .anthem_plus.const import MSG_GCS_REBOOT
 from .anthem_plus.valve_hex import (
     UNUSED_VALVE_WORD,
     VALVE1_PREFIX,
@@ -71,12 +67,6 @@ from .anthem_plus.valve_hex import (
 )
 from .const import (
     ACT_ON_LEARNED_LIMITS,
-    CONF_GCS_REBOOT_COUNT,
-    CONF_GCS_REBOOT_LAST,
-    CONF_HUB_OUTAGE_COUNT,
-    CONF_HUB_OUTAGE_LAST,
-    CONF_HUB_OUTAGE_LAST_SECONDS,
-    CONF_HUB_LOCAL_HOST,
     CONF_MOBILE_DEVICE_ID,
     CONF_OUTLET_RUN_TIMES,
     CONF_REFRESH_TOKEN,
@@ -90,7 +80,6 @@ from .const import (
     DOMAIN,
     ENABLE_CUTOFF_DEBUG_LOG,
     ENABLE_RAW_MQTT_LOG,
-    HUB_LOCAL_POLL_SECONDS,
     RAW_MQTT_LOG_DIR,
     RAW_MQTT_LOG_KEEP_FILES,
     RAW_MQTT_LOG_MAX_BYTES,
@@ -217,20 +206,6 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.raw_log: RawMqttLog | None = None
         # CUTOFF DEBUG LOG: built in `async_setup`, once `hass.config.path` is usable.
         self.cutoff_log: CutoffDebugLog | None = None
-        # HUB LOCAL PROBE: built in `async_setup` only when a host is configured.
-        self.hub_probe: HubLocalProbe | None = None
-        # How many times the valve has announced its own restart. Persisted, because the
-        # figure is only useful as a rate over days — see `CONF_GCS_REBOOT_COUNT`.
-        self._reboot_count: int = int(entry.data.get(CONF_GCS_REBOOT_COUNT) or 0)
-        self._reboot_last: float | None = entry.data.get(CONF_GCS_REBOOT_LAST)
-        # Same treatment for controller outages, and for a sharper reason: the confirming
-        # test for the smart-outlet hypothesis is whether this count *stops rising*, which
-        # is unreadable if a restart silently sets it back to zero.
-        self._hub_outage_count: int = int(entry.data.get(CONF_HUB_OUTAGE_COUNT) or 0)
-        self._hub_outage_last: float | None = entry.data.get(CONF_HUB_OUTAGE_LAST)
-        self._hub_outage_last_seconds: float | None = entry.data.get(
-            CONF_HUB_OUTAGE_LAST_SECONDS
-        )
         # Tracks how long each zone has been flowing, so a valve-timer close can be told from
         # a real stop. Always fed, even with the option off — the cost is a dict update per
         # message, and it means enabling the option takes effect immediately rather than from
@@ -351,21 +326,6 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Say at startup whether the cutoff feature can act. The switch keeps its state
         # across restarts, so without this the only warning would be the one printed when
         # somebody last toggled it — possibly weeks ago, on a different set of known limits.
-        # HUB LOCAL PROBE: reachability only, and only if the owner supplied a host.
-        host = str(self.entry.options.get(CONF_HUB_LOCAL_HOST) or "").strip()
-        if host and self.hub_device is not None:
-            self.hub_probe = HubLocalProbe(
-                session=async_get_clientsession(self.hass),
-                host=host,
-                interval=HUB_LOCAL_POLL_SECONDS,
-                on_change=self.async_update_listeners,
-                on_outage_complete=self._handle_hub_outage_complete,
-                baseline_outages=self._hub_outage_count,
-                baseline_last_ended=self._hub_outage_last,
-                baseline_last_seconds=self._hub_outage_last_seconds,
-            )
-            self.hub_probe.start()
-
         self._journal(
             "arm",
             enabled=self.restart_on_runtime_cutoff,
@@ -501,9 +461,6 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.stream = None
         # The raw capture is closed by the stream's own teardown; this one has no stream to
         # ride on, so it is released here. Blocking close — off the loop.
-        if self.hub_probe is not None:
-            await self.hub_probe.stop()
-            self.hub_probe = None
         if self.cutoff_log is not None:
             await self.hass.async_add_executor_job(self.cutoff_log.close)
 
@@ -518,9 +475,6 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             and self.gcs_device is not None
             and envelope.device_id == self.gcs_device.device_id
         ):
-            if envelope.code == MSG_GCS_REBOOT:
-                self._note_valve_reboot()
-                changed = True
             changed |= self.gcs_state.apply_envelope(envelope)
             self._remember_open_masks()
             self._check_runtime_cutoff()
@@ -725,88 +679,6 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 cut.duration,
             )
         self.hass.async_create_task(self._async_restart_after_cutoff(fired))
-
-    @callback
-    def _note_valve_reboot(self) -> None:
-        """Count a valve-announced restart, log it, and remember it across restarts.
-
-        **The valve restarting is not a normal event and nothing else surfaces it.** The
-        message code was recognised but discarded until 2026-08-14, which is how an
-        accelerating reboot fault went unnoticed for a week — it appears in the raw capture
-        and nowhere else. A WARNING means the next person sees it without being told to look.
-
-        The count is persisted so it reads "reboots since this was first seen" rather than
-        "since Home Assistant last started", which is the figure that shows a trend.
-        """
-        now = time.time()
-        since = None if self._reboot_last is None else now - self._reboot_last
-        self._reboot_count += 1
-        self._reboot_last = now
-        _LOGGER.warning(
-            "The Anthem valve reported a REBOOT (DEVICE_REBOOT_STS). That is #%d recorded, "
-            "%s. Water stops when this happens and nothing else in Home Assistant reports "
-            "it. If these are frequent, see docs/gcs/valve_reboot_fault.md",
-            self._reboot_count,
-            "first one seen" if since is None else f"{since / 60:.0f} min after the previous",
-        )
-        self._journal(
-            "valve_reboot",
-            count=self._reboot_count,
-            seconds_since_previous=None if since is None else round(since, 1),
-            hub_reachable=(self.hub_probe.reachable if self.hub_probe else None),
-        )
-        self.hass.config_entries.async_update_entry(
-            self.entry,
-            data={
-                **self.entry.data,
-                CONF_GCS_REBOOT_COUNT: self._reboot_count,
-                CONF_GCS_REBOOT_LAST: now,
-            },
-        )
-
-    @property
-    def valve_reboot_count(self) -> int:
-        """Valve-announced restarts recorded, across Home Assistant restarts."""
-        return self._reboot_count
-
-    @property
-    def valve_reboot_last(self) -> float | None:
-        """Unix time of the most recent valve reboot, or None if none has been seen."""
-        return self._reboot_last
-
-    @callback
-    def _handle_hub_outage_complete(self, outage: HubOutage) -> None:
-        """Persist a finished controller outage and record it for correlation.
-
-        Called by the probe the instant an outage closes. The count is written to the config
-        entry for the same reason the valve reboot count is — the useful figure is "outages
-        since this was first seen" — and `valve_reboot_count` is journalled alongside it so
-        the pairing question (*did the valve go down too?*) can be answered from the log
-        rather than by lining up two entity histories afterwards.
-        """
-        self._hub_outage_count += 1
-        self._hub_outage_last = outage.ended
-        self._hub_outage_last_seconds = outage.seconds
-        self._journal(
-            "hub_outage",
-            count=self._hub_outage_count,
-            seconds=None if outage.seconds is None else round(outage.seconds, 1),
-            valve_reboot_count=self._reboot_count,
-            valve_reboot_seconds_ago=(
-                None
-                if self._reboot_last is None
-                else round(time.time() - self._reboot_last, 1)
-            ),
-        )
-        self.hass.config_entries.async_update_entry(
-            self.entry,
-            data={
-                **self.entry.data,
-                CONF_HUB_OUTAGE_COUNT: self._hub_outage_count,
-                CONF_HUB_OUTAGE_LAST: self._hub_outage_last,
-                CONF_HUB_OUTAGE_LAST_SECONDS: self._hub_outage_last_seconds,
-            },
-        )
 
     @callback
     def _journal(self, event: str, **fields: Any) -> None:

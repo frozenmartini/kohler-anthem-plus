@@ -31,7 +31,6 @@ from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import (
     BooleanSelector,
-    TextSelector,
     SelectOptionDict,
     SelectSelector,
     SelectSelectorConfig,
@@ -59,7 +58,6 @@ from .anthem_plus.models import (
 )
 from .const import (
     CONF_REFRESH_TOKEN,
-    CONF_HUB_LOCAL_HOST,
     CONF_RESTART_ON_RUNTIME_CUTOFF,
     CONF_ZONE_OUTLETS,
     CONF_TEMPERATURE_UNIT,
@@ -287,13 +285,10 @@ class KohlerAnthemPlusConfigFlow(ConfigFlow, domain=DOMAIN):
 class KohlerAnthemPlusOptionsFlow(OptionsFlow):
     """Settings that can change after setup.
 
-    Two options:
+    One option: whether to re-open a zone the valve closed on its own run-time limit.
 
-    * whether to re-open a zone the valve closed on its own run-time limit;
-    * the controller's LAN address, which enables the local reachability probe.
-
-    Saving reloads the entry. The cutoff flag is read live so it takes effect immediately;
-    the probe is started during setup, so changing the host takes effect on the reload.
+    Saving reloads the entry, though the cutoff flag is read live so it takes effect
+    immediately.
     """
 
     async def async_step_init(
@@ -303,7 +298,6 @@ class KohlerAnthemPlusOptionsFlow(OptionsFlow):
             return self.async_create_entry(data=user_input)
 
         current = self.config_entry.options.get(CONF_RESTART_ON_RUNTIME_CUTOFF, False)
-        current_host = self.config_entry.options.get(CONF_HUB_LOCAL_HOST, "")
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema(
@@ -311,12 +305,6 @@ class KohlerAnthemPlusOptionsFlow(OptionsFlow):
                     vol.Required(
                         CONF_RESTART_ON_RUNTIME_CUTOFF, default=current
                     ): BooleanSelector(),
-                    # Blank disables the local probe entirely, which is the default. See
-                    # `anthem_plus/hub_local.py` — it exists to tell whether the controller
-                    # goes down when the valve reboots, and needs a LAN address to ask.
-                    vol.Optional(
-                        CONF_HUB_LOCAL_HOST, default=current_host
-                    ): TextSelector(),
                 }
             ),
         )

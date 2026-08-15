@@ -39,7 +39,6 @@ from .gcs import GcsDevice
 from .hub import HubCapabilities, HubDevice, zone_number, zone_outlet_flags
 from .mqtt import AnthemMqttStream, Envelope
 from .cutoff_log import CutoffDebugLog
-from .hub_local import HubLocalProbe, HubOutage
 from .raw_log import RawMqttLog
 from .runtime_cutoff import ZoneCutoff, ZoneCutoffDetector, ZoneReading
 from .state import GcsPreset, GcsState, HubState, HubZone
@@ -110,8 +109,6 @@ __all__ = [
     "KohlerClient",
     "KohlerError",
     "CutoffDebugLog",
-    "HubLocalProbe",
-    "HubOutage",
     "RawMqttLog",
     "ZoneCutoff",
     "ZoneCutoffDetector",

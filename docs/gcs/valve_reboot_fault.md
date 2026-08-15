@@ -35,7 +35,25 @@ uncalibrated, preset-free, and with a single interface attached; it still reboot
 This document records the evidence from both before and after that reset. §5b holds the
 owner's current mitigation and the open experiment; leave it running before changing anything.
 
-> **The integration now counts reboots.** Since 2026-08-15 `DEVICE_REBOOT_STS` is consumed:
+> ## ⚠️ Superseded 2026-08-15 — these diagnostics have all been REMOVED
+>
+> **The valve reboot counter, the controller ping and the outage counter no longer exist** —
+> code, entities and persisted counts, deleted once the diagnosis below was closed.
+> `sensor.anthem_valve_valve_reboots`, `sensor.anthem_plus_controller_local_outages` and
+> `binary_sensor.anthem_plus_controller_local_api` are **gone**, as is
+> `anthem_plus/hub_local.py`. `MSG_GCS_REBOOT` survives in `anthem_plus/const.py` as protocol
+> documentation, consumed by nothing.
+>
+> **Every instruction in this document to "read the outage counter" is therefore
+> unfollowable.** To confirm a clean run now, use the raw MQTT capture (the
+> `SYSTEM_READY` signature works retroactively) or `moes_correlation.py`. Rationale:
+> [`../handoff/2026-08-15_session7_current.md`](../handoff/2026-08-15_session7_current.md) §0.
+>
+> Everything below is retained as the evidence record — it is what the counters showed while
+> they ran, and the conclusion it supports still stands.
+
+> **The integration now counts reboots.** *(True 2026-08-14 to 08-15 only — see above.)*
+> Since 2026-08-15 `DEVICE_REBOOT_STS` is consumed:
 > `sensor.anthem_valve_valve_reboots` (`TOTAL_INCREASING`, enabled by default, persisted to the
 > config entry so it survives restarts), a WARNING in `home-assistant.log` on every reboot with
 > the interval since the last, and a `valve_reboot` record in the cutoff debug log carrying
@@ -834,8 +852,9 @@ final reboot from the physical unplug/replug — expected, matching the establis
 ~130s boot signatures, not a spontaneous fault instance.
 
 **Not yet confirmed clean.** The valve's fix was confirmed by a multi-hour reboot-free run, not
-by the act of moving it — the controller's fix needs the same treatment: check
-`sensor.anthem_plus_controller_local_outages` after several hours have passed. Whether the
+by the act of moving it — the controller's fix needs the same treatment. ⚠️ **The outage sensor
+that would have shown this was removed later the same day** (see the banner at the top), so
+confirm from the raw MQTT capture or `moes_correlation.py` instead. Whether the
 Raspberry Pi's plug was also moved is unconfirmed; check before assuming it is clear too, since
 §3e found it on the same outlet and rebooting in lockstep with the controller.
 
