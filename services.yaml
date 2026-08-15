@@ -1,0 +1,30 @@
+# Static fallback for the action's form. `services.py` overrides this at runtime via
+# `async_set_service_schema`, which is what hides the Zone 2 field on a single-zone system —
+# something this file cannot express, since it is the same for every installation.
+# Keep the wording here in step with `_FIELD_ZONE1` / `_FIELD_ZONE2` in `services.py`.
+send_valve_hex:
+  name: Send valve hex
+  description: >-
+    Send a command code straight to the Anthem valve, for anything the normal controls
+    cannot do. Set the shower up how you want it with the outlet switches and temperature
+    controls, then copy the code from the Zone Hex diagnostic sensor and paste it below.
+    WARNING: this can start water.
+  fields:
+    zone1_hex:
+      name: Zone 1 Hex
+      required: true
+      description: >-
+        The 8-character code from the "Zone 1 Hex" sensor on the Anthem Valve device. Set
+        the outlet switches and temperature the way you want them first, then copy the code.
+      example: "0184C801"
+      selector:
+        text:
+    zone2_hex:
+      name: Zone 2 Hex
+      required: false
+      description: >-
+        The 8-character code from the "Zone 2 Hex" sensor on the Anthem Valve device. Set
+        the outlet switches and temperature the way you want them first, then copy the code.
+      example: "1184C801"
+      selector:
+        text:

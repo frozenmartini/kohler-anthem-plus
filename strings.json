@@ -1,0 +1,51 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Kohler Anthem Plus",
+        "description": "Sign in with your Kohler Konnect account. Sign-in happens entirely within Home Assistant — there is no browser step and nothing to copy back.",
+        "data": {
+          "username": "Email",
+          "password": "Password"
+        }
+      },
+      "valve": {
+        "title": "Select your valve",
+        "description": "Found: {summary}\n\nYour valve's outlet layout could not be read automatically, so choose your Anthem digital valve model. This decides how many outlets exist and which zone each belongs to. It is required even with only an Anthem Plus controller, because the controller reports outlets per zone using the same layout.",
+        "data": {
+          "valve_model": "Valve model"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Sign in again",
+        "description": "The saved session for {username} has expired. Enter the password again to reconnect.",
+        "data": {
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Kohler rejected that email or password.",
+      "cannot_connect": "Could not reach Kohler. Check your internet connection and try again.",
+      "signin_blocked": "Kohler needs an extra step to sign in (for example two-factor authentication), which this integration cannot complete.",
+      "no_devices": "That account has no Anthem or Anthem Plus devices. Note that an Anthem Plus touchscreen (K-28214-ACS) only adds the controller — adding the valve itself requires a first-generation Anthem touchscreen (K-28214)."
+    },
+    "abort": {
+      "already_configured": "This Kohler account is already set up.",
+      "reauth_successful": "Reconnected successfully."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Kohler Anthem Plus options",
+        "data": {
+          "restart_on_runtime_cutoff": "Restart the shower when the valve's run-time limit closes an outlet"
+        },
+        "data_description": {
+          "restart_on_runtime_cutoff": "The valve closes each outlet after its own maximum run time (yours is 60 minutes). With this on, that outlet is reopened automatically and the shower carries on. There is no limit on how many times this repeats, so water can keep running indefinitely with nobody present. Off by default."
+        }
+      }
+    }
+  }
+}

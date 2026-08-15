@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Editor / workspace files (personal preference, not project content)
+.vscode/
+*.code-workspace
+
+# OS
+.DS_Store
+
+# Safety net: nothing currently matches these, checked recursively before
+# adding this file, but keep them ignored by default going forward.
+*.env
+.env
+*token*
+*credential*
+*secret*
