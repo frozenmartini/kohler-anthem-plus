@@ -206,6 +206,44 @@ ACT_ON_LEARNED_LIMITS = False
 CONF_OUTLET_RUN_TIMES = "outlet_run_times"
 
 # ---------------------------------------------------------------------------
+# Preset 1's hidden timer — normalised once at setup
+# ---------------------------------------------------------------------------
+# A GCS preset carries its own `time`, a second run-time limit independent of the outlets'
+# `maximumRunTime`. Whichever is lower stops the shower, and nothing ever re-syncs the preset
+# to the hardware value: `time` is only ever what the last writer sent. Full protocol detail
+# in `docs/gcs/api.md`, "two independent timers".
+#
+# That is a problem for **preset 1 specifically, and only preset 1**, because it is hidden
+# from the owner in both the first-generation touchscreen and the Konnect app. Its timer is
+# whatever the setup wizard happened to store when the preset was created — on this install,
+# 1800 s, frozen at a factory reset on 2026-08-14 and then stranded when `maximumRunTime`
+# went to 3600 s. The owner has no interface anywhere that can correct it.
+#
+# So the integration sets it once, to `DEFAULT_PRESET_TIMER_SECONDS`, and then leaves it
+# alone. The intent is not to manage the timer but to take it *out* of the way, so the
+# hardware gate is the thing that limits a shower — one limit, in one place, that the owner
+# can actually see and change.
+#
+# **Every other preset is deliberately untouched.** Presets 2-10 are visible and editable in
+# the Konnect app, their timers are the owner's choice, and on the first-generation
+# touchscreen that timer is also the countdown shown during a run. Normalising those would
+# overwrite a deliberate setting and change what the panel displays. Preset 1 is exempt from
+# that reasoning precisely because it is the one the owner cannot see.
+#
+# Why a constant rather than following `maximumRunTime`: the hardware limit cannot be read on
+# demand at all. There is no REST endpoint for outlet config, and `READ_GCS_OUTLET_CONFIG_CFG`
+# arrives unprompted over MQTT, one outlet at a time — so at setup, when this runs, it is
+# frequently not known yet. A fixed target that is at or above every observed hardware value
+# leaves the gate to the hardware in every case.
+SYNC_DEFAULT_PRESET_TIMER = True
+# Preset 1 is "Default shower" on every install seen: created by the setup wizard, and the
+# slot the app hides.
+DEFAULT_PRESET_ID = 1
+# 3600 s is the highest `maximumRunTime` observed on this hardware (900/1800/3600). Setting
+# the preset at the ceiling means the outlet limit is always the binding constraint.
+DEFAULT_PRESET_TIMER_SECONDS = 3600
+
+# ---------------------------------------------------------------------------
 # What a config-entry change has to be before it is worth a reload
 # ---------------------------------------------------------------------------
 # Read by `_async_update_listener` in `__init__.py`; the mechanism is in

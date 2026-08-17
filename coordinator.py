@@ -78,6 +78,8 @@ from .const import (
     CONF_ZONE_OUTLETS,
     CUTOFF_DEBUG_LOG_KEEP_FILES,
     DEFAULT_FLOW_PERCENT,
+    DEFAULT_PRESET_ID,
+    DEFAULT_PRESET_TIMER_SECONDS,
     DOMAIN,
     ENABLE_CUTOFF_DEBUG_LOG,
     ENABLE_RAW_MQTT_LOG,
@@ -87,6 +89,7 @@ from .const import (
     RELOAD_IGNORED_DATA_KEYS,
     RELOAD_IGNORED_OPTION_KEYS,
     SCAN_INTERVAL,
+    SYNC_DEFAULT_PRESET_TIMER,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -288,6 +291,7 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.hub_state = HubState(self.model)
 
         await self._async_seed_state()
+        await self._async_sync_default_preset_timer()
         self._persist_refresh_token()
 
         # One identity for the life of this config entry. Generated on first setup and
@@ -590,6 +594,48 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 },
             },
         )
+
+    async def _async_sync_default_preset_timer(self) -> None:
+        """Take the hidden default preset's own timer out of the way, once.
+
+        Preset 1 carries a `time` the owner cannot see or edit — it appears in neither the
+        touchscreen nor the Konnect app — and it silently overrides the outlet limit whenever
+        it is lower. Normalising it here leaves the hardware `maximumRunTime` as the single
+        thing that ends a shower. `SYNC_DEFAULT_PRESET_TIMER` in `const.py` carries the full
+        reasoning, including why presets 2-10 are deliberately left alone.
+
+        **This never fails setup.** It is a convenience, not a prerequisite: the integration
+        works fine against a preset with the wrong timer, so a Kohler outage, a rejected
+        write, or an unexpected payload is logged and stepped over. Nothing downstream reads
+        its result.
+        """
+        if not SYNC_DEFAULT_PRESET_TIMER or self.gcs is None:
+            return
+        try:
+            plan = await self.gcs.async_sync_preset_timer(
+                DEFAULT_PRESET_ID, DEFAULT_PRESET_TIMER_SECONDS
+            )
+        except (KohlerError, AuthError, DeviceOffline) as err:
+            _LOGGER.debug(
+                "Could not check preset %s's run timer (harmless, setup continues): %s",
+                DEFAULT_PRESET_ID,
+                err,
+            )
+            return
+        if plan.needed:
+            _LOGGER.info(
+                "Preset %s (%s) had a hidden %ss run timer that would stop a shower before "
+                "the valve's own limit; rewrote it to %ss so the outlet limit is the only "
+                "thing that ends a shower",
+                DEFAULT_PRESET_ID,
+                plan.name or "unnamed",
+                plan.previous,
+                DEFAULT_PRESET_TIMER_SECONDS,
+            )
+        else:
+            _LOGGER.debug(
+                "Preset %s run timer needs no change (%s)", DEFAULT_PRESET_ID, plan.reason
+            )
 
     def _zone_limits(self) -> dict[int, tuple[int, ...]]:
         """The distinct `maximumRunTime` values configured for each zone's outlets.

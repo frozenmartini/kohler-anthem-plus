@@ -449,7 +449,34 @@ when it was written:
 | 2026-08-15 → 08-17 | 900 ↔ 3600, seven more times | **never moved** |
 
 Preset 1 was rebuilt inside the 20-minute window when the post-reset default was 1800, and froze
-it. Rewriting the preset (`writepreset`) is what re-syncs it; changing the outlet config does not.
+it.
+
+##### Nothing re-syncs it — `time` is only ever what the last writer sent
+
+Tested directly on 2026-08-17, in both directions:
+
+| action | `time` after |
+|---|---|
+| Change the **default outlet** in the Konnect app | **unchanged at 1800** — the app rewrote the preset's outlet flags and sent the existing timer straight back |
+| `writepreset` with an explicit `"time": "3600"` | **3600** — applied, confirmed by read-back and by the device's own `GCS_PRESET_STS` push |
+
+So the field is neither derived nor protected. It is a plain stored value, and no app-side or
+device-side path makes it follow `maximumRunTime`. An earlier revision of this section said
+"rewriting the preset is what re-syncs it" — **wrong in both directions**: a rewrite does not
+re-sync, and a deliberate `time` write does not need to rewrite anything else.
+
+##### ⚠️ Preset 1 is invisible, so nobody can fix its timer by hand
+
+Preset 1 is hidden from the owner in **both** the first-generation touchscreen and the Konnect
+app. Its timer is whatever the setup wizard stored when the preset was created, and there is no
+interface anywhere that shows or edits it.
+
+That is why the integration normalises it — see
+[**§1a — the integration sets preset 1's timer once at setup**](#the-integration-sets-preset-1s-timer-once-at-setup).
+Presets 2-10 are left strictly alone: they are visible and editable in the app, their timers are
+the owner's choice, and on the first-generation touchscreen that same value is the **countdown
+displayed during a run** (it clears when the preset id clears). Preset 1 has no countdown to
+affect, being outside that system entirely.
 
 ##### Preset-driven vs. directly-driven, on the wire
 
@@ -469,6 +496,31 @@ outside the preset's timer entirely.
 ⚠️ **Untested:** whether a directly-driven session then runs to the full `maximumRunTime`. This
 one was stopped by hand at 444.67 s (`paused: false` — a real stop, not a timer), so the
 prediction that it would have run to 3600 s is inference, not measurement.
+
+##### The integration sets preset 1's timer once at setup
+
+`_async_sync_default_preset_timer` in `coordinator.py`, run from `async_setup`. It reads
+`gcs-preset`, and **only if** preset 1's `time` differs from `DEFAULT_PRESET_TIMER_SECONDS`
+(3600) does it send one `writepreset`, carrying the name, volume and both valve words straight
+back unchanged. Read-then-conditionally-write, so it is idempotent — proven against this
+install's real payloads: a write against the 1800 s record, a no-op against the 3600 s one.
+
+The intent is not to *manage* the timer but to take it out of play, leaving `maximumRunTime` as
+the single limit that ends a shower — one number, in one place, that the owner can actually see
+and change.
+
+Deliberate boundaries, all covered by `test_preset_timer_sync.py`:
+
+* **Preset 1 only.** Presets 2-10 are never read for this purpose and never written.
+* **An empty slot is left empty.** A factory reset with the wizard skipped leaves all ten slots
+  blank; writing a timer in would half-create a preset nobody asked for.
+* **Failure is non-fatal.** A Kohler outage or a rejected write is logged at debug and setup
+  continues. The integration works fine against a preset with the wrong timer — this is a
+  convenience, not a prerequisite, and nothing downstream reads the result.
+* **A fixed constant, not the live hardware value.** `maximumRunTime` cannot be read on demand
+  at all — no REST endpoint exists, and `READ_GCS_OUTLET_CONFIG_CFG` arrives unprompted over
+  MQTT one outlet at a time, so at setup it is frequently unknown. 3600 s is at or above every
+  observed hardware value (900/1800/3600), so the gate stays with the hardware in every case.
 
 ##### What this means for the run-time cutoff feature
 

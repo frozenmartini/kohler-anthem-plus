@@ -11,6 +11,7 @@ preset start is always two commands.
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from typing import Any
 
 from .client import KohlerClient
@@ -49,6 +50,97 @@ VALVE_FIELDS = {
     "Valve1": ("primaryValve1", VALVE1_PREFIX),
     "Valve2": ("secondaryValve1", VALVE2_PREFIX),
 }
+
+
+@dataclass(frozen=True)
+class PresetTimerPlan:
+    """What, if anything, to do about one preset's stored ``time``.
+
+    ``reason`` is one of:
+
+    ``absent``
+        No such preset slot in the read. Nothing to do.
+    ``empty``
+        The slot exists but holds no name and no valve words — an unconfigured slot.
+        **Deliberately left alone**: writing a timer into a blank slot would half-create a
+        preset the owner never asked for.
+    ``already``
+        The stored timer already matches the target. Nothing to write.
+    ``rewrite``
+        The timer differs and should be written.
+    """
+
+    reason: str
+    name: str = ""
+    volume: str = "0"
+    valves: dict[int, str] = field(default_factory=dict)
+    previous: int | None = None
+
+    @property
+    def needed(self) -> bool:
+        """Whether a ``writepreset`` should actually be sent."""
+        return self.reason == "rewrite"
+
+
+def _preset_record(payload: Any, preset_id: int) -> dict[str, Any] | None:
+    """Find one slot in a ``gcs-preset`` read."""
+    details = (payload or {}).get("gcsPresetExperienceDetails")
+    if not isinstance(details, list):
+        return None
+    for entry in details:
+        if not isinstance(entry, dict):
+            continue
+        try:
+            if int(str(entry.get("presetId"))) == preset_id:
+                return entry
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def plan_preset_timer(
+    payload: Any, preset_id: int, target_seconds: int
+) -> PresetTimerPlan:
+    """Decide whether a preset's stored timer needs rewriting, and with what.
+
+    ``writepreset`` **replaces the whole record**, so an omitted field is a silent edit.
+    That is why this reads the raw REST payload rather than the parsed state model: only
+    the payload still carries the name, volume and per-valve ``hexString`` that have to be
+    written straight back unchanged. Everything except ``time`` is preserved byte for byte.
+
+    Kept pure — no I/O, no Home Assistant — so the offline suite can prove the exact
+    payload for a write that reconfigures the owner's shower.
+    """
+    record = _preset_record(payload, preset_id)
+    if record is None:
+        return PresetTimerPlan("absent")
+
+    valves: dict[int, str] = {}
+    for detail in record.get("valveDetails") or []:
+        if not isinstance(detail, dict):
+            continue
+        index = str(detail.get("valveIndex") or "")
+        word = str(detail.get("hexString") or "").strip().lower()
+        if not index.lower().startswith("valve") or not word or set(word) == {"0"}:
+            continue
+        try:
+            valves[int(index[5:])] = word
+        except ValueError:
+            continue
+
+    name = str(record.get("title") or record.get("name") or "").strip()
+    if not name and not valves:
+        return PresetTimerPlan("empty")
+
+    try:
+        previous: int | None = int(str(record.get("time")))
+    except (TypeError, ValueError):
+        previous = None
+
+    volume = str(record.get("volume") or "0")
+    if previous == target_seconds:
+        return PresetTimerPlan("already", name, volume, valves, previous)
+    return PresetTimerPlan("rewrite", name, volume, valves, previous)
 
 
 class GcsDevice:
@@ -224,6 +316,30 @@ class GcsDevice:
         return await self._client.async_request(
             "POST", GCS_WRITE_PRESET, json_body=payload
         )
+
+    async def async_sync_preset_timer(
+        self, preset_id: int, target_seconds: int
+    ) -> PresetTimerPlan:
+        """Read one preset and, if its stored timer differs, write the target in.
+
+        Read-then-conditionally-write, so it is idempotent: run it a hundred times and it
+        sends at most one write, the first time. Everything except ``time`` is written back
+        exactly as read — see :func:`plan_preset_timer` for why that matters.
+
+        Returns the plan, whose ``reason`` says what happened. Raises whatever the client
+        raises; the caller decides whether a failure is worth failing setup over.
+        """
+        payload = await self._client.async_get_gcs_presets(self.device_id)
+        plan = plan_preset_timer(payload, preset_id, target_seconds)
+        if plan.needed:
+            await self.async_write_preset(
+                preset_id,
+                plan.name,
+                plan.valves,
+                time_seconds=target_seconds,
+                volume=plan.volume,
+            )
+        return plan
 
     async def async_create_preset(
         self,
