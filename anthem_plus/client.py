@@ -48,9 +48,13 @@ REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=30)
 class KohlerError(Exception):
     """A Kohler API call failed."""
 
-    def __init__(self, message: str, payload: Any = None) -> None:
+    def __init__(self, message: str, payload: Any = None, status: int | None = None) -> None:
         super().__init__(message)
         self.payload = payload
+        #: HTTP status when this came from a response, else None. Lets a caller tell apart
+        #: failures that mean different things — a 404 on a collection endpoint is "empty",
+        #: not "broken" — without parsing the message string.
+        self.status = status
 
 
 class DeviceOffline(KohlerError):
@@ -295,7 +299,9 @@ class KohlerClient:
             )
         if status >= 400:
             detail = payload if isinstance(payload, str) else repr(payload)
-            raise KohlerError(f"{path} failed with HTTP {status}: {detail}", payload)
+            raise KohlerError(
+                f"{path} failed with HTTP {status}: {detail}", payload, status
+            )
 
     # ------------------------------------------------------------------ #
     # Reads

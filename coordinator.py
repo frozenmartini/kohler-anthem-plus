@@ -1051,7 +1051,18 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     # only safe way to resolve a favourite — never hardcode an id.
                     self.favorites = favorites
             except KohlerError as err:
-                _LOGGER.debug("Could not read HUB favourites: %s", err)
+                if getattr(err, "status", None) == 404:
+                    # Not a failure: this endpoint 404s when the account has **no** saved
+                    # favourites, rather than returning an empty list. Confirmed 2026-08-17 —
+                    # the route is handled (it answers with the application's own error
+                    # envelope, unlike a genuine bad path), MQTT `FAVORITES_SNAPSHOT` agrees
+                    # with `attributes: []`, and `docs/hub/cloud_api.md` §5.2 has a captured
+                    # 200 from when this account still had one. Logging it as an error made
+                    # three misleading lines per startup.
+                    self.favorites = []
+                    _LOGGER.debug("No HUB favourites are saved on this account")
+                else:
+                    _LOGGER.debug("Could not read HUB favourites: %s", err)
 
     # ------------------------------------------------------------------ #
     # Helpers

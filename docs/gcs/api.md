@@ -850,6 +850,47 @@ domain predicts. The picker range is a UI limitation, not a device limit.
 ⚠️ **Values above 3600 have deliberately not been tested.** Everything above is inside the
 designed domain; the real ceiling question is still open.
 
+#### ❌ 3600 is the ceiling — three values above it were rejected
+
+| value | > 3600 | ×300 | ×900 | in 3.0.5 picker | result |
+|---|---|---|---|---|---|
+| 3601 | yes | no | no | no | **rejected** |
+| 3900 | yes | yes | no | no | **rejected** |
+| **4500** | yes | **yes** | **yes** | no | **rejected** |
+
+4500 satisfies every grid hypothesis on the table — 300, 900 and 1800 — so grid rules are
+eliminated as the explanation for its rejection. **3600 is the effective maximum.**
+
+**The rejection signature is silence.** Every one returned **HTTP 201** with a `correlationId`,
+then produced *nothing*: no device push, no state change, no error anywhere. Identical to a
+malformed-body rejection. A 201 from this endpoint means "accepted for delivery" and nothing
+more, for out-of-range values as much as for wrong shapes.
+
+What makes that readable at all is the null test: writing 3600 **over** 3600 *did* produce a
+device push. So silence means rejected, not "nothing changed so nothing was announced". Without
+that control the two are indistinguishable.
+
+> ⚠️ **Still open, and deliberately unanswered:** whether 3600 is a *ceiling* or simply the top
+> of an *allowed list*. The 3.0.5 picker is curated rather than uniform — 15/20/25/30/45/60 min
+> = 900/1200/1500/1800/2700/3600 — skipping 35/40/50/55. A 300-multiple absent from that list,
+> **2100** (35 min), would decide it. Not tested; the owner's interest was only in whether 3600
+> could be exceeded, and it cannot.
+>
+> It matters only for entity design: a `number` bounded 900–3600 step 300, versus a `select` of
+> exactly six values.
+
+##### Build note — the picker moved between app versions
+
+| Konnect build | Max Shower Duration options |
+|---|---|
+| **3.0.1** (the decompile) | 15/20/25/30 min → 900–1800 |
+| **3.0.5** (current store) | 15/20/25/30/45/60 min → 900–3600 |
+
+So 3.0.1's narrow list really was a UI limitation, exactly as the dead `p1()` mapper implied —
+and 3600 was writable all along. **The current app's own maximum now coincides with the device's.**
+This is the cleanest example of the rule that app behaviour is not evidence of hardware
+capability: same valve, same firmware, two different apparent limits.
+
 #### Four practical findings from the run
 
 1. **An immediate read-back lies.** `gcsadvancestate` is a cloud document that updates only when
