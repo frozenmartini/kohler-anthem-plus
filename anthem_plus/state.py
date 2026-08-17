@@ -385,18 +385,34 @@ class GcsState:
         return self.warmup_mode != WARMUP_DISABLED
 
     def apply_envelope(self, envelope: Envelope) -> bool:
-        """Apply a GCS message. Returns True if anything changed."""
+        """Apply a GCS message. Returns True if Home Assistant should re-render.
+
+        **Every message from the valve advances `last_update`** — whatever its code, whether
+        or not this class knows how to decode it, and whether or not it carried anything new.
+        That is what the sensor means: the last time the device was heard from, which is a
+        liveness signal, not a change feed.
+
+        It used to be set inside three of the four decode handlers, so it only moved for
+        `GCS_SOLO_STS`, `GCS_WARM_STS` and `GCS_PRESET_STS`. Everything else the valve emits —
+        `READ_GCS_OUTLET_CONFIG_CFG`, `READ_GCS_EXPERIENCE_STS`, `GCS_RECIEVED_STS`,
+        `DEVICE_REBOOT_STS`, `READ_GCS_UI_CFG`, the firmware report — left the timestamp
+        stale, so a valve that was plainly talking could look silent for hours.
+        """
         if envelope.sku != SKU_GCS:
             return False
-        if envelope.code == MSG_GCS_SOLO_STATUS:
-            return self._apply_solo(envelope)
-        if envelope.code == MSG_GCS_WARMUP_STATUS:
-            return self._apply_warmup(envelope)
-        if envelope.code == MSG_GCS_PRESET_STATUS:
-            return self._apply_preset(envelope)
-        if envelope.code == MSG_GCS_OUTLET_CONFIG:
-            return self._apply_outlet_config(envelope)
-        return False
+        # Before dispatch: an undecodable message is still proof of life.
+        self.last_update = envelope.received_at
+        handler = {
+            MSG_GCS_SOLO_STATUS: self._apply_solo,
+            MSG_GCS_WARMUP_STATUS: self._apply_warmup,
+            MSG_GCS_PRESET_STATUS: self._apply_preset,
+            MSG_GCS_OUTLET_CONFIG: self._apply_outlet_config,
+        }.get(envelope.code)
+        if handler is not None:
+            handler(envelope)
+        # Always True: `last_update` moved, so the sensor has something new to show even when
+        # nothing else did. The handlers' own change flags are subsumed by this.
+        return True
 
     def _apply_outlet_config(self, envelope: Envelope) -> bool:
         """Record the per-outlet flow bounds the valve reports.
@@ -467,8 +483,6 @@ class GcsState:
             if self.presets.get(preset_id) != preset:
                 self.presets[preset_id] = preset
                 changed = True
-        if changed:
-            self.last_update = envelope.received_at
         return changed
 
     def _apply_solo(self, envelope: Envelope) -> bool:
@@ -502,7 +516,6 @@ class GcsState:
             active = _preset_id_or_none(attribute.get("presetOrExperienceId"))
             changed |= active != self.active_preset_id
             self.active_preset_id = active
-        self.last_update = envelope.received_at
         return changed
 
     def _apply_warmup(self, envelope: Envelope) -> bool:
@@ -521,7 +534,6 @@ class GcsState:
         changed = mode is not None and mode != self.warmup_mode
         if mode is not None:
             self.warmup_mode = str(mode)
-        self.last_update = envelope.received_at
         return changed
 
     def apply_rest_state(self, payload: dict[str, Any]) -> None:
@@ -685,6 +697,10 @@ class HubState:
         """Apply a HUB message. Returns True if anything changed."""
         if envelope.sku != SKU_HUB:
             return False
+        # Before dispatch, for the same reason as the valve: the controller emits plenty this
+        # class does not decode — `SYSTEM_STS`, `STATUS_SNAPSHOT`, `LUMIWAVE_STS` and the
+        # four `*_EXP_SNAPSHOT` codes — and every one of them is proof it is alive.
+        self.last_update = envelope.received_at
         handler = {
             MSG_HUB_SHOWER_VALVE: self._apply_valve,
             MSG_HUB_MUSIC: self._apply_music,
@@ -693,11 +709,9 @@ class HubState:
             MSG_HUB_FAVORITE: self._apply_favorite,
             MSG_HUB_FAVORITES_SNAPSHOT: self._apply_favorites_snapshot,
         }.get(envelope.code)
-        if handler is None:
-            return False
-        changed = handler(envelope)
-        self.last_update = envelope.received_at
-        return changed
+        if handler is not None:
+            handler(envelope)
+        return True
 
     def _apply_valve(self, envelope: Envelope) -> bool:
         changed = False
