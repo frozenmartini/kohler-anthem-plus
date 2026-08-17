@@ -40,10 +40,10 @@
       "init": {
         "title": "Kohler Anthem Plus options",
         "data": {
-          "restart_on_runtime_cutoff": "Restart the shower when the valve's run-time limit closes an outlet"
+          "restart_on_runtime_cutoff": "Endless Shower — restart the shower when Max Shower Duration is reached"
         },
         "data_description": {
-          "restart_on_runtime_cutoff": "The valve closes each outlet after its own maximum run time (yours is 60 minutes). With this on, that outlet is reopened automatically and the shower carries on. There is no limit on how many times this repeats, so water can keep running indefinitely with nobody present. Off by default."
+          "restart_on_runtime_cutoff": "The valve stops the shower after the Max Shower Duration set in the Kohler Konnect app. With Endless Shower on, it starts again automatically and the shower carries on. There is no limit on how many times this repeats, so water can keep running indefinitely with nobody present. Off by default."
         }
       }
     }

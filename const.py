@@ -175,6 +175,54 @@ CONF_RESTART_ON_RUNTIME_CUTOFF = "restart_on_runtime_cutoff"
 CONF_OUTLET_RUN_TIMES = "outlet_run_times"
 
 # ---------------------------------------------------------------------------
+# Endless Shower — the messages the owner actually reads
+# ---------------------------------------------------------------------------
+# Written for someone standing in a bathroom, not for whoever wrote the integration. The
+# feature is called **Endless Shower** everywhere the owner can see it; `maximumRunTime`,
+# `restart_on_runtime_cutoff` and the zone/outlet split are internal and stay out of these.
+#
+# The one setting a user can act on is **Max Shower Duration** in the Kohler Konnect app, so
+# every "it is not working" message points at exactly that and nothing else.
+#
+# Shared between the startup log in `coordinator.py` and the switch-on log in `switch.py`, so
+# the two cannot drift into saying different things about the same state.
+
+# Nothing to work with: no outlet has reported a duration, or only some have. Also used when
+# a cutoff fires but no outlet snapshot exists to restore.
+ENDLESS_SHOWER_NOT_SET_UP = (
+    "Endless Shower has not been set up properly. Please reconfigure 'Max Shower Duration' "
+    "in the Kohler Konnect app to enable this function."
+)
+
+# Armed. %s is the duration in whole minutes, from `describe_duration`.
+ENDLESS_SHOWER_ON = (
+    "Endless Shower is ON. Your shower will restart automatically every %s minutes, when "
+    "'Max Shower Duration' is reached."
+)
+
+# A cutoff was caught and the shower put back. %s is the local time it was cut off.
+ENDLESS_SHOWER_RESTARTED = "Max Shower Duration reached at %s. Restarted the shower."
+
+# Defensive only. A cutoff cannot normally fire without a mask to restore: the detector sets
+# its start time and its last-running mask on the same update, and `forget()` clears both
+# together, so "timed a zone" and "knows what was in it" cannot come apart. It has never
+# fired — all seven restores in the capture corpus had a mask.
+#
+# ⚠️ **This is NOT the "Home Assistant restarted mid-shower" case.** That one produces no log
+# at all, and cannot: the clock restarts with the process, so at the valve's real cut-off the
+# measured duration falls short of the limit, nothing matches, and no cutoff is detected. The
+# shower simply ends. Deliberate — see `ZoneCutoffDetector`, which would rather miss a cutoff
+# than reopen a valve on a duration it did not actually measure.
+#
+# Says nothing about zones: the owner has no use for the zone number, and the cutoff debug
+# log carries it for anyone investigating. Logged once per affected zone, so two lines mean
+# two zones.
+ENDLESS_SHOWER_NOTHING_TO_RESTORE = (
+    "Endless Shower could not restart the shower, because Home Assistant has no record of "
+    "what was running."
+)
+
+# ---------------------------------------------------------------------------
 # Preset 1's hidden timer — normalised once at setup
 # ---------------------------------------------------------------------------
 # A GCS preset carries its own `time`, a second run-time limit independent of the outlets'

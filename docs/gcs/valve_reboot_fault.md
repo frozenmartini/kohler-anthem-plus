@@ -333,7 +333,7 @@ calibration, presets, or firmware, and it has **no reboot capability at all** �
 | Warm-up merged into the valve Status sensor | no |
 | **Flow no longer inherits** — every write forces `DEFAULT_FLOW_PERCENT` (100%) | **yes**, on writes the user initiates |
 | `kohler_anthem_plus.send_valve_hex` action | **yes**, when called |
-| **Run-time cutoff restart** option + Keep water running switch (per-outlet detection at this point) | **yes**, on a detected cutoff |
+| **Run-time cutoff restart** option + the switch now called **Endless Shower** (per-outlet detection at this point) | **yes**, on a detected cutoff |
 | Shower switch OFF changed from `0x40` pause to `0x00` stop | **yes**, when switched off |
 | Temperature sliders bounded 80–113 °F; `HEAT` device class | no — UI gate only |
 | `tests/run_offline.sh` allowlist runner, after a test accidentally ran water | no |
@@ -365,7 +365,7 @@ calibration, presets, or firmware, and it has **no reboot capability at all** �
 | 08-14 06:46:03 | `maximumRunTime` changed back **900 → 3600 s** |
 | 08-14 ~06:26–07:09 | Repeated interventions during the failing showers |
 | 08-14 ~09:40 | **Factory reset of both devices**, integration re-added |
-| 08-14 ~10:00 | **Flow control disabled on both GCS and HUB**; Keep water running left off |
+| 08-14 ~10:00 | **Flow control disabled on both GCS and HUB**; Endless Shower (then "Keep water running") left off |
 
 ### The flow-control timeline argues against flow as the trigger
 

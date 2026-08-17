@@ -32,8 +32,14 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from homeassistant.helpers.entity import EntityCategory
 
-from .const import CONF_RESTART_ON_RUNTIME_CUTOFF, DOMAIN, SHOWER_ON_PRESET_ID
-from .coordinator import KohlerAnthemPlusCoordinator
+from .const import (
+    CONF_RESTART_ON_RUNTIME_CUTOFF,
+    DOMAIN,
+    ENDLESS_SHOWER_NOT_SET_UP,
+    ENDLESS_SHOWER_ON,
+    SHOWER_ON_PRESET_ID,
+)
+from .coordinator import KohlerAnthemPlusCoordinator, describe_duration
 from .entity import KohlerControllerEntity, KohlerValveEntity
 
 _LOGGER = logging.getLogger(__name__)
@@ -53,7 +59,7 @@ async def async_setup_entry(
         # activating a favourite, so a controller-only account gets no outlet switches.
         model = coordinator.model
         entities.append(ShowerSwitch(coordinator))
-        entities.append(KeepWaterRunningSwitch(coordinator))
+        entities.append(EndlessShowerSwitch(coordinator))
         entities.extend(
             ZoneOutletSwitch(coordinator, zone, outlet)
             for zone in model.zones
@@ -139,7 +145,7 @@ class ShowerSwitch(KohlerValveEntity, SwitchEntity):
             raise
 
 
-class KeepWaterRunningSwitch(KohlerValveEntity, SwitchEntity):
+class EndlessShowerSwitch(KohlerValveEntity, SwitchEntity):
     """Whether to re-open a zone the valve closed on its own run-time limit.
 
     A switch rather than only a config-flow checkbox, because this is a behaviour someone
@@ -163,7 +169,7 @@ class KeepWaterRunningSwitch(KohlerValveEntity, SwitchEntity):
     needing a restart.
     """
 
-    _attr_name = "Keep water running"
+    _attr_name = "Endless Shower"
     _attr_icon = "mdi:timer-refresh-outline"
     _attr_entity_category = EntityCategory.CONFIG
 
@@ -194,7 +200,7 @@ class KeepWaterRunningSwitch(KohlerValveEntity, SwitchEntity):
         if value:
             self._log_enabled_state()
         else:
-            _LOGGER.info("Keep water running disabled")
+            _LOGGER.info("Endless Shower disabled")
         self.async_write_ha_state()
 
     def _log_enabled_state(self) -> None:
@@ -213,33 +219,17 @@ class KeepWaterRunningSwitch(KohlerValveEntity, SwitchEntity):
         known = self.coordinator.outlet_run_times
 
         if not known:
-            _LOGGER.warning(
-                "Keep water running enabled, BUT NO OUTLET HAS REPORTED ITS RUN-TIME LIMIT "
-                "YET — nothing will be restarted until it does. The valve announces this "
-                "unprompted (READ_GCS_OUTLET_CONFIG_CFG) and it cannot be requested; watch "
-                "for 'Learned run-time limit for outlet(s)' in the log. Once seen it is "
-                "remembered permanently, including across restarts"
-            )
+            _LOGGER.warning(ENDLESS_SHOWER_NOT_SET_UP)
             return
 
         if waiting:
-            _LOGGER.warning(
-                "Keep water running enabled and armed for zone(s) %s (from outlet(s) %s), "
-                "but zone(s) %s have not reported a run-time limit yet and will NOT be "
-                "restarted until the valve announces one of their outlets",
-                ", ".join(str(z) for z in self.coordinator.armed_zones),
-                ", ".join(f"{o}={known[o]}s" for o in sorted(known)),
-                ", ".join(str(z) for z in waiting),
-            )
+            # Partly armed is reported the same way as not armed at all: from the owner's
+            # side the situation and the remedy are identical, and naming the zones that
+            # did report would only invite trusting a half-armed feature.
+            _LOGGER.warning(ENDLESS_SHOWER_NOT_SET_UP)
             return
 
-        _LOGGER.warning(
-            "Keep water running enabled and armed for all %d zone(s) (%s): a zone closed "
-            "by the valve's run-time limit will be reopened automatically, with no limit "
-            "on repeats",
-            len(self.coordinator.armed_zones),
-            ", ".join(f"{o}={known[o]}s" for o in sorted(known)),
-        )
+        _LOGGER.warning(ENDLESS_SHOWER_ON, describe_duration(known))
 
     @property
     def extra_state_attributes(self) -> dict[str, object]:

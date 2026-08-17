@@ -30,6 +30,7 @@ from homeassistant.exceptions import (
 )
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.util import dt as dt_util
 
 from .anthem_plus import (
     AnthemMqttStream,
@@ -86,6 +87,10 @@ from .const import (
     RAW_MQTT_LOG_KEEP_FILES,
     RAW_MQTT_LOG_MAX_BYTES,
     RELOAD_IGNORED_DATA_KEYS,
+    ENDLESS_SHOWER_NOT_SET_UP,
+    ENDLESS_SHOWER_NOTHING_TO_RESTORE,
+    ENDLESS_SHOWER_ON,
+    ENDLESS_SHOWER_RESTARTED,
     RELOAD_IGNORED_OPTION_KEYS,
     SCAN_INTERVAL,
     SYNC_DEFAULT_PRESET_TIMER,
@@ -110,6 +115,34 @@ def entry_reload_signature(entry: ConfigEntry) -> tuple[Any, ...]:
         ignore_data=RELOAD_IGNORED_DATA_KEYS,
         ignore_options=RELOAD_IGNORED_OPTION_KEYS,
     )
+
+
+def describe_zones(zones: list[int]) -> str:
+    """Name a set of zones the way the owner's hardware actually looks.
+
+    A two-zone K-28212 has zones worth naming; a single-zone K-28209/K-28210 has exactly one
+    and "zone(s) 1" reads like a template nobody finished. Shared with `switch.py` so both
+    log paths phrase it identically.
+    """
+    if not zones:
+        return "no zones"
+    if len(zones) == 1:
+        return f"zone {zones[0]}"
+    return f"zones {', '.join(str(zone) for zone in zones)}"
+
+
+def describe_duration(run_times: dict[int, int]) -> str:
+    """Max Shower Duration in minutes, the way the Konnect app states it.
+
+    Reads outlet 1 — zone 1's first outlet — because the app presents one duration for the
+    whole system and every install seen has all outlets on the same value. Falls back to the
+    lowest-numbered outlet that has reported, so a partly-learned valve still names a real
+    number instead of nothing.
+    """
+    if not run_times:
+        return "?"
+    seconds = run_times.get(1) or run_times[min(run_times)]
+    return f"{seconds / 60:g}"
 
 
 def _command_half(value: str, field: str) -> str:
@@ -367,21 +400,10 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # working" look identical from the log — and this is a feature that can
                 # restart water with nobody present, so it should announce itself.
                 _LOGGER.warning(
-                    "Keep water running is ON and armed for zone(s) %s (from outlet(s) %s). "
-                    "A zone closed by the valve's run-time limit will be reopened "
-                    "automatically, with no limit on repeats",
-                    ", ".join(str(z) for z in self.armed_zones),
-                    ", ".join(
-                        f"{o}={s}s" for o, s in sorted(self.outlet_run_times.items())
-                    ),
+                    ENDLESS_SHOWER_ON, describe_duration(self.outlet_run_times)
                 )
             else:
-                _LOGGER.warning(
-                    "Keep water running is ON but no outlet has reported its run-time "
-                    "limit yet, so nothing will be restarted. The valve announces this "
-                    "unprompted and it cannot be requested; watch for 'Learned run-time "
-                    "limit for outlet(s)'"
-                )
+                _LOGGER.warning(ENDLESS_SHOWER_NOT_SET_UP)
 
     @callback
     def _handle_auth_error(self, err: Exception) -> None:
@@ -738,15 +760,12 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
             return
 
-        for cut in fired:
-            _LOGGER.warning(
-                "Zone %s was closed by the valve's %ss run-time limit after %.0fs; "
-                "restarting it because restart_on_runtime_cutoff is enabled",
-                cut.zone,
-                cut.limit,
-                cut.duration,
-            )
-        self.hass.async_create_task(self._async_restart_after_cutoff(fired))
+        # Detection and restart used to log a line each. One message now covers both, and it
+        # is emitted only once the water is actually back — so it never claims a restart that
+        # then failed. The cut time is captured here rather than in the restart, which runs a
+        # few seconds later as a task.
+        cut_at = dt_util.now()
+        self.hass.async_create_task(self._async_restart_after_cutoff(fired, cut_at))
 
     @callback
     def _journal(self, event: str, **fields: Any) -> None:
@@ -762,7 +781,9 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self.cutoff_log.wants_open:
             self.hass.async_add_executor_job(self.cutoff_log.prepare)
 
-    async def _async_restart_after_cutoff(self, fired: list[ZoneCutoff]) -> None:
+    async def _async_restart_after_cutoff(
+        self, fired: list[ZoneCutoff], cut_at: Any
+    ) -> None:
         """Put back exactly what was flowing in the zones the valve cut.
 
         The valve clears the zone's mask in the same message that reports the cut, so current
@@ -830,11 +851,7 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # which is reported rather than silently sent.
             restore = cut.mask or snapshot.get(cut.zone, 0)
             if not restore:
-                _LOGGER.warning(
-                    "Zone %s hit its run-time limit but there is no record of which outlets "
-                    "were open, so nothing can be restored there",
-                    cut.zone,
-                )
+                _LOGGER.warning(ENDLESS_SHOWER_NOTHING_TO_RESTORE)
             masks[cut.zone] = restore
             # The detector's own reading is authoritative for the zone it actually timed —
             # more precise than the snapshot, same precedence as the mask above.
@@ -885,12 +902,7 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             for zone, bit in [self.model.outlet_location(outlet)]
             if masks.get(zone, 0) >> bit & 1
         )
-        _LOGGER.warning(
-            "Water restarted after run-time cutoff. Zone(s) %s hit the limit; restored "
-            "outlet(s) %s",
-            ", ".join(str(cut.zone) for cut in fired),
-            ", ".join(str(o) for o in restored),
-        )
+        _LOGGER.warning(ENDLESS_SHOWER_RESTARTED, cut_at.strftime("%H:%M:%S"))
         self._journal("restore_done", outlets=restored)
 
     def _snapshot(self) -> dict[str, Any]:
