@@ -252,7 +252,16 @@ class KohlerClient:
         # A 401 usually means the access token aged out mid-flight; one retry with a
         # freshly minted token is enough. Retrying more would mask a real auth failure.
         if status == 401 and allow_retry:
-            _LOGGER.debug("401 from %s; refreshing token and retrying once", path)
+            # INFO, not DEBUG. This is rare, it costs a token refresh plus a second round
+            # trip — seconds, not milliseconds — and it is the only thing in this client that
+            # can make a single call take that long. A 5.05 s valve restore on 2026-08-15
+            # could not be explained afterwards precisely because this line was invisible
+            # under default logging. See the session 8 handoff.
+            _LOGGER.info(
+                "401 from %s — the access token aged out mid-request; refreshing it and "
+                "retrying once. Expect this call to take a few seconds longer than usual",
+                path,
+            )
             await self._auth.async_refresh()
             return await self.async_request(
                 method, path, json_body=json_body, allow_retry=False
