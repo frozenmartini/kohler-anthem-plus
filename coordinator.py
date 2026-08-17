@@ -28,6 +28,7 @@ from homeassistant.exceptions import (
     ConfigEntryNotReady,
     HomeAssistantError,
 )
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
@@ -91,6 +92,7 @@ from .const import (
     ENDLESS_SHOWER_NOTHING_TO_RESTORE,
     ENDLESS_SHOWER_ON,
     ENDLESS_SHOWER_RESTARTED,
+    ISSUE_NOT_SET_UP,
     RELOAD_IGNORED_OPTION_KEYS,
     SCAN_INTERVAL,
     SYNC_DEFAULT_PRESET_TIMER,
@@ -404,6 +406,33 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
             else:
                 _LOGGER.warning(ENDLESS_SHOWER_NOT_SET_UP)
+        self.async_refresh_setup_issue()
+
+    @callback
+    def async_refresh_setup_issue(self) -> None:
+        """Raise or clear the Repairs card for an Endless Shower that cannot act.
+
+        Called wherever either half of the condition can change: at setup, when the valve
+        announces a limit, and when the switch is toggled. Idempotent — Home Assistant keeps
+        one issue per id, so re-creating an existing one is a no-op and deleting a missing
+        one is too.
+
+        The condition is `zones_awaiting_run_time`, not "nothing known at all", so a valve
+        that has reported one zone but not the other still raises it. Half-armed is not armed
+        for the zone that has no limit, and that is exactly the silent case worth surfacing.
+        """
+        issue_id = f"{ISSUE_NOT_SET_UP}_{self.entry.entry_id}"
+        if self.restart_on_runtime_cutoff and self.zones_awaiting_run_time:
+            ir.async_create_issue(
+                self.hass,
+                DOMAIN,
+                issue_id,
+                is_fixable=False,
+                severity=ir.IssueSeverity.WARNING,
+                translation_key=ISSUE_NOT_SET_UP,
+            )
+        else:
+            ir.async_delete_issue(self.hass, DOMAIN, issue_id)
 
     @callback
     def _handle_auth_error(self, err: Exception) -> None:
@@ -615,6 +644,9 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 },
             },
         )
+        # The reason the Repairs card can look after itself: this is the moment the owner's
+        # trip to the Konnect app pays off, and it needs no restart to be noticed.
+        self.async_refresh_setup_issue()
 
     async def _async_sync_default_preset_timer(self) -> None:
         """Take the hidden default preset's own timer out of the way, once.

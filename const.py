@@ -217,6 +217,15 @@ ENDLESS_SHOWER_RESTARTED = "Max Shower Duration reached at %s. Restarted the sho
 # Says nothing about zones: the owner has no use for the zone number, and the cutoff debug
 # log carries it for anyone investigating. Logged once per affected zone, so two lines mean
 # two zones.
+# Repairs card shown while Endless Shower is on but cannot act. A log line states this once,
+# at startup, and then scrolls away — it can never answer "is it still broken?", which is the
+# only question the owner actually has. A repair is the opposite: it appears when the
+# condition becomes true, persists while it stays true, and removes itself when the valve
+# finally reports a duration. Nobody has to dismiss it.
+#
+# Doubles as the `translation_key`, so the text lives in `strings.json` under `issues`.
+ISSUE_NOT_SET_UP = "endless_shower_not_set_up"
+
 ENDLESS_SHOWER_NOTHING_TO_RESTORE = (
     "Endless Shower could not restart the shower, because Home Assistant has no record of "
     "what was running."

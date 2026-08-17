@@ -47,5 +47,11 @@
         }
       }
     }
+  },
+  "issues": {
+    "endless_shower_not_set_up": {
+      "title": "Endless Shower is not set up",
+      "description": "Endless Shower is turned on, but Home Assistant does not know your Max Shower Duration yet — so it cannot restart your shower when the valve stops it.\n\nOpen the Kohler Konnect app and set **Max Shower Duration**. Changing that setting is what makes the valve report the limit; re-saving the same value does not, so if it is already the duration you want, set it to something else, then set it back.\n\nThis message disappears on its own once the valve reports the limit. No restart needed."
+    }
   }
 }

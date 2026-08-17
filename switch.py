@@ -201,6 +201,9 @@ class EndlessShowerSwitch(KohlerValveEntity, SwitchEntity):
             self._log_enabled_state()
         else:
             _LOGGER.info("Endless Shower disabled")
+        # Turning it off clears the Repairs card as well as raising it — an unusable feature
+        # nobody has switched on is not a problem worth a card.
+        self.coordinator.async_refresh_setup_issue()
         self.async_write_ha_state()
 
     def _log_enabled_state(self) -> None:

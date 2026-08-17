@@ -20,9 +20,10 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import issue_registry as ir
 
 from .coordinator import KohlerAnthemPlusCoordinator, entry_reload_signature
-from .const import DOMAIN
+from .const import DOMAIN, ISSUE_NOT_SET_UP
 from .services import async_register_services, async_unregister_services
 
 _LOGGER = logging.getLogger(__name__)
@@ -142,6 +143,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if PLATFORMS:
         unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
+        # Repairs outlive the config entry, so an entry being removed would otherwise leave a
+        # card pointing at an integration that is no longer installed. Deleting a missing
+        # issue is a no-op, so this is safe on a plain reload too — setup re-raises it if the
+        # condition still holds.
+        ir.async_delete_issue(hass, DOMAIN, f"{ISSUE_NOT_SET_UP}_{entry.entry_id}")
         coordinator: KohlerAnthemPlusCoordinator = hass.data[DOMAIN].pop(entry.entry_id)
         await coordinator.async_shutdown_stream()
         if not hass.data[DOMAIN]:
