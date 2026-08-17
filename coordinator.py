@@ -603,6 +603,17 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         which value the valve would use; matching any of them means such a zone is still
         protected, and the cost is a handful of extra 10 s windows in a 15-minute session
         that would each also have to coincide with a `0x40` pause to fire.
+
+        ⚠️ **`maximumRunTime` only. Preset timers are deliberately excluded — do not add
+        them here.** A preset carries its own `time` (`GCS_PRESET_STS`), a *second*
+        independent limit that stops a preset-driven session early whenever it is lower than
+        `maximumRunTime`; this install currently runs a 1800 s preset under a 3600 s hardware
+        gate, so it is the preset that stops the shower. Those stops land as
+        `verdict: "ignored"` with a large `off_by`, and that is the intended outcome: the
+        hardware gate cutting a shower short is what this feature exists to defeat, whereas a
+        preset ending at its own configured duration is the system doing what the user asked.
+        Restarting those would override a setting somebody chose on purpose. Owner's decision,
+        2026-08-17 — see `docs/gcs/api.md`, "two independent timers".
         """
         limits: dict[int, set[int]] = {zone: set() for zone in self.model.zones}
         for outlet in range(1, self.model.total_outlets + 1):

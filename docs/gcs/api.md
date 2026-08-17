@@ -148,12 +148,20 @@ dumping the complete attribute set of every `GCS_SOLO_STS` in this window — on
 config, never as a running countdown. Whatever a touchscreen displays as a countdown is computed
 and held locally on the panel — it is not transmitted.
 
-**None of this affects the integration.** The run-time cutoff detector never reads
+**None of this affects the *restore* logic.** The run-time cutoff detector never reads
 `presetOrExperienceId` — it tracks per-zone mask and pause state only, and a real
 `maximumRunTime` cutoff pauses every zone a preset owns in one atomic message, a different shape
 from the staggered manual pattern above. See
 [`valve_reboot_fault.md`](valve_reboot_fault.md#5-fixed-2026-08-15--the-restore-now-replays-the-pre-cutoff-flow)
 for the full reasoning.
+
+> ⚠️ **An earlier revision of this paragraph said "None of this affects the integration."
+> That is wrong, and 2026-08-17 disproved it.** The preset's `time` is a *second, independent
+> timer* that can stop a shower the detector cannot account for, because the detector only ever
+> learns `maximumRunTime`. See
+> [**§1a — two independent run-time limits**](#-confirmed-2026-08-17--two-independent-timers-hardware-maximumruntime-vs-software-preset-time).
+> The sentence is accurate about the restore path only, which is what it was originally
+> measuring.
 
 ### `presetOrExperienceId` is a **GCS** fact, and almost nothing sets it
 
@@ -397,6 +405,90 @@ below.
 **It does not close one outlet.** Byte 3 goes to `0x40` — pause flag set, outlet mask zeroed
 — on the primary *and* the secondary here, for a limit reached in zone 2 alone. The
 temperature byte survives untouched.
+
+#### ✅ CONFIRMED 2026-08-17 — two independent timers: hardware `maximumRunTime` vs. software preset `time`
+
+**There is not one run-time limit on this system. There are two, from different layers, and the
+more restrictive one wins.**
+
+| | where it lives | scope | nature |
+|---|---|---|---|
+| **`maximumRunTime`** | per outlet, `READ_GCS_OUTLET_CONFIG_CFG` | every session, however started | **hardware gate** — the valve enforces it |
+| **preset `time`** | per preset, `GCS_PRESET_STS` | only while that preset drives the session | **software gate** — a stored duration the preset carries |
+
+**A preset's `time` cannot exceed the hardware gate.** Set a preset above `maximumRunTime` and
+the valve clamps the session to `maximumRunTime` anyway. Set it below — as this install
+currently is — and the preset stops the shower first, well short of a limit the valve would
+happily have allowed.
+
+##### The observation that forced this
+
+On 2026-08-17 the install had **`maximumRunTime` 3600 s** on all six outlets and **preset 1
+`time` 1800 s**. Two preset-driven runs, both stopped by the preset:
+
+```text
+14:57:24 → 15:27:24   1799.90 s   paused (0x40)
+15:35:00 → 16:04:59   1799.66 s   paused (0x40)
+```
+
+0.24 s apart from each other, 1800.3 s short of the limit the cutoff detector was armed with.
+The second run was a deliberate re-test — preset 1 activated again specifically to see whether
+it would stop at 30 minutes a second time. It did.
+
+##### Why preset 1 held a stale value
+
+The preset does **not** follow later changes to `maximumRunTime`. It keeps whatever was in force
+when it was written:
+
+| UTC | `maximumRunTime` | preset 1 `time` |
+|---|---|---|
+| 2026-08-14 20:04:37 | → **1800** (factory reset restores the default) | |
+| 2026-08-14 20:04:45 | | wiped by the reset — `name ""`, `time "0"` |
+| 2026-08-15 00:00:04 | 1800 | **recreated → 1800** |
+| 2026-08-15 00:21:08 | → **3600** | **still 1800** |
+| 2026-08-15 → 08-17 | 900 ↔ 3600, seven more times | **never moved** |
+
+Preset 1 was rebuilt inside the 20-minute window when the post-reset default was 1800, and froze
+it. Rewriting the preset (`writepreset`) is what re-syncs it; changing the outlet config does not.
+
+##### Preset-driven vs. directly-driven, on the wire
+
+The two are distinguishable, which is what confirmed the mechanism rather than merely fitting it:
+
+```text
+15:34:59.975  GCS_RECIEVED_STS   messageRecievedAndExecuted    <- preset activation is acked
+15:35:00.061  GCS_SOLO_STS       presetOrExperienceId "1"      <- preset drives the session
+16:04:59.725  GCS_SOLO_STS       1184c840  id "0"              <- preset timer expires: PAUSE
+16:05:02.032  GCS_SOLO_STS       1184c801  id "0"              <- resumed by solowritesystem
+```
+
+The resume 2.3 s later was a **`solowritesystem` write, not a preset activation** — no
+`GCS_RECIEVED_STS` appeared for it, and `presetOrExperienceId` stayed `0`. That session was
+outside the preset's timer entirely.
+
+⚠️ **Untested:** whether a directly-driven session then runs to the full `maximumRunTime`. This
+one was stopped by hand at 444.67 s (`paused: false` — a real stop, not a timer), so the
+prediction that it would have run to 3600 s is inference, not measurement.
+
+##### What this means for the run-time cutoff feature
+
+**Decision, owner's call 2026-08-17: the cutoff feature tracks `maximumRunTime` only. Preset
+timers are deliberately out of scope and must not be folded in.**
+
+A preset stopping at its own configured duration is the system working as configured — the user
+chose that duration. The feature exists to defeat the *hardware* gate cutting a shower short, not
+to override a preset's own setting. Restarting a preset-timer stop would resume showers the user
+deliberately configured to end.
+
+Consequences to expect, none of which are faults:
+
+* A preset-timer stop logs `verdict: "ignored"` with a large `off_by` (1800.3 s here). Correct.
+* The learned-limit watcher (`SUSPECTED_LIMIT_MIN_SAMPLES = 3`, 2.0 s clustering) **will** cluster
+  repeated 1800 s stops and eventually name 1800 s a suspected limit for that zone. That is the
+  watcher doing its job, and it is **not** grounds to flip `ACT_ON_LEARNED_LIMITS` — doing so
+  would make the integration act on a preset timer through the back door.
+* `sensor.<valve>_zone_N_outlet_1_max_run_time` shows the hardware gate. It is not the number
+  that will stop a preset-driven shower, and is not meant to be.
 
 ##### The rule, confirmed by a controlled two-cutoff experiment
 

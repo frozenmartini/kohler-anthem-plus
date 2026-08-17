@@ -182,6 +182,15 @@ CONF_RESTART_ON_RUNTIME_CUTOFF = "restart_on_runtime_cutoff"
 # nothing and turns "do you trust the inference" into a question with evidence behind it.
 #
 # This does not gate the *reporting*, which is always on and always harmless.
+#
+# ⚠️ **2026-08-17 — step 2 above now has a trap in it.** A preset carries its own `time`, a
+# second limit independent of `maximumRunTime`, and this install runs a 1800 s preset under a
+# 3600 s hardware gate. Preset-timer stops repeat to the fraction of a second (1799.90 and
+# 1799.66 on 08-17), so the watcher **will** cluster them and offer 1800 s as a suspected
+# limit. That inference is correct and still must not be acted on: the owner's decision is
+# that this feature tracks the hardware gate only, never preset timers. Before flipping this
+# flag, check every `suspected_limit` against `GCS_PRESET_STS`'s `time` for the presets in
+# use, and discard any that match one. See `docs/gcs/api.md`, "two independent timers".
 ACT_ON_LEARNED_LIMITS = False
 
 # Learned per-outlet `maximumRunTime`, persisted because it is **otherwise unobtainable on
