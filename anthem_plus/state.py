@@ -89,6 +89,64 @@ def _preset_id_or_none(value: object) -> int | None:
     return number or None
 
 
+def outlet_limits_from_settings(payload: Any) -> dict[int, OutletLimits]:
+    """Read per-outlet limits from a ``gcsadvancestate`` response.
+
+    The same data the valve announces over MQTT as ``READ_GCS_OUTLET_CONFIG_CFG``, but
+    **readable on demand** — which MQTT is not, since it arrives unprompted roughly twice a
+    session. Verified live 2026-08-17; see ``docs/gcs/api.md`` §1c.
+
+    Two traps, both of which yield plausible-looking wrong numbers rather than an error:
+
+    * **The key spelling differs from MQTT.** REST says ``maximumRuntime`` /
+      ``maximumFlowrate`` / ``minimumFlowrate`` / ``defaultFlowrate``; MQTT capitalises the
+      ``T`` and ``R``. Reading with the MQTT spelling silently finds nothing at all.
+    * **REST returns DISPLAY units where MQTT returns WIRE units.** Flow arrives as ``50``
+      where MQTT says ``200``. Everything is converted to the byte scale here, so the two
+      sources are interchangeable — ``OutletLimits`` means byte scale whatever filled it.
+
+    Outlets that cannot be parsed are skipped rather than guessed at.
+    """
+    limits: dict[int, OutletLimits] = {}
+    # Accepts either the whole `gcsadvancestate` response or the `setting` block on its own,
+    # because `KohlerClient.async_get_gcs_settings` already unwraps it while a raw capture
+    # does not. Cheaper than making every caller remember which one it is holding.
+    source = payload if isinstance(payload, dict) else {}
+    if "valveSettings" not in source:
+        source = source.get("setting") if isinstance(source.get("setting"), dict) else {}
+    if not isinstance(source, dict):
+        return limits
+    for valve in source.get("valveSettings") or []:
+        if not isinstance(valve, dict):
+            continue
+        for entry in valve.get("outletConfigurations") or []:
+            if not isinstance(entry, dict):
+                continue
+            try:
+                outlet_id = int(str(entry.get("outLetId")))
+            except (TypeError, ValueError):
+                continue
+
+            def _flow(key: str, item: dict = entry) -> int | None:
+                """Display flow -> byte scale, the units OutletLimits is defined in."""
+                try:
+                    return int(round(float(str(item.get(key))) * 4))
+                except (TypeError, ValueError):
+                    return None
+
+            try:
+                run_time: int | None = int(str(entry.get("maximumRuntime")))
+            except (TypeError, ValueError):
+                run_time = None
+            low, high = _flow("minimumFlowrate"), _flow("maximumFlowrate")
+            if low is None or high is None:
+                continue
+            limits[outlet_id] = OutletLimits(
+                outlet_id, low, high, run_time, _flow("defaultFlowrate")
+            )
+    return limits
+
+
 @dataclass(frozen=True)
 class OutletLimits:
     """Per-outlet flow bounds the valve reports, on the **byte** scale (0x10-0xC8).
@@ -110,6 +168,14 @@ class OutletLimits:
     #
     # None when the valve has not announced this outlet yet. Never assume 3600.
     maximum_run_time: int | None = None
+    # The outlet's configured starting flow, byte scale, from `defaultFlowRate`.
+    #
+    # **Nothing reads this yet.** Captured deliberately on 2026-08-17 for a later question:
+    # flow control is disabled system-wide on this install, and if a Kohler firmware update
+    # ever fixes the controller's flow handling, the per-outlet default and maximum are what
+    # a flow entity would have to be bounded by. Cheap to record now, impossible to
+    # reconstruct retroactively.
+    default_flow_byte: int | None = None
 
 
 @dataclass(frozen=True)
@@ -435,7 +501,11 @@ class GcsState:
                 run_time: int | None = int(str(attribute.get("maximumRunTime")))
             except (TypeError, ValueError):
                 run_time = None
-            limits = OutletLimits(outlet_id, low, high, run_time)
+            try:
+                default_flow: int | None = int(str(attribute.get("defaultFlowRate")))
+            except (TypeError, ValueError):
+                default_flow = None
+            limits = OutletLimits(outlet_id, low, high, run_time, default_flow)
             if self.outlet_limits.get(outlet_id) != limits:
                 self.outlet_limits[outlet_id] = limits
                 changed = True

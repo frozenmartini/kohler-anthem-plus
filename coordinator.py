@@ -59,6 +59,7 @@ from .anthem_plus import (
     unit_to_celsius,
 )
 from .anthem_plus.entry_reload import reload_signature
+from .anthem_plus.state import outlet_limits_from_settings
 from .anthem_plus.valve_hex import (
     UNUSED_VALVE_WORD,
     VALVE1_PREFIX,
@@ -987,6 +988,31 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self.gcs_state.apply_rest_state(payload)
             except KohlerError as err:
                 _LOGGER.debug("Could not seed GCS state: %s", err)
+
+            # Per-outlet limits, including `maximumRunTime` — the number Endless Shower
+            # cannot act without.
+            #
+            # This used to arrive **only** over MQTT, unprompted and one outlet at a time,
+            # which left a blind window of unknown length after a fresh install: the switch
+            # read "on" while the feature was inert, and the owner was told to go change Max
+            # Shower Duration in the Konnect app purely to provoke an announcement.
+            # `gcsadvancestate` carries the same data and is readable on demand — it was
+            # reachable all along, in a response this integration already fetched for
+            # topology (see `docs/gcs/api.md` §1c, corrected 2026-08-17).
+            #
+            # Runs on every re-seed, not just the first: cheap, and it re-checks the limit
+            # after a reconnect rather than trusting a value that may be hours stale.
+            try:
+                limits = outlet_limits_from_settings(
+                    await self.client.async_get_gcs_settings(self.gcs_device.device_id)
+                )
+                if limits:
+                    self.gcs_state.outlet_limits.update(limits)
+                    # Same path an MQTT announcement takes, so the value is persisted and
+                    # the cutoff detector is armed without waiting for the valve to speak.
+                    self._learn_run_times(self.gcs_state)
+            except KohlerError as err:
+                _LOGGER.debug("Could not read outlet limits over REST: %s", err)
 
             # Presets push over MQTT on every create, edit, rename, and delete, so this is
             # only the seed — nothing re-reads them on a clock.

@@ -196,9 +196,15 @@ CONF_OUTLET_RUN_TIMES = "outlet_run_times"
 
 # Nothing to work with: no outlet has reported a duration, or only some have. Also used when
 # a cutoff fires but no outlet snapshot exists to restore.
+# ⚠️ **Reworded 2026-08-17 and it must stay this way.** This used to read "please reconfigure
+# 'Max Shower Duration' in the Kohler Konnect app" — advice that existed only because the limit
+# arrived over MQTT unprompted, so changing the app setting was the one way to provoke an
+# announcement. The integration now reads it over REST at setup (`gcsadvancestate`), so that
+# instruction is obsolete: this state is transient and self-healing, not something the owner
+# should be sent to the app to fix.
 ENDLESS_SHOWER_NOT_SET_UP = (
-    "Endless Shower has not been set up properly. Please reconfigure 'Max Shower Duration' "
-    "in the Kohler Konnect app to enable this function."
+    "Endless Shower is ON but the shower time limit has not been read from the valve yet, so "
+    "nothing will be restarted. It arms itself automatically as soon as the valve reports it."
 )
 
 # Armed. %s is the duration in whole minutes, from `describe_duration`.
