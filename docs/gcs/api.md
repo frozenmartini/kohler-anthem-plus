@@ -708,6 +708,174 @@ all six slots.
 `outLetFlags` is `1` for every outlet here, so it does not distinguish installed from absent
 on this system either.
 
+## 1c. `writeoutletconfig` — setting Max Shower Duration
+
+**Sources:** JADX decompile of Konnect **3.0.1**, plus live verification on this account
+2026-08-17. ⚠️ **The store version at the time of writing is 3.0.5**, so every statement below
+that describes the *app* is pinned to 3.0.1 and may have moved. Statements about the *device*
+were verified live.
+
+```
+POST /platform/api/v1/commands/gcs/writeoutletconfig
+```
+
+### ⚠️ Where the app disagrees with the hardware
+
+This is the important framing: **what the Konnect app exposes is narrower than what the valve
+holds, and in one case the app misreads the valve outright.** Do not infer device limits from
+app behaviour.
+
+| | Konnect 3.0.1 | This valve, live |
+|---|---|---|
+| Max Shower Duration picker | **15/20/25/30 min** (900–1800 s) — `IntRange(15,30)` filtered to multiples of 5 | holds **3600** |
+| Value→index mapper `p1()` (dead code) | 15–60 min, step 5 → **900–3600** | consistent |
+| Upper bound constant / clamp / validation | **none anywhere on the send path** | unknown |
+
+`p185fj/o.java` declares `min=15, max=30, step=5`, but **only the step is ever read** — nothing
+references the bounds. They document intent and enforce nothing.
+
+So 3600 is legal in the designed domain and simply unreachable from 3.0.1's picker. 2700 has
+never been observed for the same reason: no shipped picker could produce it, even though `p1()`
+maps it to index 6.
+
+> ### 🚨 3.0.1 misreads any value above 1800 — and one tap rewrites it
+>
+> `p185fj/o.java:24-36` snaps the device's value into 15–30 before choosing a wheel index.
+> Trace `a(60)`: `60 >= 20` → `i11 = 25`; `60 < 25` false; `(60 >= 30) && (60 == 30)` false →
+> **returns 25**.
+>
+> **On a valve set to 3600, the app displays 25 min, and tapping Save writes 1500.** Anything
+> above 1800 is mis-displayed and one accidental Save from being silently cut. A vendor defect;
+> nothing this integration can prevent. Worth telling any user who has a duration above 30 min.
+
+### The envelope
+
+Wrapper key is **`gcsOutletConfigControlModel`** — same envelope as `writepreset`, different key
+and inner model. Every value is a **string**.
+
+```json
+{ "deviceId": "gcs-…", "sku": "GCS", "tenantId": "<tenant-guid>",
+  "gcsOutletConfigControlModel": {
+    "outLetId": "0", "outLetType": "62", "outLetFlags": "1",
+    "minimumOutletTemperature": "150", "defaultOutletTemperature": "388",
+    "maximumOutletTemperature": "450",
+    "minimumFlowrate": "16", "defaultFlowrate": "200", "maximumFlowrate": "200",
+    "maximumRuntime": "3600" } }
+```
+
+`maxVolume` exists in the model and the app sends it on its commissioning path; it is absent
+from both read surfaces here, so this integration omits it. `purge` is declared but **has no
+setter** — R8 stripped it as unreachable, so the app's real body is 11 keys and never 12.
+
+### 🚨 The read and write key spellings differ
+
+| MQTT read (`READ_GCS_OUTLET_CONFIG_CFG`) | REST write body |
+|---|---|
+| `maximumRunTime` | **`maximumRuntime`** |
+| `maximumFlowRate` | **`maximumFlowrate`** |
+| `minimumFlowRate` | **`minimumFlowrate`** |
+| `defaultFlowRate` | **`defaultFlowrate`** |
+
+Capital `T`/`R` on the read side, lowercase on the write side. The temperature keys and
+`outLetId` / `outLetType` / `outLetFlags` match on both.
+
+**Do not build a write body by copying MQTT keys.** Gson drops unmatched keys silently, the API
+returns 201, and nothing is applied — four of eleven fields would vanish. That is the same
+lenient-success failure that cost seven guesses on `writepreset`, and it would look exactly like
+a device-side limit.
+
+### ✅ CORRECTION — outlet config IS readable on demand
+
+**`gcsadvancestate` carries `setting.valveSettings[].outletConfigurations[]`.** Verified live
+2026-08-17. This integration has always called that endpoint — `topology.py` reads
+`noOfOutlets` from the same response — and simply never looked inside the array.
+
+This corrects a claim repeated in `const.py` and in §1a of this document: that `maximumRunTime`
+is *"otherwise unobtainable on demand"* and that *"there is no REST endpoint for outlet
+configuration"*. The **read-only paths** listed as 404 (`gcs-outlet-config` and friends) really
+do 404 — but the data was reachable all along under `gcsadvancestate`.
+
+### Units — the read source decides whether you convert
+
+| Read source | Temperatures | Flow rates | Before writing |
+|---|---|---|---|
+| MQTT `READ_GCS_OUTLET_CONFIG_CFG` | tenths °C (`388`) | byte units (`200`) | **pass through** |
+| REST `gcsadvancestate` | °C (`38.8`) | display (`50`) | **×10 and ×4** |
+
+Verified live: REST returned `maximumOutletTemperature: "45"`, `minimumFlowrate: "4"`,
+`defaultOutletTemperature: "38.8"` — display units, settling an open question the decompile
+could only infer. The write body wants wire units either way (`v0()` = ×10, `t0()` = ×4).
+
+`v0()` special-cases one value: 49.0 °C → `488`, not 490 — 488 tenths is exactly 120 °F.
+
+> 🚨 **`maximumOutletTemperature` is the scald limit.** Whole-record replace means omitting it,
+> or writing it on the wrong scale, changes it. Assert the outgoing value matches what was read
+> before every write, and abort if not.
+
+### One outlet per call, chained on success
+
+There is **no list form**. The app writes N sequential calls, one per outlet, each carrying that
+outlet's complete record with the same `maximumRuntime`, and only issues the next after a 2xx
+(`p185fj/m.java:514-518`). **A failure mid-loop leaves outlets in mixed state.**
+
+### The response proves nothing
+
+```java
+class CommandSuccessResponseModel { String correlationId; Long timestamp; }
+```
+
+No status, no error code, no echo of the applied value. The app performs **no read-back** — on
+the last outlet's success it waits 5000 ms and shows a local dialog. So a 201 means *accepted for
+delivery*, never *applied*. **Verify by reading the value back**, and allow time: an immediate
+`gcsadvancestate` read still shows the old value, because that document only updates once the
+device reports.
+
+### ✅ Verified live — 2026-08-17, K-28212, six outlets
+
+Eighteen writes, three values, shower off. **Every one applied exactly. Nothing was clamped,
+nothing was ignored, and no other field moved.**
+
+| value | outlets written | read back | scald limit | flow bounds |
+|---|---|---|---|---|
+| **900** | 6 | `900 x6` | `45` unchanged | `50` / `4` unchanged |
+| **1800** | 6 | `1800 x6` | `45` unchanged | `50` / `4` unchanged |
+| **3600** | 6 | `3600 x6` | `45` unchanged | `50` / `4` unchanged |
+
+Every call returned **HTTP 201** with `{correlationId, timestamp}`.
+
+**This is the app-vs-hardware gap made concrete.** Konnect 3.0.1's picker can only produce
+900–1800, yet **3600 was written and accepted**, exactly as the dead `p1()` mapper's 900–3600
+domain predicts. The picker range is a UI limitation, not a device limit.
+
+⚠️ **Values above 3600 have deliberately not been tested.** Everything above is inside the
+designed domain; the real ceiling question is still open.
+
+#### Four practical findings from the run
+
+1. **An immediate read-back lies.** `gcsadvancestate` is a cloud document that updates only when
+   the device reports. Reading it ~1 s after a 201 still showed the *old* value; the change
+   appeared within the 25 s wait. Do not conclude "ignored" from a fast read — that is exactly
+   how a working write looks like a device-side limit.
+2. **A no-change write still triggers a device push.** The null test — writing 3600 over 3600 —
+   produced a `READ_GCS_OUTLET_CONFIG_CFG` announcement anyway. So `writeoutletconfig` is a
+   reliable way to **force** an outlet-config announcement, which is otherwise unprompted and
+   arrives roughly twice a session. That has obvious value for the cutoff feature's cold start.
+3. **The integration picks it up with no extra work.** `_learn_run_times` sees the device push
+   and persists to the config entry unaided — observed mid-sweep holding `1800` for all six, then
+   `3600` after the restore. The whole loop is: write → cloud → valve → MQTT → coordinator →
+   config entry.
+4. **The write order is per outlet and the device echoes per outlet.** Six writes produced six
+   pushes, ~0.5 s apart, matching the app's chained loop.
+
+### The app refuses to send while water is running
+
+`p185fj/h.java:284-303` gates Save on three conditions — offline, valve not found, and any outlet
+running — the last raising *"Settings cannot be saved while any outlet is running."* Whether the
+cloud or firmware enforces this too is untested; the app never gets that far. **Run any
+experiment with the shower off.**
+
+Nothing else is sent: no `uiconfigsuccess`, no state re-read, no follow-up of any kind.
+
 ## 2. Direct "turn on water" = `solowritesystem` (no preset read needed)
 
 `POST /platform/api/v1/commands/gcs/solowritesystem`

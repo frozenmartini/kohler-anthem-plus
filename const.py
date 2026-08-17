@@ -162,11 +162,18 @@ CUTOFF_DEBUG_LOG_KEEP_FILES = None
 CONF_RESTART_ON_RUNTIME_CUTOFF = "restart_on_runtime_cutoff"
 
 
-# Learned per-outlet `maximumRunTime`, persisted because it is **otherwise unobtainable on
-# demand**. There is no REST endpoint for outlet configuration — `gcs-outlet-config`,
-# `gcs-outletconfig`, `gcs-outlet-configuration`, `gcs-valve-config` and friends all 404 —
-# so the only source is `READ_GCS_OUTLET_CONFIG_CFG`, which the valve emits unprompted, one
-# outlet per message, roughly twice a session.
+# Learned per-outlet `maximumRunTime`, persisted so the cutoff feature is armed from the first
+# second after a restart rather than waiting on an unprompted announcement.
+#
+# ⚠️ **Corrected 2026-08-17.** This comment used to say the value was "otherwise unobtainable on
+# demand" because every `gcs-outlet-config`-style REST path 404s. Those paths really do 404, but
+# the data was reachable all along: **`gcsadvancestate` carries
+# `setting.valveSettings[].outletConfigurations[]`**, and this integration already calls that
+# endpoint — `topology.py` reads `noOfOutlets` from the very same response. Verified live.
+#
+# Persisting is still worth it (one fewer REST round trip on the hot path), but the "blind
+# window" that justified it is not the constraint it was believed to be. Reading it at setup
+# would close that window entirely — see `docs/gcs/api.md` §1c. Not yet done.
 #
 # Without persistence the cutoff feature is inert after every restart until the valve happens
 # to announce again, which can be a long wait and gives no sign of why nothing is happening.
@@ -257,9 +264,10 @@ ENDLESS_SHOWER_NOTHING_TO_RESTORE = (
 # that reasoning precisely because it is the one the owner cannot see.
 #
 # Why a constant rather than following `maximumRunTime`: the hardware limit cannot be read on
-# demand at all. There is no REST endpoint for outlet config, and `READ_GCS_OUTLET_CONFIG_CFG`
-# arrives unprompted over MQTT, one outlet at a time — so at setup, when this runs, it is
-# frequently not known yet. A fixed target that is at or above every observed hardware value
+# demand *over MQTT*, which is where this runs: `READ_GCS_OUTLET_CONFIG_CFG` arrives unprompted,
+# one outlet at a time, so at setup the value is frequently not known yet. (It **is** readable
+# over REST from `gcsadvancestate` — corrected 2026-08-17 — but this sync deliberately does not
+# depend on a second network read succeeding.) A fixed target that is at or above every observed hardware value
 # leaves the gate to the hardware in every case.
 SYNC_DEFAULT_PRESET_TIMER = True
 # Preset 1 is "Default shower" on every install seen: created by the setup wizard, and the
