@@ -229,6 +229,12 @@ class KohlerAnthemPlusConfigFlow(ConfigFlow, domain=DOMAIN):
                     self.hass.config_entries.async_update_entry(
                         entry, data={**entry.data, **data}
                     )
+                    # The explicit reload is required, not belt-and-braces. Reauth usually
+                    # changes nothing but the refresh token, and `_async_update_listener`
+                    # deliberately ignores that key — so leaving the reload to the listener
+                    # would leave `KohlerAuth` holding the dead token that caused the reauth
+                    # in the first place. Where other fields changed too, the listener may
+                    # also fire and reload a second time; harmless, and reauth is rare.
                     await self.hass.config_entries.async_reload(entry.entry_id)
                 return self.async_abort(reason="reauth_successful")
 
@@ -287,8 +293,10 @@ class KohlerAnthemPlusOptionsFlow(OptionsFlow):
 
     One option: whether to re-open a zone the valve closed on its own run-time limit.
 
-    Saving reloads the entry, though the cutoff flag is read live so it takes effect
-    immediately.
+    Saving does **not** reload the entry. The flag is read live from ``entry.options`` on
+    every access, so it takes effect the moment it is saved, and a reload would cost a full
+    platform rebuild for nothing — see ``RELOAD_IGNORED_OPTION_KEYS`` in ``const.py``. An
+    option added here later reloads by default until it is proven to be read live.
     """
 
     async def async_step_init(

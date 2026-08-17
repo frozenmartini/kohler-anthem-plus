@@ -197,6 +197,37 @@ ACT_ON_LEARNED_LIMITS = False
 CONF_OUTLET_RUN_TIMES = "outlet_run_times"
 
 # ---------------------------------------------------------------------------
+# What a config-entry change has to be before it is worth a reload
+# ---------------------------------------------------------------------------
+# Read by `_async_update_listener` in `__init__.py`; the mechanism is in
+# `anthem_plus/entry_reload.py`, which also explains why the comparison needs a snapshot.
+#
+# Keys the running integration writes to its OWN entry. A change to one of them is
+# bookkeeping, not configuration, and must never cause a reload:
+#
+# * `CONF_REFRESH_TOKEN` — B2C rotates it on every refresh and invalidates the previous one,
+#   so the newest has to be persisted immediately or a restart comes up unauthenticated.
+#   That makes it the most frequently written key here, and reloading on it would flap every
+#   entity and drop MQTT for nothing.
+# * `CONF_OUTLET_RUN_TIMES` — written whenever the valve announces a `maximumRunTime`, which
+#   it does unprompted and **can do mid-shower**. A reload builds a new coordinator with a
+#   fresh `ZoneCutoffDetector`, so every zone clock restarts at zero while the valve's own
+#   timer keeps running: the exact mechanism by which a run-time cutoff gets missed. This
+#   exclusion matters more than the comparison it is part of.
+# * `CONF_MOBILE_DEVICE_ID` — generated once on first connect, then reused forever.
+RELOAD_IGNORED_DATA_KEYS = frozenset(
+    {CONF_REFRESH_TOKEN, CONF_OUTLET_RUN_TIMES, CONF_MOBILE_DEVICE_ID}
+)
+
+# Options the coordinator reads live from `entry.options` on every access instead of caching,
+# so they already take effect the moment they are saved and a reload would be pure cost.
+#
+# Anything NOT listed here reloads. An option added later therefore works by default, and
+# only an option proven to be read live gets added to this set — a decision someone has to
+# write down rather than inherit by accident.
+RELOAD_IGNORED_OPTION_KEYS = frozenset({CONF_RESTART_ON_RUNTIME_CUTOFF})
+
+# ---------------------------------------------------------------------------
 # REMOVED 2026-08-15 — valve reboot counter, controller ping, outage counter
 # ---------------------------------------------------------------------------
 # `CONF_GCS_REBOOT_COUNT` / `CONF_GCS_REBOOT_LAST` / `CONF_HUB_LOCAL_HOST` /

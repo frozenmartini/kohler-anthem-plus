@@ -21,7 +21,7 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 
-from .coordinator import KohlerAnthemPlusCoordinator
+from .coordinator import KohlerAnthemPlusCoordinator, entry_reload_signature
 from .const import DOMAIN
 from .services import async_register_services, async_unregister_services
 
@@ -153,25 +153,30 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Reload only when something other than the rotating token changed.
+    """Reload only when the entry changed in a way that needs one.
 
-    The coordinator writes the refresh token back on every poll because B2C rotates it.
-    That goes through ``async_update_entry``, which fires this listener — but reloading on a
-    bare token rotation would tear down and rebuild every platform, flapping all entities to
-    ``unavailable`` and dropping the MQTT connection along with its warm-up.
+    This integration writes to its own config entry while running — the rotating refresh
+    token whenever B2C issues a new one, and ``maximumRunTime`` whenever the valve announces
+    one, which it does unprompted and can do mid-shower. Every one of those writes fires this
+    listener. Reloading on them would flap all entities to ``unavailable``, drop the MQTT
+    connection with its warm-up, and reset the run-time cutoff's zone clocks while the valve's
+    own timer kept running.
+
+    So the decision is a comparison against ``coordinator.reload_signature``, the frozen
+    snapshot taken when the coordinator was built. ``RELOAD_IGNORED_DATA_KEYS`` and
+    ``RELOAD_IGNORED_OPTION_KEYS`` in ``const.py`` say what is excluded and why; anything
+    else — including a key nobody anticipated — reloads.
+
+    ⚠️ **Do not compare against ``coordinator.entry``.** That is the same object Home
+    Assistant mutates in place, so it always equals ``entry`` and this listener becomes dead
+    code that returns early every time. That was the defect here until 2026-08-17; see
+    ``anthem_plus/entry_reload.py``.
     """
     coordinator: KohlerAnthemPlusCoordinator | None = hass.data.get(DOMAIN, {}).get(
         entry.entry_id
     )
-    if coordinator is not None:
-        from .const import CONF_REFRESH_TOKEN
-
-        current = {k: v for k, v in entry.data.items() if k != CONF_REFRESH_TOKEN}
-        loaded = {
-            k: v
-            for k, v in coordinator.entry.data.items()
-            if k != CONF_REFRESH_TOKEN
-        }
-        if current == loaded:
-            return
+    if coordinator is not None and entry_reload_signature(entry) == (
+        coordinator.reload_signature
+    ):
+        return
     await hass.config_entries.async_reload(entry.entry_id)

@@ -55,6 +55,7 @@ from .anthem_plus import (
     model_for_topology,
     unit_to_celsius,
 )
+from .anthem_plus.entry_reload import reload_signature
 from .anthem_plus.valve_hex import (
     UNUSED_VALVE_WORD,
     VALVE1_PREFIX,
@@ -83,12 +84,30 @@ from .const import (
     RAW_MQTT_LOG_DIR,
     RAW_MQTT_LOG_KEEP_FILES,
     RAW_MQTT_LOG_MAX_BYTES,
+    RELOAD_IGNORED_DATA_KEYS,
+    RELOAD_IGNORED_OPTION_KEYS,
     SCAN_INTERVAL,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
 GCS_STATE_PATH = "/devices/api/v1/device-management/gcs-state/{device_id}"
+
+
+def entry_reload_signature(entry: ConfigEntry) -> tuple[Any, ...]:
+    """Fingerprint the parts of a config entry that are worth a reload.
+
+    Shared by the coordinator, which takes one at setup, and `_async_update_listener` in
+    `__init__.py`, which takes one per update and compares. Both must apply the same
+    exclusions or the comparison means nothing, so there is one call site for the pair of
+    key sets rather than two that can drift.
+    """
+    return reload_signature(
+        entry.data,
+        entry.options,
+        ignore_data=RELOAD_IGNORED_DATA_KEYS,
+        ignore_options=RELOAD_IGNORED_OPTION_KEYS,
+    )
 
 
 def _command_half(value: str, field: str) -> str:
@@ -181,6 +200,11 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Kept under our own name rather than relying on the base class's `config_entry`,
         # whose presence varies by release.
         self.entry = entry
+        # The entry as it looked when this coordinator was built, frozen. Home Assistant
+        # mutates the `ConfigEntry` object in place, so `self.entry` is a live view and
+        # cannot serve as a "before" — comparing it against the entry compares an object
+        # with itself. `_async_update_listener` compares against this instead.
+        self.reload_signature = entry_reload_signature(entry)
         # The stored split wins over the SKU: an install that matches no catalogue model
         # still reloads correctly, and a SKU label can never silently change topology.
         stored = entry.data.get(CONF_ZONE_OUTLETS)
