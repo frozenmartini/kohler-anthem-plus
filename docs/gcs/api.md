@@ -534,13 +534,26 @@ deliberately configured to end.
 
 Consequences to expect, none of which are faults:
 
-* A preset-timer stop logs `verdict: "ignored"` with a large `off_by` (1800.3 s here). Correct.
-* The learned-limit watcher (`SUSPECTED_LIMIT_MIN_SAMPLES = 3`, 2.0 s clustering) **will** cluster
-  repeated 1800 s stops and eventually name 1800 s a suspected limit for that zone. That is the
-  watcher doing its job, and it is **not** grounds to flip `ACT_ON_LEARNED_LIMITS` — doing so
-  would make the integration act on a preset timer through the back door.
+* A preset-timer stop logs `verdict: "ignored"` with a large `off_by` (1800.3 s here). Correct,
+  and the `reason` field still says exactly why nothing was restarted.
 * `sensor.<valve>_zone_N_outlet_1_max_run_time` shows the hardware gate. It is not the number
   that will stop a preset-driven shower, and is not meant to be.
+
+##### This finding is what removed the limit-guessing code
+
+The integration used to infer limits the valve had never announced: `MissedCutoffWatcher`
+collected declined pauses and, once three landed within 2 s of each other, offered the duration
+as a "suspected limit" that `ACT_ON_LEARNED_LIMITS` could promote into a real one.
+
+**Removed 2026-08-17.** It rested on an assumption this section disproves — that repeated
+identical pause durations mean an unannounced *hardware* limit. They do not. They are the
+ordinary signature of a **preset timer**, and presets 2-10 are the owner's own settings. The
+machinery would have offered 1800 s here, correctly identifying a real timer, and acting on it
+would have restarted showers configured to end.
+
+With both limits now understood there is nothing left to infer, so the detector fires **only**
+on announced `maximumRunTime`. `test_no_limit_guessing.py` asserts the absence, including that
+six identical 1799.9 s pauses in a row produce no fire and no suspicion.
 
 ##### The rule, confirmed by a controlled two-cutoff experiment
 

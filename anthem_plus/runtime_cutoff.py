@@ -28,6 +28,29 @@ found 1 of 4.
 # same directory; see `cutoff_log.py`.
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# ⚠️ ANNOUNCED LIMITS ONLY. NOTHING HERE INFERS A LIMIT FROM BEHAVIOUR.
+# ---------------------------------------------------------------------------
+# The only limits this detector will ever fire on are the `maximumRunTime` values the valve
+# itself announced, as persisted in `CONF_OUTLET_RUN_TIMES`. A duration that matches nothing
+# announced is recorded and left alone, however suggestive it looks.
+#
+# A `MissedCutoffWatcher` used to live here and guess: it collected declined pauses and, on
+# three landing within 2 s of each other, offered the duration as a "suspected limit" for the
+# caller to promote. **Removed 2026-08-17, deliberately, and it should not come back.**
+#
+# It was built when it was believed the valve had one run-time limit and the only way to miss
+# one was not being told. That turned out to be wrong: a **preset carries its own `time`**, a
+# second limit independent of `maximumRunTime`, and it is the lower of the two that stops the
+# shower (`docs/gcs/api.md`, "two independent timers"). So repeated identical durations are
+# not evidence of an unannounced hardware limit at all — they are the normal signature of a
+# preset the owner configured. Presets 2-10 are user settings; restarting a shower that ended
+# on one would override a deliberate choice.
+#
+# The mechanism is understood now and there is nothing left to infer. `test_no_limit_guessing.py`
+# in the offline suite asserts this module has no source of limits but its caller's.
+# ---------------------------------------------------------------------------
+
 ## Why duration alone is enough to discriminate
 
 Across **156** completed zone-open periods in the capture corpus (2026-08-07 to 08-14,
@@ -117,42 +140,6 @@ LOCAL_WRITE_GRACE_SECONDS = 30.0
 # ---------------------------------------------------------------------------
 # Self-diagnosis: noticing a limit we do not know about
 # ---------------------------------------------------------------------------
-# The bug this module was rewritten for was invisible for a day because a cutoff that fails
-# to fire produces no evidence anywhere. These constants power a check that would have caught
-# it from the owner's own behaviour, on the first occurrence.
-#
-# The idea: a *timer* repeats to the same fraction of a second; a *person* does not. So when
-# several declined pauses in one zone land on the same duration, that duration is a limit
-# nobody told us about. This only ever reports — see `MissedCutoffWatcher`.
-
-# How close two declined pauses must be to count as the same duration. Real cutoffs cluster
-# far tighter than this (0.22 s spread across the six 900 s ones, 1.17 s across the five
-# 3600 s ones), and the nearest unrelated pause above the floor below is **334 s** away, so
-# there is no meaningful risk of accidental grouping.
-LIMIT_CLUSTER_TOLERANCE_SECONDS = 2.0
-
-# Durations shorter than this are never considered. **This is the constant that makes the
-# check usable at all.** Preset activation and `action:"Off"` produce short pauses that
-# cluster hard — the corpus has seven within 0.4 s of 10 s, five within 0.4 s of 11 s, and
-# three near 42 s — and without a floor every one of those is a false alarm. Above 300 s the
-# corpus has three non-cutoff pauses total and no cluster of any size. A run-time safety
-# cutoff below five minutes is not a plausible product either.
-MIN_PLAUSIBLE_LIMIT_SECONDS = 300.0
-
-# How many matching durations before saying so. Two could be coincidence; three at the same
-# fraction of a second is a clock.
-SUSPECTED_LIMIT_MIN_SAMPLES = 3
-
-# A declined pause followed by the shower coming back this fast is corroborating evidence:
-# nobody pauses deliberately and resumes 11 seconds later. Measured over the corpus, 10 of 11
-# real cutoffs were resumed within a minute against 9 of 54 other pauses — good supporting
-# evidence, too weak to trigger on alone, which is why it only annotates a cluster.
-QUICK_RESUME_SECONDS = 60.0
-
-# Bound the bookkeeping. Nothing needs more history than this to find a cluster of three.
-MAX_OBSERVATIONS_PER_ZONE = 50
-
-
 @dataclass(frozen=True)
 class ZoneReading:
     """What a zone was actually delivering, beyond which outlets were open.
@@ -192,132 +179,6 @@ class ZoneCutoff:
 
 
 @dataclass
-class MissedCutoffWatcher:
-    """Spots a run-time limit nobody announced, by noticing durations that repeat.
-
-    **Reports only.** Nothing here can open a valve. Its output is evidence for a human — or,
-    once trusted, an input the caller may *choose* to act on by merging
-    :attr:`learned_limits` into what it feeds :meth:`ZoneCutoffDetector.update`.
-
-    The staging is deliberate. A limit inferred from behaviour is a weaker claim than one the
-    valve announced, and the consequence of being wrong is water turning on by itself. So the
-    watcher first spends a while writing down what it *would* have done, and only starts
-    doing it when somebody has read those records and agreed.
-
-    ## Two limits worth knowing before trusting it
-
-    **It does not model a configuration change.** Observations never expire, so if the limit
-    is altered in the app, the old value keeps voting and can out-vote the new one. Replaying
-    the reference install's whole history demonstrates exactly this: it spans the owner
-    lowering the limit from 3600 s to 900 s, and zone 2 — four cutoffs in the old era, two in
-    the new — "learns" 3600 while zone 1 learns 900. Neither zone's *actual* limit is 3600.
-
-    **State is in memory and starts empty on every restart.** Which is what contains the
-    problem above, since accumulating across a config change needs Home Assistant to run
-    straight through one. `ZoneCutoffDetector.forget()` deliberately leaves it alone — a
-    reconnect makes durations meaningless, not observations.
-
-    The cost of that same fact: three cutoffs are needed **within one Home Assistant run**
-    before anything is learned. On an install that restarts often, this will rarely have
-    anything to say. That is acceptable for what it is for — noticing a limit the valve has
-    never announced — but it is not a system that gets steadily better the longer it runs.
-    """
-
-    journal: Journal = field(default_factory=_NullJournal)
-    # zone -> [(duration, corroborated_by_quick_resume)]
-    _seen: dict[int, list[tuple[float, bool]]] = field(default_factory=dict)
-    # zone -> (monotonic time of the declined close, its duration), pending a resume check
-    _pending: dict[int, tuple[float, float]] = field(default_factory=dict)
-    # (zone, rounded duration) already reported, so each finding is announced once
-    _announced: set[tuple[int, int]] = field(default_factory=set)
-
-    def note_declined(self, zone: int, duration: float, now: float) -> None:
-        """Record a paused close that was not treated as a cutoff."""
-        if duration < MIN_PLAUSIBLE_LIMIT_SECONDS:
-            return
-        observations = self._seen.setdefault(zone, [])
-        observations.append((duration, False))
-        del observations[:-MAX_OBSERVATIONS_PER_ZONE]
-        self._pending[zone] = (now, duration)
-
-    def note_flow_start(self, zone: int, now: float) -> None:
-        """Note a zone starting again, to see whether it followed a decline closely."""
-        pending = self._pending.pop(zone, None)
-        if pending is None:
-            return
-        stopped_at, duration = pending
-        if now - stopped_at > QUICK_RESUME_SECONDS:
-            return
-        observations = self._seen.get(zone, [])
-        for index in range(len(observations) - 1, -1, -1):
-            if observations[index][0] == duration:
-                observations[index] = (duration, True)
-                break
-
-    def _cluster(self, zone: int) -> list[list[tuple[float, bool]]]:
-        clusters: list[list[tuple[float, bool]]] = []
-        for observation in sorted(self._seen.get(zone, []), key=lambda o: o[0]):
-            for cluster in clusters:
-                if abs(cluster[0][0] - observation[0]) <= LIMIT_CLUSTER_TOLERANCE_SECONDS:
-                    cluster.append(observation)
-                    break
-            else:
-                clusters.append([observation])
-        return clusters
-
-    @property
-    def learned_limits(self) -> dict[int, tuple[int, ...]]:
-        """Durations that have repeated often enough to look like a timer, per zone."""
-        found: dict[int, tuple[int, ...]] = {}
-        for zone in self._seen:
-            values = sorted(
-                round(sum(d for d, _ in c) / len(c))
-                for c in self._cluster(zone)
-                if len(c) >= SUSPECTED_LIMIT_MIN_SAMPLES
-            )
-            if values:
-                found[zone] = tuple(values)
-        return found
-
-    def report(self, zone: int, known: tuple[int, ...]) -> None:
-        """Announce any new finding for this zone. Called after each declined close."""
-        for cluster in self._cluster(zone):
-            if len(cluster) < SUSPECTED_LIMIT_MIN_SAMPLES:
-                continue
-            seconds = round(sum(d for d, _ in cluster) / len(cluster))
-            if any(abs(seconds - limit) <= CUTOFF_TOLERANCE_SECONDS for limit in known):
-                continue  # already a limit we act on
-            key = (zone, seconds)
-            if key in self._announced:
-                continue
-            self._announced.add(key)
-            resumed = sum(1 for _, quick in cluster if quick)
-            _LOGGER.warning(
-                "Zone %s has now paused %d times after about %ss, which is not a "
-                "maximumRunTime this valve has announced (known: %s). That looks like a "
-                "run-time limit nobody told us about — %d of those %d were followed by the "
-                "shower being turned straight back on. Nothing has been restarted on the "
-                "strength of it; see the cutoff debug log",
-                zone,
-                len(cluster),
-                seconds,
-                ", ".join(f"{limit}s" for limit in known) or "none",
-                resumed,
-                len(cluster),
-            )
-            self.journal.note(
-                "suspected_limit",
-                zone=zone,
-                seconds=seconds,
-                samples=len(cluster),
-                quick_resumes=resumed,
-                durations=[round(d, 2) for d, _ in cluster],
-                known_limits=list(known),
-                acted_on=False,
-            )
-
-
-@dataclass
 class ZoneCutoffDetector:
     """Tracks how long each zone has been flowing and reports timer-driven closes.
 
@@ -331,8 +192,6 @@ class ZoneCutoffDetector:
     #: cutoff that *fails to fire* produces no log line anywhere else, and that is the
     #: failure mode this feature actually has.
     journal: Journal = field(default_factory=_NullJournal)
-    #: Watches for limits the valve never announced. Reports; never acts on its own.
-    watcher: MissedCutoffWatcher = field(default_factory=MissedCutoffWatcher)
     # zone -> monotonic time it was first seen flowing, or absent if not flowing
     _flowing_since: dict[int, float] = field(default_factory=dict)
     # zone -> the last mask seen while flowing, so a cutoff knows what to put back
@@ -443,9 +302,6 @@ class ZoneCutoffDetector:
                 reading = readings.get(zone)
                 if zone not in self._flowing_since:
                     self._flowing_since[zone] = now
-                    # Before anything else: a zone starting again moments after a close we
-                    # declined is evidence that close was not wanted.
-                    self.watcher.note_flow_start(zone, now)
                     if reading is not None:
                         self._last_reading[zone] = reading
                     self.journal.note(
@@ -513,28 +369,14 @@ class ZoneCutoffDetector:
             self._last_reading.pop(zone, None)
 
             def stop(reason: str, **extra: Any) -> None:
+                """Record a close this detector is not claiming, and why.
+
+                Recording only. A close that matches no announced `maximumRunTime` is left
+                alone — see the module docstring on why nothing is inferred from durations.
+                """
                 self.journal.note(
                     "flow_end", **record, verdict="ignored", reason=reason, **extra
                 )
-                if not is_paused:
-                    # A 0x00 stop is somebody stopping the shower. Only pauses are
-                    # candidates for a timer we have not been told about.
-                    return
-                self.watcher.note_declined(zone, duration, now)
-                self.watcher.report(zone, candidates)
-                for seconds in self.watcher.learned_limits.get(zone, ()):
-                    if abs(duration - seconds) > CUTOFF_TOLERANCE_SECONDS:
-                        continue
-                    # The staging record: what would have happened had this suspected limit
-                    # been promoted to a real one. Read these before promoting it.
-                    self.journal.note(
-                        "would_have_fired",
-                        zone=zone,
-                        duration=duration,
-                        suspected_limit=seconds,
-                        mask=was_running,
-                        note="not acted on — this limit was inferred, not announced",
-                    )
 
             if not candidates:
                 # The valve has never announced a limit for this zone's outlets, so there is

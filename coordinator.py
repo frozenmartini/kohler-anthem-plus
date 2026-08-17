@@ -67,7 +67,6 @@ from .anthem_plus.valve_hex import (
     normalize_word,
 )
 from .const import (
-    ACT_ON_LEARNED_LIMITS,
     CONF_MOBILE_DEVICE_ID,
     CONF_OUTLET_RUN_TIMES,
     CONF_REFRESH_TOKEN,
@@ -668,12 +667,6 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 continue
             zone, _ = self.model.outlet_location(outlet)
             limits.setdefault(zone, set()).add(seconds)
-        if ACT_ON_LEARNED_LIMITS:
-            # Off by default and meant to be promoted deliberately — see the constant. Until
-            # then a suspected limit is only ever written to the debug log, alongside a
-            # record of what acting on it would have done.
-            for zone, learned in self._cutoff.watcher.learned_limits.items():
-                limits.setdefault(zone, set()).update(learned)
         return {zone: tuple(sorted(values)) for zone, values in limits.items()}
 
     def run_time_limits_for_zone(self, zone: int) -> tuple[int, ...]:
@@ -687,12 +680,6 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         regardless. None when the zone is idle, or after a reconnect until it next starts.
         """
         return self._cutoff.flowing_for(zone)
-
-    @property
-    def suspected_limits(self) -> dict[int, tuple[int, ...]]:
-        """Run-time limits inferred from repeated pauses, per zone. Diagnostic unless
-        `ACT_ON_LEARNED_LIMITS` is on."""
-        return self._cutoff.watcher.learned_limits
 
     @callback
     def _check_runtime_cutoff(self) -> None:

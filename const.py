@@ -161,37 +161,6 @@ CUTOFF_DEBUG_LOG_KEEP_FILES = None
 # fire on anything other than a positive run-time match.
 CONF_RESTART_ON_RUNTIME_CUTOFF = "restart_on_runtime_cutoff"
 
-# ---------------------------------------------------------------------------
-# Staged promotion of a *learned* run-time limit
-# ---------------------------------------------------------------------------
-# The integration can notice a limit the valve never announced, by spotting pause durations
-# that repeat to the fraction of a second (`MissedCutoffWatcher`). Whether it may then act on
-# one is this flag, and it is **off**.
-#
-# The order to do this in, agreed with the owner 2026-08-14:
-#
-#   1. Leave it False. Shower normally. The cutoff debug log fills with `suspected_limit`
-#      records and, whenever one of them matches a real close, a `would_have_fired` record
-#      saying exactly which zone and which outlets it *would* have restored.
-#   2. Read those. Check every `would_have_fired` against what actually happened.
-#   3. Only when they are all correct, set this True. The suspected limit then joins the
-#      announced ones as a candidate and restarts fire on it.
-#
-# Why the staging: a limit inferred from behaviour is a weaker claim than one the valve
-# stated, and being wrong means water turning on with nobody there. `would_have_fired` costs
-# nothing and turns "do you trust the inference" into a question with evidence behind it.
-#
-# This does not gate the *reporting*, which is always on and always harmless.
-#
-# ⚠️ **2026-08-17 — step 2 above now has a trap in it.** A preset carries its own `time`, a
-# second limit independent of `maximumRunTime`, and this install runs a 1800 s preset under a
-# 3600 s hardware gate. Preset-timer stops repeat to the fraction of a second (1799.90 and
-# 1799.66 on 08-17), so the watcher **will** cluster them and offer 1800 s as a suspected
-# limit. That inference is correct and still must not be acted on: the owner's decision is
-# that this feature tracks the hardware gate only, never preset timers. Before flipping this
-# flag, check every `suspected_limit` against `GCS_PRESET_STS`'s `time` for the presets in
-# use, and discard any that match one. See `docs/gcs/api.md`, "two independent timers".
-ACT_ON_LEARNED_LIMITS = False
 
 # Learned per-outlet `maximumRunTime`, persisted because it is **otherwise unobtainable on
 # demand**. There is no REST endpoint for outlet configuration — `gcs-outlet-config`,

@@ -252,12 +252,6 @@ class KeepWaterRunningSwitch(KohlerValveEntity, SwitchEntity):
         return {
             "armed_zones": self.coordinator.armed_zones,
             "awaiting_run_time_limit_zones": self.coordinator.zones_awaiting_run_time,
-            # Limits inferred from repeated pauses rather than announced by the valve.
-            # Reported so they can be checked; not acted on unless ACT_ON_LEARNED_LIMITS.
-            "suspected_limits_seconds": {
-                str(zone): list(values)
-                for zone, values in self.coordinator.suspected_limits.items()
-            },
             "armed_outlets": sorted(known),
             "run_time_limits_seconds": {str(k): v for k, v in sorted(known.items())},
             "awaiting_run_time_limit": self.coordinator.outlets_awaiting_run_time,

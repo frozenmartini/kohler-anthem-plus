@@ -346,7 +346,7 @@ calibration, presets, or firmware, and it has **no reboot capability at all** �
 | **Cutoff debug log** (`cutoff_log.py`) | no — read only |
 | Restore also covers the preset case (`also_paused`) | **yes**, on a detected cutoff |
 | Readiness reported per zone (`armed_zones`) | no |
-| `MissedCutoffWatcher` — limit inference, **diagnostic only**, gated by `ACT_ON_LEARNED_LIMITS = False` | no |
+| ~~`MissedCutoffWatcher` — limit inference, gated by `ACT_ON_LEARNED_LIMITS`~~ — **removed 2026-08-17**, see [`api.md`](api.md); repeated durations were preset timers, not unannounced hardware limits | n/a |
 | Local-write grace fixed — per-zone, and only *closing* writes earn it | detection only |
 | New entities: Zone 1 Active, Zone 2 Active, Preset Active | no |
 | `flow_is_live` attribute on the Zone Hex sensors | no |
