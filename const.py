@@ -68,17 +68,27 @@ SHOWER_ON_PRESET_ID = 1
 PRESET_HIDDEN_IDS: frozenset[int] = frozenset({1})
 
 # ---------------------------------------------------------------------------
-# Temporary debugging
+# The controller's own water state, published alongside the valve's
 # ---------------------------------------------------------------------------
-# **TEMPORARY — set back to False when done.**
+# **No longer temporary — do NOT set this back to False.** It went in as a debugging aid
+# and became load-bearing on 2026-08-18.
 #
 # Normally nothing derived from `SHOWER_VALVE_STS` is published on an account that also has
 # a valve: the controller does not observe a valve-driven session and reports `status: OFF`
 # with an all-zero outlet array while water is running, so it would contradict the valve's
 # own entities on the same dashboard.
 #
-# Set True to publish them anyway, as diagnostics, for comparing the two sources side by
-# side while debugging. They are *expected* to disagree — that is the point of looking.
+# That contradiction turned out to be the information, not the noise. The two sources
+# answer different questions — the valve "is water running", the controller "does this
+# controller know about it" — and the second decides whether the controller's `stopall`,
+# `valvecontrol OFF`, and 60-minute session ceiling apply at all. So the `ControllerOutlet`
+# sensors are now the Anthem Plus device's reference for water, and
+# `coordinator.hub_water_is_running` — which backs both controller switches — is defined to
+# agree with them exactly.
+#
+# Turning this off would delete the rows the owner reads the controller's view from. The
+# switches keep working (they read `hub_state`, not the entities), but the evidence behind
+# them becomes invisible.
 EXPOSE_CONTROLLER_WATER_STATE = True
 
 # ---------------------------------------------------------------------------

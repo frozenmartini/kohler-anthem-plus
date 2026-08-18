@@ -624,6 +624,41 @@ That fixes the state-source policy:
 Implemented as `resolve_outlet_source()` in `anthem_plus/models.py`, so it is a single
 decision rather than a convention each entity has to remember.
 
+### ⚠️ That policy applies to the VALVE's entities — not the controller's — 2026-08-18
+
+The table above answers "where does the physical water state come from". It was also, until
+2026-08-18, feeding the **Anthem Plus device's own switches**, and there it produced a false
+positive: `switch.anthem_plus_shower` and `switch.anthem_plus_system` reported showers the
+controller had never been told about.
+
+The measurement that settled it. An 86-minute shower on 2026-08-18 — zone 2 outlet 4 open
+07:52:01 local, the valve's 3600 s pause and our restore at 08:52, stopped by hand at
+09:18 — driven entirely through `solowritesystem`. The capture
+(`mqtt_raw_20260818T052055Z_71_0b22dd90.jsonl`) holds **five `GCS_SOLO_STS` messages and
+nothing else**: no `SHOWER_VALVE_STS`, no HUB message of any code, for the whole shower.
+The controller's last word of any kind had been 18:51:31 the previous evening. Both
+controller switches tracked the shower faithfully throughout, which read as health and was
+in fact the valve wearing the controller's name.
+
+So the two devices answer two different questions, and both answers are true at once:
+
+| Device | Question its entities answer | Source |
+|---|---|---|
+| **Anthem Valve** | Is water physically running? | GCS valve word — authoritative, always |
+| **Anthem Plus** | Does the controller know about it? | HUB `SHOWER_VALVE_STS` outlet arrays only |
+
+The second is not a lesser version of the first. It decides whether the controller's
+`stopall` and `valvecontrol OFF` have anything to stop, and whether its 60-minute session
+ceiling is counting — see [the 60-minute session ceiling](gcs/api.md). A controller
+reporting "off" during a running shower is giving a correct and useful answer to its own
+question.
+
+Implemented as `coordinator.hub_water_is_running`, which backs both Anthem Plus switches and
+is the any-of over exactly the `ControllerOutletSensor` rows, so a switch can never disagree
+with the sensors beneath it. `EXPOSE_CONTROLLER_WATER_STATE` in `const.py` publishes those
+rows on a both-devices account and is **no longer the temporary debugging flag its name
+suggests**. Pinned by `tests/test_hub_switch_source.py`.
+
 ### Two devices, not one merged device
 
 A GCS and a HUB on one account are usually the same physical shower reached through two

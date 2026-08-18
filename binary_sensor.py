@@ -91,12 +91,14 @@ async def async_setup_entry(
         if attached(capabilities.steam):
             entities.append(ControllerSteamSensor(coordinator))
 
-    # Everything derived from SHOWER_VALVE_STS is created **only** on a controller-only
-    # account. Where a valve exists it owns the water state, and the controller's view is
-    # not merely redundant but actively wrong during a valve-driven session — it reports
-    # `status: OFF` with an all-zero outlet array while water is running. Publishing that
-    # alongside the valve's own entities would put two contradicting answers on one
-    # dashboard, so it is not published at all.
+    # Everything derived from SHOWER_VALVE_STS is created on a controller-only account,
+    # where it is the only water state there is — and, since 2026-08-18, on a both-devices
+    # account too, via EXPOSE_CONTROLLER_WATER_STATE.
+    #
+    # It does put two contradicting answers on one dashboard during a valve-driven session:
+    # the valve reports an open outlet, the controller `status: OFF` with an all-zero array.
+    # They are answering different questions and both answers are true. See
+    # EXPOSE_CONTROLLER_WATER_STATE for why the second one is worth a row.
     source = resolve_outlet_source(
         coordinator.gcs_device is not None, coordinator.hub_device is not None
     )
@@ -480,9 +482,14 @@ class ControllerSteamSensor(ControllerAccessorySensor):
 class ControllerOutletSensor(KohlerControllerEntity, BinarySensorEntity):
     """One outlet within one zone, as the controller reports it.
 
-    **Created only on a controller-only account.** Where a valve exists it owns the water
-    state — the controller does not observe a valve-driven session and would report
-    ``status: OFF`` with an all-zero array while water runs.
+    **This is the controller's belief, not the plumbing.** It does not observe a
+    valve-driven session, so during one it reads OFF with an all-zero array while water is
+    running — the **Anthem Valve** outlet sensors are what answer "is water coming out of
+    this outlet". What these rows answer instead is "does the controller know", which is
+    what decides whether its ``stopall`` and its 60-minute session ceiling apply.
+
+    ``coordinator.hub_water_is_running`` is the any-of over exactly these, and backs both
+    Anthem Plus switches, so a switch here can never disagree with the rows beneath it.
 
     Addressed per zone for the same reason as the valve's switches: the controller's data is
     per zone, and a global numbering needs a model-dependent split that can be got wrong.

@@ -1354,23 +1354,40 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raise HomeAssistantError(f"Kohler command failed: {err}") from err
 
     @property
-    def water_is_running(self) -> bool | None:
-        """Whether water is actually flowing, from whichever device can see it.
+    def hub_water_is_running(self) -> bool | None:
+        """Whether the **controller** believes water is running. Never asks the valve.
 
-        **Never read the controller's water state when a valve exists.** The controller does
-        not observe a valve-driven session: measured live, the valve reported an open outlet
-        while the controller reported ``status: OFF`` with an all-zero array one second
-        later. Anything asking "is water running" on a both-devices account must ask the
-        valve, or it reports the shower off mid-shower.
+        This is deliberately the controller's own, possibly wrong, view — and the entities
+        on the Anthem Plus device are the one place that is the right answer. They are
+        answering "what does this controller think it is doing", and a controller that has
+        not been told about a session is not doing anything: its ``stopall`` and
+        ``valvecontrol OFF`` have nothing to stop, and its own timers are not counting.
 
-        This is the same decision ``resolve_outlet_source()`` makes for the outlet entities,
-        applied to the whole-system view.
+        **This replaced a valve-backed property on 2026-08-18, because that produced a false
+        positive.** `resolve_outlet_source()` is right that the valve owns the *physical*
+        water state, and the Anthem Valve entities read it. But feeding it to the
+        controller's switches made them report a system the controller knew nothing about.
+        Measured that day: a 86-minute GCS-driven shower — open at 07:52:01 local, the
+        valve's 3600 s pause and our restore at 08:52, stopped by hand at 09:18 — during
+        which the controller published **not one message of any kind**, `SHOWER_VALVE_STS`
+        included. The capture holds five `GCS_SOLO_STS` messages and nothing else. Both
+        controller switches nonetheless tracked the shower perfectly, which looked like
+        health and was actually the valve wearing the controller's name.
+
+        Read from the outlet arrays rather than ``HubState.is_running``'s zone ``status``
+        so this agrees exactly with the ``ControllerOutletSensor`` binary sensors — the
+        Shower switch is on if and only if one of those outlet rows is on. The two sources
+        do not disagree in any capture; matching them is about the dashboard being
+        self-consistent, not about correctness.
+
+        ``None`` — "unknown", not "off" — until the controller has reported a zone at all,
+        since an empty ``zones`` map pads to all-False and would otherwise read as a
+        confident "no water".
         """
-        if self.gcs_state is not None:
-            return self.gcs_state.is_running
-        if self.hub_state is not None:
-            return self.hub_state.is_running
-        return None
+        state = self.hub_state
+        if state is None or not state.zones:
+            return None
+        return any(state.outlets)
 
     async def async_set_hub_shower(self, on: bool) -> None:
         """Run or stop the controller's own default shower. **On runs water.**

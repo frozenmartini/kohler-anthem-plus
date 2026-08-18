@@ -332,9 +332,17 @@ class HubShowerSwitch(KohlerControllerEntity, SwitchEntity):
     system-wide stop use the System switch, which calls ``stopall``.
 
     ``is_on`` follows reported state rather than what we last sent, so a shower started from
-    the touchscreen or the app shows up here too. It reads whichever device can actually see
-    the water — the valve where one exists — because the controller does not observe a
-    valve-driven session and would show off mid-shower. See ``coordinator.water_is_running``.
+    the touchscreen or the app shows up here too.
+
+    **It reports the controller's view only — never the valve's.** So a shower driven
+    straight at the valve through ``solowritesystem``, which is every shower Home Assistant
+    starts, leaves this switch off. That is the intended reading, not a gap: the controller
+    is not party to such a session, and this switch's own ``valvecontrol OFF`` would not
+    stop it. For whether water is physically running, read the **Anthem Valve** device's
+    Shower switch and outlet sensors, which are authoritative.
+
+    See ``coordinator.hub_water_is_running`` for the 2026-08-18 measurement that made this
+    the rule.
     """
 
     _attr_name = "Shower"
@@ -349,7 +357,7 @@ class HubShowerSwitch(KohlerControllerEntity, SwitchEntity):
     def is_on(self) -> bool | None:
         if self._optimistic is not None:
             return self._optimistic
-        return self.coordinator.water_is_running
+        return self.coordinator.hub_water_is_running
 
     @callback
     def _handle_coordinator_update(self) -> None:
@@ -374,11 +382,18 @@ class HubShowerSwitch(KohlerControllerEntity, SwitchEntity):
 
 
 class HubSystemSwitch(KohlerControllerEntity, SwitchEntity):
-    """Is *anything* running, and the one control that stops all of it.
+    """Is anything running **that the controller knows about**, and the one control that
+    stops all of it.
 
     ``is_on`` is true when **any** subsystem is active — water, music, steam, or lighting —
     so it answers "is the shower room doing something" in a single row, with an attribute
     breakdown naming which. Off calls ``stopall``, the only command that idles everything.
+
+    **All four subsystems are the controller's own view, water included.** A shower driven
+    at the valve through ``solowritesystem`` is invisible here, because it is invisible to
+    the controller — and ``stopall``, this switch's off action, would not stop it either.
+    Scoping the switch to what its own off action can reach is the point: it stays honest
+    about both. The **Anthem Valve** device owns the question "is water running".
 
     **The two directions are deliberately asymmetric, and this is the honest part.** There is
     no "start everything" concept: the controller cannot turn on music and steam and water
@@ -405,9 +420,10 @@ class HubSystemSwitch(KohlerControllerEntity, SwitchEntity):
         if state is None:
             return {}
         return {
-            # NOT `state.is_running` — see `coordinator.water_is_running`. The controller
-            # cannot see a valve-driven session and would report water off mid-shower.
-            "water": self.coordinator.water_is_running,
+            # The controller's own outlet arrays, deliberately — not the valve's. Reading
+            # the valve here made this switch report sessions the controller had never been
+            # told about; see `coordinator.hub_water_is_running`.
+            "water": self.coordinator.hub_water_is_running,
             "music": state.music_on,
             "steam": state.steam_on,
             "light": state.light_on,
