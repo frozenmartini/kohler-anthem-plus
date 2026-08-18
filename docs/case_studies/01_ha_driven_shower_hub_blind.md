@@ -8,6 +8,19 @@ This is the reference case for what changes when Home Assistant drives the valve
 It is short enough to quote in full, every event is attributed, and it settles an open
 question that had no data behind it since 2026-08-17.
 
+> ### ⚠️ MQTT is the Konnect app's UI channel — not device communication
+>
+> Every observation below is from MQTT, and **MQTT is not how the valve and the controller
+> talk to each other.** The integration registers a client identity on Kohler's IoT Hub and
+> the cloud invokes direct methods *on us*: we are an app instance, and the payloads say what
+> the app should **render**. The real device-to-device link is the **RJ wired connection**
+> between the controller and the valve, and **we cannot sniff it** — nothing here observes it.
+>
+> So "the HUB reported X" means "the cloud told app clients to render X", and **absence of a
+> message means there was no card change to push — not that a device was silent or broken.**
+> Conclusions about what a device *knew* rest on its **behaviour** (a timer firing, water
+> moving), never on messages alone. Read [`intro.md`](intro.md) §1 before this document.
+
 > **The headline.** The Anthem Plus controller did not know the shower was on — not at the
 > start, not through 86 minutes of running water, not when the valve paused it at its own
 > 60-minute limit, and not when Home Assistant restarted it. Both devices had a 60-minute
@@ -244,6 +257,39 @@ failing to report the shower. There was, as far as it was concerned, no shower t
 
 ## 7. What this establishes
 
+### ⭐ The controller never interpreted this as a shower — and that is a HUB fault, not an MQTT one
+
+**Owner's conclusion, 2026-08-18, and it is the right reading of the whole session.**
+
+The chain is short. The controller pushes a card update when its own model of the shower
+changes. It pushed nothing for 86 minutes. Under the app-UI-channel model
+([`intro.md`](intro.md) §1) that means **its model never changed** — and its model is built
+from what it observes over the **RJ wired link**, not from MQTT. So the controller, wired to
+the valve the entire time, **did not interpret the valve opening outlets as a shower having
+started.**
+
+**This is therefore a controller-side interpretation gap, not an artefact of the message
+channel.** MQTT reported the situation correctly: there was nothing to render, because as far
+as the controller was concerned nothing was happening.
+
+Two independent lines converge on it, and they share no failure mode:
+
+| evidence | class | what it shows |
+|---|---|---|
+| No card update, for 86 minutes | the app UI channel | the controller's model of the shower never changed |
+| **Its 15-minute clock never ran** | **device behaviour** | no session existed to count. [Case study 2](02_hub_commanded_shower_15min.md) proves that clock works and fires within 0.6 s |
+
+The second crosses the wired link and is decisive on its own.
+
+⚠️ **What this does NOT separate.** "Did not receive the valve's state over the wire" and
+"received it and did not count it as a session" are both controller-side, and nothing here
+tells them apart. The controller is demonstrably *not* blind to the valve in general — during
+the 2026-08-17 shower it reported every one of the valve's pauses, sessions it had itself
+commanded. The precise, defensible claim is: **the controller does not treat a valve-side
+open it did not command as a session** — it neither renders it nor starts its clock. Which of
+the two mechanisms produces that is unmeasured, and probably unmeasurable without sniffing a
+link we cannot reach.
+
 ### ✅ Started by `solowritesystem`, the HUB does not count
 
 [Session 9](../handoff/2026-08-17_session9_current.md) §1 left this explicitly open — three
@@ -319,11 +365,21 @@ these five words and asserts both switches stay off through all of them.
    HUB-commanded session in full: `status: ON` with populated outlet arrays, the mid-session
    change, and the stop, each ~0.5 s behind the valve and matching it bit for bit.
 
-   ⚠️ **That makes this question harder, not easier.** Two independent measurements now say a
-   message should have arrived at 09:18:13 — case study 2, and the older `solowritesystem`
-   measurement in [`architecture.md`](../architecture.md) where the stop of a session the HUB
-   never saw open *did* produce a `status: OFF`. This session's silence is the outlier against
-   both. Treat §6a's fifth row with that in mind.
+   ✅ **RESOLVED 2026-08-18, by correcting what the channel is.** The premise of this
+   question was wrong. It assumed a message "should have arrived" because a device commanded
+   an OFF transition — which only makes sense if MQTT carries device traffic. It does not; it
+   is the app's UI channel ([`intro.md`](intro.md) §1). The controller's card already read
+   "off", because it never registered this shower as having started (§7). The stop left it
+   "off". **No card change, no push, no message to expect.**
+
+   The one residue is the older `solowritesystem` measurement in
+   [`architecture.md`](../architecture.md), where the stop of a session the controller never
+   saw open *did* produce a `status: OFF` — a redundant off→off card push. That is a much
+   smaller puzzle: "when does the cloud push a no-change update", not "why was a device
+   silent". Worth a footnote if it ever recurs; not worth chasing.
+
+   **§6a's fifth row stands as originally written.** The doubt raised against it rested on the
+   same wrong premise.
 
 2. ✅ **Was the controller healthy on 2026-08-18? Yes — this is settled, see [§6a](#-6a-the-connection-was-healthy-the-whole-time).**
    Connected, listening, alive, and publishing normally on the same account and subscription

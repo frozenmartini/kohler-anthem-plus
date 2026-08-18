@@ -10,6 +10,19 @@ hardware, same afternoon, opposite commander. Home Assistant touched nothing.**
 > guessed at. Consequences for Endless Shower are noted where they fall out, but they are
 > consequences, not the objective.
 
+> ### ⚠️ MQTT is the Konnect app's UI channel — not device communication
+>
+> Every observation below is from MQTT, and **MQTT is not how the valve and the controller
+> talk to each other.** The integration registers a client identity on Kohler's IoT Hub and
+> the cloud invokes direct methods *on us*: we are an app instance, and the payloads say what
+> the app should **render**. The real device-to-device link is the **RJ wired connection**
+> between the controller and the valve, and **we cannot sniff it** — nothing here observes it.
+>
+> So "the HUB reported X" means "the cloud told app clients to render X", and **absence of a
+> message means there was no card change to push — not that a device was silent or broken.**
+> Conclusions about what a device *knew* rest on its **behaviour** (a timer firing, water
+> moving), never on messages alone. Read [`intro.md`](intro.md) §1 before this document.
+
 > **The headline.** Started with the controller's own `valveOnOff`, the Anthem Plus owns the
 > session completely: its clock runs, it cuts at exactly its configured **15 minutes** with a
 > `0x00` stop, and it reports every transition — including `status: ON` with populated outlet

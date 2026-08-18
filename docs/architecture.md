@@ -382,8 +382,15 @@ integration.
 
 **A digital valve has two interface ports.** The manual does not mention it, but a
 first-gen K-28214 *and* a HUB controller can be connected to the **same valve**
-simultaneously. Both interfaces stay consistent, because they take state from MQTT and the
-wired link. That is how one physical shower ends up as both a GCS and a HUB entry on the
+simultaneously. Both interfaces stay consistent because they share the **wired link** to the
+valve.
+
+> ⚠️ **Corrected 2026-08-18.** This sentence previously said the interfaces "take state from
+> MQTT and the wired link". They do not take state from MQTT at all. **MQTT is the Konnect
+> app's UI channel** — Kohler's cloud invoking direct methods on registered *app clients*, of
+> which this integration is one. Device-to-device traffic runs over the RJ wired connection,
+> which cannot be sniffed. Getting this backwards produces wrong readings of every capture;
+> see [`case_studies/intro.md`](case_studies/intro.md) §1. That is how one physical shower ends up as both a GCS and a HUB entry on the
 same account — and it is what makes full GCS control available to an Anthem Plus owner.
 
 ### The first-gen touchscreen is a peripheral, not a controller
