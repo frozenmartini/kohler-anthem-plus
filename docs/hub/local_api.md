@@ -172,6 +172,107 @@ Body: {"req_command":"<action>", ...action-specific fields}
 
 ---
 
+## 3a. ⭐ `get_valve_settings` — the ONLY readable source of Max Shower Duration
+
+**Found 2026-08-18. This endpoint answers a question the cloud API cannot.**
+
+The Anthem Plus enforces its own maximum shower duration, independently of the valve's
+per-outlet `maximumRunTime`, and it is the timer that ends a controller-commanded shower.
+It appears in **no** cloud response and **no** MQTT message — a search of every capture on
+disk for a field carrying the configured value returns nothing. It is here:
+
+```
+GET /web/api/v1/device/get_valve_settings        (Bearer token required)
+```
+
+Found by reading the hub's own UI bundle, which is downloadable unauthenticated:
+
+```sh
+curl -s http://<HUB_IP>/ | grep -oE 'main\.[a-z0-9]+\.js'
+curl -s http://<HUB_IP>/web/main.<hash>.js -o main.js     # ~4.9 MB
+```
+
+```js
+getValveSettings() { return this.commonHttpService.httpGet("web/api/v1/device/get_valve_settings") }
+```
+
+Live response, 2026-08-18 (this install):
+
+```json
+{"coldwatertimeout":"5","configuration":"Custom","flowcontrol":false,
+ "lowflowstate":false,"maxshowerduration":"15","maxtemp":"113","warmupmode":"on",
+ "zone1":{"defaultFlow":"100","defaultOutlets":[],"defaultTemp":"102",
+          "port1":62,"port2":52,"port3":1,"ports":3,"warmupOutlets":[1,2,3]},
+ "zone2":{"defaultFlow":"100","defaultOutlets":[1],"defaultTemp":"102",
+          "port1":11,"port2":38,"port3":21,"ports":3,"warmupOutlets":[1,2]}}
+```
+
+| field | meaning | notes |
+|---|---|---|
+| `maxshowerduration` | **max shower duration, MINUTES** | dropdown offers only `15 / 30 / 45 / 60` |
+| `warmupmode` | `on` / `off` / `pause` | `on` = "Water Stays ON"; only `on` observed |
+| `zoneN.warmupOutlets` | outlets opened during warm-up | 1-based **within the zone** |
+| `zoneN.defaultOutlets` | outlets the shower settles to | `[]` means the zone stays shut |
+| `zoneN.defaultTemp` / `defaultFlow` | °F / percent | `"102"` → `0x184` (388); `"100"` → `0xC8` (200) |
+| `maxtemp` | scald limit, °F | `"113"` here |
+| `coldwatertimeout` | **ice-bath function only** | ⚠️ NOT a shower timer — see below |
+| `flowcontrol`, `lowflowstate` | flow-control enable | `false` on this install, system-wide |
+
+> ⚠️ **`coldwatertimeout` is not a fourth shower timer.** It belongs to the ice-bath / ice-shower
+> function, which runs as an experience rather than as ordinary shower control. Ice shower and
+> experiences generally — on both the GCS and the HUB — are out of scope for this work.
+
+**This object predicts a controller-commanded shower completely.** Every word on the wire in
+[case study 2](../case_studies/02_hub_commanded_shower_15min.md) — the five-outlet warm-up, the
+settle to one outlet, the temperature, the flow, and the 900.557 s cut — follows from these
+fields. Verified against the capture, field by field.
+
+Read it with `/homeassistant/scripts/kohler-work/hub_local_read.py`: GET-only by construction,
+takes the PIN from `/root/kohler_creds.json` under a `pin` key (alongside the cloud credentials
+`fresh_token.sh` uses, which ignores the extra key), and prints neither the PIN nor the JWT.
+
+### Endpoints the bundle exposes that this document did not list
+
+The bundle names **67** `/web/api/v1/device/*` paths. Beyond those documented elsewhere here:
+
+```text
+gcs_favorites          gcs_special_functions   gcs_system_profile     gcs_system_report
+get_valve_settings     get_valve_config_info   get_valid_valve_configs
+get_gcs_ui_settings    get_gcs_experiences     get_gcs_error_log      get_gcsuicard_info
+get_default_details    get_favorites_details   get_water_exp_details  get_steam_exp_details
+get_iceshower_exp_details  get_lumiwave_exp_details  get_flowrate_calibration_details
+get_hub_settings       get_hospitality_settings  get_showroom_settings  get_hubcard_info
+get_valvecard_info     get_connectivity_info   get_network_details    get_ntp_config
+get_fw_details         get_recent_fw_details   get_online_fw_updates  get_ble_state
+get_is_valve_supports_rmt_btn  get_rmt_btn_action  get_rmt_btn_card_info
+hub_config_state       update_load_exp_click
+```
+
+**Route existence can be probed without credentials.** A real route returns
+`403 {"error":"Unauthorised token"}`; a non-route falls through to the SPA and returns HTML.
+So the two are distinguishable with no PIN at all.
+
+Two more pre-auth reads confirmed live: `get_hub_version_info` → `{"version":"2.88"}`, and
+`get_hub_running_state` → `{"devicename":[],"hospitality":false,"lwexp_trigger":false,
+"running":false,"updates":false}`.
+
+### ⚠️ The hub's clock may be in the wrong timezone
+
+`get_hub_settings` on this install reports `datetime: "2026-08-18T15:07"` with
+`timezone: "(UTC-06:00) … America/Guatemala"` while the house is UTC-7 — the hub runs **one
+hour ahead of local time**. Harmless for MQTT analysis, whose timestamps come from Home
+Assistant, but it will corrupt any correlation against a hub-side log or `get_error_log`.
+
+### Side effect: authenticating here makes the hub publish to the CLOUD
+
+Each `request_user_login` was followed within seconds by a burst of five HUB snapshot messages
+(`SHOWER_EXP`, `STEAM_EXP`, `ICE_SHOWER_EXP`, `LUMIWAVE_EXP`, `FAVORITES`) plus a
+`READ_GCS_EXPERIENCE_STS` on the cloud MQTT stream. Reproducible over two logins. Worth knowing
+before reading a capture that contains a local-API session — those records are not water
+activity.
+
+---
+
 ## 4. WATER / VALVE — setup & self-test only (NOT control)
 
 > **This section does not control the shower.** (See the Scope callout up top.)

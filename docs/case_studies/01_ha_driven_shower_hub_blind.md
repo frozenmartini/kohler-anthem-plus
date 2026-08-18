@@ -223,7 +223,7 @@ controller. Every one of those is ruled out, and the controller published nothin
 | **The connection dropped and re-established** | The IoT Hub `$rid` runs **1 → 5, unbroken, no reset** across the whole session. A new connection restarts it at 1 (visible in the next capture, which does exactly that). One connection, start to finish. |
 | **Our client filtered HUB messages out** | There is no filter to apply. `RawLog.write()` records everything, and there is **one** wildcard subscription — `$iothub/methods/POST/#` — carrying both devices, told apart only by `sku` *inside* an already-recorded payload. No code path can drop one device and keep the other. |
 | **The controller was powered off or hung** | It **commanded the 09:18:13 stop** from its own touchscreen, through itself, to the valve. A dead controller cannot end a shower. |
-| **The controller's publishing was broken** | It publishes normally on this same account, subscription and connection — see the live session captured a few hours later, `mqtt_raw_20260818T201525Z_72_d536f3df.jsonl`, where a panel-started shower produces `SHOWER_VALVE_STS` with `status: ON` and populated outlet arrays. Written up as case study 2. |
+| **The controller's publishing was broken** | It publishes normally on this same account, subscription and connection — [case study 2](02_hub_commanded_shower_15min.md), a HUB-commanded shower a few hours later, where every transition produced a `SHOWER_VALVE_STS`. ⚠️ But see open question 1: that also means a message was *expected* here and did not come. |
 
 **So the controller was healthy, connected, listening, and had nothing to say.** It was not
 failing to report the shower. There was, as far as it was concerned, no shower to report.
@@ -314,13 +314,16 @@ these five words and asserts both switches stay off through all of them.
    panel. If `SHOWER_VALVE_STS` arrives, session-tracking is confirmed and the rule needs
    rewording.
 
-   ⏳ **That test was run the same afternoon and is case study 2.** First indications are
-   that the controller reports a panel-started session in full, `status: ON` and populated
-   outlet arrays included — which supports session-tracking and would mean
-   `resolve_outlet_source()`'s wording ("the HUB never reports a GCS-driven open outlet")
-   describes *who commanded it*, not *which direction the transition went*. **Left open
-   here deliberately**: it is case study 2's finding to establish from a complete session,
-   not something to backfill into this one.
+   ✅ **That test was run the same afternoon —
+   [case study 2](02_hub_commanded_shower_15min.md) §6d.** The controller reports a
+   HUB-commanded session in full: `status: ON` with populated outlet arrays, the mid-session
+   change, and the stop, each ~0.5 s behind the valve and matching it bit for bit.
+
+   ⚠️ **That makes this question harder, not easier.** Two independent measurements now say a
+   message should have arrived at 09:18:13 — case study 2, and the older `solowritesystem`
+   measurement in [`architecture.md`](../architecture.md) where the stop of a session the HUB
+   never saw open *did* produce a `status: OFF`. This session's silence is the outlier against
+   both. Treat §6a's fifth row with that in mind.
 
 2. ✅ **Was the controller healthy on 2026-08-18? Yes — this is settled, see [§6a](#-6a-the-connection-was-healthy-the-whole-time).**
    Connected, listening, alive, and publishing normally on the same account and subscription
