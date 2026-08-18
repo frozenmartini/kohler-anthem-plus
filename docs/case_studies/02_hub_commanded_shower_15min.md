@@ -104,7 +104,13 @@ It trails the valve by **0.491, 0.547 and 0.553 s** — consistent, and small.
 13:26:08.110   HUB valveOnOff — water on, warm-up recipe    <- the session clock starts HERE
 13:26:08.355   zone 1 joins                                  +0.245 s
 13:26:32.885   valve reaches setpoint (atTemp)               +24.775 s
-13:26:38.369   warm-up ends, zone 1 closes, zone 2 -> 0x01   +30.258 s (5.483 s after atTemp)
+13:26:38.369   warm-up ends, zone 1 closes, zone 2 -> 0x01   +30.258 s (5.483 s after atTemp) [1]
+
+> **[1] The ordering here is coincidence, not causation.** ⚠️ In
+> [case study 3](03_both_ceilings_at_15_minutes.md) §8a the order reverses — warm-up ends at
+> +8.548 s and `atTemp` sets 25.36 s *later*. The controller ends warm-up on its own
+> judgement, not on the valve's `atTemp` bit, and warm-up length tracks how hot the pipes
+> already are: 30.26 s here, 8.44 s an hour later.
 13:41:08.667   HUB STOP, both zones 0x00
 ```
 

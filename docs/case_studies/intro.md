@@ -107,6 +107,12 @@ From [case study 1](01_ha_driven_shower_hub_blind.md) and
 changes it.** A shower started from Home Assistant cannot acquire a controller clock; one
 started from the panel cannot shed it.
 
+**When both clocks run, both fire.** [Case study 3](03_both_ceilings_at_15_minutes.md) set both
+maximums to 900 s: the valve paused at 899.918 s and the controller stopped at 901.004 s,
+1.087 s apart, neither deferring to the other. The controller enforces its ceiling
+**unconditionally whenever it knows a session is running** — which is the positive control that
+closes case study 1.
+
 The controller's entire water surface in the Konnect app is **`valveOnOff` and favourites** —
 read-rich, write-poor. `SHOWER_VALVE_STS` carries per-zone status, outlets, temperature and
 flow for the card to *display*, but the only things that can be *pressed* are one on/off
@@ -161,3 +167,4 @@ function and is **not** a shower timer. An earlier reading of it as one was wron
 |---|---|---|
 | **[1](01_ha_driven_shower_hub_blind.md)** | 2026-08-18, 86 min, started by `solowritesystem` | The controller does not know, does not count, and does not render. Its 60-minute ceiling never fired. Silence explained by §1. |
 | **[2](02_hub_commanded_shower_15min.md)** | 2026-08-18, 15 min, started by `valveOnOff` | The controller owns the session, cuts at exactly its configured 15 min with `0x00`, and renders every transition. **Warm-up counts toward the ceiling and carries no pause.** `maxshowerduration` is readable over the local API. |
+| **[3](03_both_ceilings_at_15_minutes.md)** | 2026-08-18, both ceilings at 15 min, started by `valveOnOff` | The control. **Both devices fired — valve `0x40` at 899.918 s, controller `0x00` at 901.004 s, 1.087 s apart, neither deferring.** That closes case study 1: a mechanism that enforces unconditionally and did not fire there proves the controller never knew the shower existed. Endless Shower caught the pause and, incidentally, overrode the controller's ceiling too. |

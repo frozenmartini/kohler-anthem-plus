@@ -261,6 +261,13 @@ failing to report the shower. There was, as far as it was concerned, no shower t
 
 **Owner's conclusion, 2026-08-18, and it is the right reading of the whole session.**
 
+> ✅ **Confirmed by positive control.** [Case study 3](03_both_ceilings_at_15_minutes.md) §7 put
+> both ceilings at 15 minutes on a controller-owned session: the controller commanded its
+> shutoff at 901.004 s, on its own clock, *even though the valve had already paused the zone a
+> second earlier*. So the mechanism is live and enforced unconditionally when a session is
+> known. It did not fire once in this session's 86 minutes — 26 minutes past its own
+> 60-minute ceiling — which can only mean the condition was never met.
+
 The chain is short. The controller pushes a card update when its own model of the shower
 changes. It pushed nothing for 86 minutes. Under the app-UI-channel model
 ([`intro.md`](intro.md) §1) that means **its model never changed** — and its model is built
