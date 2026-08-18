@@ -87,6 +87,46 @@ TEMPERATURE_MAX_TENTHS = 488
 # Retained for callers that still reason in the old terms; both are derived, not magic.
 TEMPERATURE_BASE_C = 25.6
 TEMPERATURE_STEP_C = 0.1
+
+# ---------------------------------------------------------------------------
+# ⚠️ Fahrenheit is a LOOKUP TABLE, not arithmetic — Konnect 3.0.1, `p315jj/h.java:1971`
+# ---------------------------------------------------------------------------
+# `h.z()` maps a displayed whole °F to tenths of a °C directly, and it is **not**
+# `round((f - 32) * 50 / 9)`. Above 86 °F it sits exactly one tenth *below* that formula at
+# sixteen entries — 87, 89, 91, 93, 96, 98, 100, 102, 105, 107, 109, 111, 114, 116, 118, 120 —
+# precisely the set where naive rounding would round up.
+#
+# **That low bias is the mechanism, not a rounding artefact.** It is what makes the app's
+# round trip idempotent: with `h.j(c) = round(c * 1.8 + 32)` for display, `z(j(t)) == t` holds
+# for all 64 entries. Naive arithmetic breaks it on 12 of the 34 values this integration's
+# slider can produce, every one by +1 tenth:
+#
+#     102 °F -> ours 0x185 (389), Kohler 0x184 (388)
+#     100 °F -> ours 0x17A (378), Kohler 0x179 (377)
+#      98 °F -> ours 0x16F (367), Kohler 0x16E (366)
+#
+# Measured consequence, 2026-08-17: the owner reported the temperature coming back "one more"
+# after the shower restarted itself, and 0x185 (389) appears 11 times in this system's capture
+# corpus — a value **no Kohler client can emit**. `z()` cannot produce it, and the Celsius path
+# writes whole degrees (380/390/400). Those messages were this integration's own writes.
+#
+# The valve accepts off-ladder values perfectly well — nothing here is a protocol requirement.
+# What it costs is that a setpoint written from Home Assistant no longer sits where the
+# touchscreen would put it, so the next panel adjustment starts from a value one tenth off.
+#
+# Outside 59–122 °F the app returns 0, which for a device that opens water valves would mean
+# "full cold". `unit_to_celsius` falls back to the arithmetic rather than doing that.
+FAHRENHEIT_TO_TENTHS_C = {
+    59: 150, 60: 156, 61: 161, 62: 167, 63: 172, 64: 178, 65: 183, 66: 189,
+    67: 194, 68: 200, 69: 206, 70: 211, 71: 217, 72: 222, 73: 228, 74: 233,
+    75: 239, 76: 244, 77: 250, 78: 256, 79: 261, 80: 267, 81: 272, 82: 278,
+    83: 283, 84: 289, 85: 294, 86: 300, 87: 305, 88: 311, 89: 316, 90: 322,
+    91: 327, 92: 333, 93: 338, 94: 344, 95: 350, 96: 355, 97: 361, 98: 366,
+    99: 372, 100: 377, 101: 383, 102: 388, 103: 394, 104: 400, 105: 405,
+    106: 411, 107: 416, 108: 422, 109: 427, 110: 433, 111: 438, 112: 444,
+    113: 450, 114: 455, 115: 461, 116: 466, 117: 472, 118: 477, 119: 483,
+    120: 488, 121: 494, 122: 500,
+}
 # The byte accepts up to 0xFF, but the Konnect app never sends above 0xE8 (48.8 °C /
 # 119.8 °F). Whether the firmware enforces that cap or only the app does is untested, so
 # writes clamp to the app's limit rather than the byte's.
@@ -614,10 +654,22 @@ def celsius_to_unit(value_c: float, temperature_unit: str) -> float:
 
 
 def unit_to_celsius(value: float, temperature_unit: str) -> float:
-    """Convert an account-unit temperature into Celsius for encoding."""
-    if temperature_unit.lower().startswith("f"):
-        return (value - 32) * 5 / 9
-    return value
+    """Convert an account-unit temperature into Celsius for encoding.
+
+    Fahrenheit goes through `FAHRENHEIT_TO_TENTHS_C`, Kohler's own table, so a value written
+    from Home Assistant lands exactly where the touchscreen would put it. See that table for
+    why arithmetic is wrong here — it drifts +1 tenth on 12 of the 34 values the slider offers.
+
+    The table holds whole degrees only. A fractional °F — reachable through the service, not
+    the slider — falls back to the arithmetic, as does anything outside 59-122 °F. Kohler
+    returns 0 there; that would be full cold, so it is not copied.
+    """
+    if not temperature_unit.lower().startswith("f"):
+        return value
+    whole = round(value)
+    if abs(value - whole) < 0.01 and whole in FAHRENHEIT_TO_TENTHS_C:
+        return FAHRENHEIT_TO_TENTHS_C[whole] / TEMPERATURE_TENTHS_PER_DEGREE
+    return (value - 32) * 5 / 9
 
 
 def decode_valve_state(

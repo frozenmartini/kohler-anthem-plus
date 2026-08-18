@@ -1319,9 +1319,14 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         turning the shower off and the valve timing out looked identical on the wire, leaving
         only `note_local_write()`'s 30 s grace between "stopped" and "helpfully restarted".
 
-        Stopping with ``0x00`` removes the ambiguity at the source rather than relying on a
-        timing window: the cutoff detector ignores every close that is not a pause, so a stop
-        issued from here can never be undone however it lines up with a run-time limit.
+        ⚠️ **That reasoning no longer holds, and this call is back on the timing window.**
+        On 2026-08-17 the detector stopped requiring the pause flag, because the valve ends a
+        60-minute session with ``0x00`` and a real cutoff was being ignored (see
+        `anthem_plus/runtime_cutoff.py`). A stop issued from here is now protected by
+        `note_local_write()`'s 30 s grace and nothing else — which is sound, since
+        `async_apply_valve` records the write before it sends and the valve's echo arrives in
+        about a second, but it is a window rather than a rule. Writing ``0x00`` is still
+        right: it keeps the *journal* able to tell our stop from the valve's pause.
 
         Still routed through `async_apply_valve` rather than `GcsDevice.async_turn_off()`,
         which would write a flat 38.0 °C to both zones — this preserves each zone's own

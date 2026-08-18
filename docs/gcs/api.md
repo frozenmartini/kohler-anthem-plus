@@ -190,9 +190,14 @@ through the cloud API.
 | **First-generation touchscreen** (side wall) | **`0x40`** | the *only* surface observed pausing. On the reference system it is a secondary panel used while seated. |
 | **The valve's run-time cutoff** | **`0x40`** | internally `{preset, action:"Off"}` |
 
-**Only two things write `0x40`: the first-gen touchscreen, and the cutoff.** That is what
-makes "a close is a cutoff only if its zone is paused" a usable discriminator — every stop a
-user is likely to issue writes `0x00` and is ignored by construction.
+**Only two things write `0x40`: the first-gen touchscreen, and the cutoff.** That used to make
+"a close is a cutoff only if its zone is paused" a usable discriminator — every stop a user is
+likely to issue writes `0x00` and was ignored by construction.
+
+> ⚠️ **Retired 2026-08-17.** The table above is still accurate about who writes what, but the
+> discriminator built on it is gone: the valve's **60-minute session ceiling** ends a zone
+> with `0x00`, so requiring the pause flag ignored a real cutoff. See "the 60-minute session
+> ceiling" below. Duration alone now decides, and the flag is recorded rather than obeyed.
 
 The exception worth designing around is a **GCS-only install**, which has no Anthem Plus
 panel. There the touchscreen is the primary surface, so a `0x40` stop is routine rather than
@@ -658,6 +663,92 @@ This session also reads as per-outlet at first glance — outlet 4 opened at 19:
 cut landed 3598 s later, while outlets 2, 3 and 5, added 8, 30 and 18 minutes in, were
 nowhere near their own limits. But outlet 4 is also what *started zone 2 flowing*, so the two
 clocks coincide again. **It is the zone's timer**; see the correction above.
+
+#### ⭐ CONFIRMED 2026-08-17 — the 60-minute session ceiling, and it stops rather than pauses
+
+**There is a third timer.** Beyond the per-outlet `maximumRunTime` and a preset's own `time`,
+the valve ends a zone **3600 s after that zone first started flowing** — and that clock keeps
+running while the water is off between restarts, so nothing that reopens the valve can
+outrun it.
+
+Measured on a directly-driven session (`presetOrExperienceId: 0`), Endless Shower on,
+`maximumRunTime` `900` on all six outlets:
+
+```text
+17:43:07.255  0584c804              zone 1 opens                <- session clock starts
+17:58:07.135  0584c840  899.88 s    paused -> restarted at 17:58:08.582   (1.45 s off)
+18:13:08.496  0584c840  899.91 s    paused -> restarted at 18:13:10.690   (2.19 s off)
+18:28:10.452  0579c840  899.76 s    paused -> restarted at 18:28:11.987   (1.54 s off)
+18:43:07.462  056ec800  895.47 s    STOPPED — no 0x40, nothing restarted it
+```
+
+The arithmetic is what identifies it. Flow: 899.88 + 899.91 + 899.76 + 895.47 = **3595.02 s**.
+Water-off gaps: 1.45 + 2.19 + 1.54 = **5.18 s**. Total **3600.20 s**, wall clock, from the
+zone's first opening — the final leg short of its own 900 s limit by exactly the time the
+restarts had the valve closed.
+
+Two things follow, and both matter to anything restarting a shower:
+
+* **The ceiling counts the gaps.** It is wall clock since the zone opened, not accumulated
+  flow — accumulated flow would have allowed a full fourth leg and cut at 3600 s of water.
+* **It signals with `0x00`, not `0x40`.** Every `maximumRunTime` expiry in the corpus pauses;
+  this one stops. That is consistent with it being a session *end* rather than a hold — the
+  valve reported `configWriteAllowedFlag` back to `1` at the same instant, which it does when
+  the primary valve goes idle, while zone 2 kept running for another six minutes untouched.
+
+**✅ MECHANISM CONFIRMED by the owner, 2026-08-17 — it is the HUB's own timer, not the
+valve's.** The two devices each enforce a maximum shower duration, independently, and they
+signal it differently:
+
+| | where it is set | value on this install | what it writes |
+|---|---|---|---|
+| **GCS valve** | `maximumRunTime`, per outlet | 900 s (15 min) | **`0x40`** — pause, mask cleared |
+| **Anthem Plus HUB** | its own max shower duration | **60 min** | **`0x00`** — stop |
+
+So `0x00` was never a strange valve behaviour. It is the HUB stopping the shower, using the
+same plain stop every HUB-issued stop uses — exactly what the control-surface table above
+already says the Anthem Plus panel writes. The valve pauses; the controller stops. Once the
+two timers are seen as belonging to two devices, every number lines up.
+
+⚠️ **This also corrects a belief carried in earlier notes: the HUB's shower duration is NOT
+ignored.** It was thought to be inert because of the firmware 2.88 bug that broke HUB flow
+control. It is live, it is still 60 minutes, and it ended this shower.
+
+**It is timed per zone, from the start of that zone's continuous run.** The stop cleared zone
+1 only; zone 2 kept running for another six minutes and was never touched. Zone 1's clock
+started at 17:43:07 — when zone 1 *re-opened* — not at 17:39:07 when the shower itself began,
+because zone 1 had been closed from 17:39:37 to 17:43:07. Zone 2's own 60 minutes was never
+reached; its last continuous run began at 18:21:25.
+
+**A 3.5-minute gap resets the HUB's clock; a 1.5-second one does not.** That is the whole
+reason the ceiling caught us: our restore closes the valve for 1.2–2.2 s, which the HUB reads
+as the same session continuing, so the gaps are counted rather than resetting anything.
+**Where the threshold sits between 1.5 s and 3.5 min is unmeasured.**
+
+**Where the setting lives is unknown.** It is in **no capture on disk** — not the local
+`hub_config` read, not any cloud HUB response; a search of every HUB and config capture for a
+field valued 60 or 3600 returns nothing. Reading it, so the cutoff detector could use it as an
+announced limit instead of inferring anything, is an open item.
+
+> ##### ⚠️ Consequence: "a cutoff always pauses" was retired on 2026-08-17
+>
+> The detector required the `0x40` flag, so this cutoff was logged
+> `verdict: "ignored", reason: "stopped (0x00) rather than paused (0x40)"` and the shower
+> stayed off with the owner still in it. **At the owner's instruction the flag is no longer
+> required** — `0x00` and `0x40` are treated alike, and duration does the whole job.
+>
+> Replaying all 1267 valve samples in the corpus through the changed detector fires **25**
+> times, every one a genuine timer event within tolerance of a real limit, and **no false
+> positives** — the 91 recorded stops never came closer than 123 s to a limit, this ceiling
+> excepted at 4.53 s. What it costs is stated in `anthem_plus/runtime_cutoff.py`: a
+> deliberate stop landing inside the tolerance window now gets restarted, and Home
+> Assistant's own stops are protected by `note_local_write()`'s grace rather than by the flag.
+>
+> ⚠️ **Dropping the flag does not catch the ceiling at every Max Shower Duration.** A
+> duration must still match an announced `maximumRunTime` within `CUTOFF_TOLERANCE_SECONDS`,
+> and 3600 only lands near one because the limit is 900 (4 × 900 ≈ 3600, minus the gaps). At
+> 20 or 25 minutes the ceiling falls mid-leg and is logged as an ordinary unexplained stop.
+> Closing that needs the session clock tracked explicitly.
 
 #### A valve reboot dumps the complete set — the only known way to force it
 
@@ -1136,7 +1227,8 @@ Resolve it against the preset list's `isExperience` flag before displaying it as
 >   preset that is demonstrably in effect.
 > * Do not infer "no preset" from `0` while `warmUpStatus` is `warmUpInProgress`. The honest
 >   reading of that combination is *unknown*.
-> * The run-time cutoff is unaffected: it keys off the pause flag, never the preset id.
+> * The run-time cutoff is unaffected: it keys off duration, never the preset id. (It keyed
+>   off the pause flag too until 2026-08-17 — see "the 60-minute session ceiling".)
 
 ### Stop — `action:"Off"` is VERIFIED (2026-08-13), and it pauses rather than stops
 
@@ -1164,8 +1256,10 @@ So the two stop paths are distinguishable on the wire:
 | `{preset, action:"Off"}` | `0x40` — **pause** | cleared to `0` |
 | `solowritesystem` mask `0x00` | `0x00` — stop | unchanged |
 
-**This identifies the run-time cutoff.** A cutoff produces `0x40` and clears the preset id —
-the `action:"Off"` signature, not the `solowritesystem` one. The valve ends the *experience*
+**This identifies a preset-driven run-time cutoff.** Such a cutoff produces `0x40` and clears
+the preset id — the `action:"Off"` signature, not the `solowritesystem` one. ⚠️ It is *not* a
+complete test for "was this the valve's timer": the 60-minute session ceiling ends a directly
+driven zone with `0x00` and no preset was ever involved. The valve ends the *experience*
 rather than closing an outlet, which is why a preset-driven session loses both zones: a
 preset is definitionally a two-zone object, carrying a 6-hex word for `Valve1` **and**
 `Valve2` on every stored preset.

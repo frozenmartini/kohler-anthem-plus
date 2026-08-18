@@ -69,6 +69,23 @@ command (write): [valve index : 4][   0      ][   0      ][temp high : 2]
 to zero when building a command, which is why they never appear in a word we send. In the
 app they land in `ValveStatusModel.atFlow` / `.atTemp`.
 
+> **Correction, decompile 2026-08-17: THREE bits are hardcoded on write, not two.** The single
+> command encoder `h.s1()` builds byte 0 by string concatenation —
+> `i(index + "000" + binaryString)` — and because temperature never exceeds 500 tenths that
+> last piece is always one character. So bit 1, the *high* bit of the 2-bit temperature field,
+> is a literal zero too. The effective write contract is:
+>
+> ```text
+> byte0 = (valveIndex << 4) | (temperature >> 8)      with temperature <= 511
+> ```
+>
+> There is no branch, flag or parameter: the app is structurally incapable of setting `atFlow`
+> or `atTemp` on a write. `encode_word` here masks with `0x03` rather than hardcoding, which is
+> equivalent given `TEMPERATURE_MAX_TENTHS` is 488 — bit 1 can never be reached.
+>
+> Corroboration that these are not protocol fields at all: in the **preset** word (`h.W()`, a
+> different 6-hex format) the same bit positions carry **outlet flags**.
+
 ### `atTemp` is SYSTEM-level, and lives only on the primary valve
 
 Confirmed against the touchscreen by a deliberate experiment. The user narrated their
@@ -228,6 +245,50 @@ or merely the app does is untested — do not assume values above `0xE8` are saf
 Kohler's REST API reports temperatures in Celsius regardless of the account's
 display unit, and so does this byte. Convert at the edge.
 
+## ⭐ Fahrenheit is a LOOKUP TABLE, not arithmetic — decompile, 2026-08-17
+
+`h.z()` (`p315jj/h.java:1971`) maps a displayed whole °F straight to tenths of a °C through a
+hardcoded 64-entry switch covering 59–122 °F. It is **not** `round((f − 32) × 50 / 9)`. Above
+86 °F it sits exactly one tenth *below* that formula at sixteen entries — 87, 89, 91, 93, 96,
+98, 100, 102, 105, 107, 109, 111, 114, 116, 118, 120 — precisely the set where naive rounding
+would round up.
+
+**The low bias is the mechanism, not sloppiness.** Paired with `h.j(c) = round(c × 1.8 + 32)`
+for display, it makes the round trip exact: `z(j(t)) == t` for all 64 entries. Naive arithmetic
+breaks it on **12 of the 34 values this integration's slider offers**, every one by +1 tenth.
+
+| displayed | Kohler `z()` | naive arithmetic | drift |
+|---|---|---|---|
+| 102 °F | `0x184` (388) | `0x185` (389) | **+1** |
+| 101 °F | `0x17F` (383) | `0x17F` (383) | 0 |
+| 100 °F | `0x179` (377) | `0x17A` (378) | **+1** |
+| 99 °F | `0x174` (372) | `0x174` (372) | 0 |
+| 98 °F | `0x16E` (366) | `0x16F` (367) | **+1** |
+
+This is why the touchscreen's values always sit 0.04–0.16 °F *below* the integer they display:
+that is the table, and the touchscreen and the app share it.
+
+### 🚨 `0x185` (389) is our fingerprint, and it was our bug
+
+No Kohler client can emit 389. It is absent from `z()`, and the Celsius path writes whole
+degrees (380/390/400). Yet it appears **11 times in this system's capture corpus**, on
+2026-08-14. Those were this integration's own writes, through
+`unit_to_celsius`'s arithmetic — which is what the owner was seeing when they reported the
+temperature "coming back one more" after a restart. **Fixed 2026-08-17:** the table is now in
+`anthem_plus/valve_hex.py` as `FAHRENHEIT_TO_TENTHS_C` and `unit_to_celsius` uses it, with
+`test_temperature_ladder.py` pinning every slider value against it.
+
+The valve accepts off-ladder values perfectly happily — this is not a protocol requirement.
+What it cost was that a setpoint written from Home Assistant no longer sat where the
+touchscreen would have put it, so the next panel adjustment started from a value one tenth off.
+
+Outside 59–122 °F the app returns **0**, which on a device that opens water valves would mean
+full cold. `unit_to_celsius` falls back to the arithmetic instead of copying that.
+
+> **The Celsius path really does drift, in the app.** `Pi/A.java`'s `W()` displays
+> `round(38.8) = 39` and writes `39 × 10 = 390` — a genuine +0.2 °C per touch. This account is
+> in Fahrenheit so it does not bite, and it should **not** be ported.
+
 ## Byte 2 — flow
 
 ```text
@@ -251,8 +312,18 @@ maps to a fourth in the real world. The first three are the most likely source o
 |---|---|---|---|
 | Byte | `0x00`–`0xC8` | — | the wire format, here and in MQTT |
 | `flowSetpoint` | 0–50 | byte ÷ 4 | GCS `gcs-state` — the device's native unit |
-| Percent | 0–100 | byte ÷ 2 | HUB favourite `flowrate`, Home Assistant entities |
+| Percent | 0–100 | byte ÷ **maximumFlowRate** × 100 | HUB favourite `flowrate`, Home Assistant entities |
 | **US gallons per minute** | 0–~13 | **byte ÷ 200 × 13.03** | the physical system — fitted, never transmitted |
+
+> ⚠️ **Percent is a ratio against the configured ceiling — confirmed by decompile 2026-08-17.**
+> The app decodes byte 2 as `byte / 4.0` (the setpoint scale) and computes the *displayed*
+> percentage as `h.B(flow, maxFlow)` — a ratio against that outlet's `maximumFlowRate`, which
+> is itself divided by 4 (`AnthemCustomizationActivity:1932`). So **`byte ÷ 2` is correct here
+> only because this install reports `maximumFlowRate` `0xC8` (200) on all six outlets.**
+> `FLOW_PER_PERCENT = 2` in `valve_hex.py` carries that assumption. It is right for this
+> system and wrong for any install with a lower ceiling, where writing "100%" would send
+> double the intended flow. `OutletLimits` already reads the real ceiling; wiring it into the
+> percent conversion is an open item, deliberately not done blind on a device that runs water.
 
 On the reference install **flow byte `0xC8` (200, 100%) works out at ~13 gpm**, and byte
 `0x10` (16, the floor) at ~1.04 gpm. That maximum is **system-wide, shared by both zones**,
@@ -606,8 +677,14 @@ a preset created on the **touchscreen** may well store a flow it genuinely honou
 Setting a preset to 104 °F stored `0x90` → 40.0 °C → exactly 104.0 °F. Setting 103 °F
 stored `0x89` → 39.3 °C → 102.74 °F, about 0.3 °F low. The byte's 0.1 °C resolution cannot
 land on 103 °F exactly — the closest is `0x8A` (102.92 °F) — but the app chose a value one
-step further away still. The mechanism is unexplained; it is small, and it originates in
-the app's write path, not in this decode.
+step further away still.
+
+**Partly explained, 2026-08-17.** The app does not compute Fahrenheit at all — it looks it up
+in `h.z()` (see the Fahrenheit-ladder section above), which is why its values never land on
+the arithmetic answer. The ladder gives 103 °F → `0x18A` (394), while this preset held
+`0x189` (393); both display as 103 under `h.j()`, so the *preset* write path still uses
+something other than a straight `z()` lookup. Small, and still in the app's write path rather
+than in this decode.
 
 ## Worked examples
 

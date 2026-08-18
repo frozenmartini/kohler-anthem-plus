@@ -65,9 +65,54 @@ spanning the reconfiguration from a 3600 s limit to 900 s):
 Every cutoff lands within **1.32 s** of its limit; the nearest pause that was not a cutoff is
 over five minutes away. The two groups do not come close to touching.
 
-Note what the third row buys: requiring the pause flag removes 91 of the 156 periods from
-consideration outright, including every stop issued from Home Assistant or the Anthem Plus
-controller. Duration then only has to separate 11 cutoffs from 54 other pauses.
+Note what the third row *used to* buy: requiring the pause flag removed 91 of the 156 periods
+from consideration outright, including every stop issued from Home Assistant or the Anthem
+Plus controller. Duration then only had to separate 11 cutoffs from 54 other pauses.
+
+### ⚠️ The pause flag is no longer required — 2026-08-17, owner's decision
+
+**A `0x00` stop is now treated exactly like a `0x40` pause.** The rule above described the
+corpus accurately and still does; what it missed is that the valve has a *second* way to end
+a session, and it does not pause.
+
+Measured 2026-08-18 (local 2026-08-17 evening), a shower with Endless Shower on and
+`maximumRunTime` 900 s on all six outlets:
+
+```text
+17:43:07  zone 1 opens                                     <- the session clock starts here
+17:58:07  paused 0x40 at 899.88s  -> restarted (1.45s off)
+18:13:08  paused 0x40 at 899.91s  -> restarted (2.19s off)
+18:28:10  paused 0x40 at 899.76s  -> restarted (1.54s off)
+18:43:07  STOPPED 0x00 at 895.47s -> ignored, water stayed off
+          3595.02s of flow + 5.18s of restart gaps = 3600.20s wall clock
+```
+
+The final leg came up short of its own 900 s limit by exactly the time the water had spent
+off during the three restarts. **Mechanism confirmed by the owner: the two devices each run
+their own maximum-duration timer, and they signal differently.**
+
+    GCS valve   maximumRunTime, per outlet   900 s here    writes 0x40  (pause)
+    Anthem Plus HUB   its own max duration   60 min here   writes 0x00  (stop)
+
+So `0x00` is not a strange valve behaviour — it is the controller stopping the shower with
+the same plain stop every HUB-issued stop uses. The HUB's clock keeps running through our
+1.2-2.2 s restore gaps, which is why the ceiling arrives mid-leg. The owner was still
+showering — zone 2 ran on for another six minutes, untouched, because the HUB times per zone.
+
+**What this costs, stated plainly:** a deliberate stop that lands within
+`CUTOFF_TOLERANCE_SECONDS` of an announced limit will now be restarted. Somebody who ends a
+shower at 14:50-15:10 by the wall panel gets the water back. Two things still stand between
+that and a restart: `LOCAL_WRITE_GRACE_SECONDS` covers every stop Home Assistant itself
+issued, and the duration window remains narrow — of the 91 stops in the corpus, none came
+closer than 123 s to a limit, and the one that did was this genuine cutoff at 4.53 s. The
+journal keeps recording `paused` on every `flow_end`, so the two populations stay separable
+in analysis even though the detector no longer separates them.
+
+⚠️ **This does not on its own catch the ceiling at other Max Shower Duration settings.** A
+duration must still match an announced `maximumRunTime` within tolerance, and 3600 s only
+lands near one because the limit is currently 900 s. At 20 or 25 minutes the ceiling falls
+mid-leg and is logged as an ordinary unexplained stop. Closing that needs the session clock
+itself — see `docs/gcs/api.md`, "the 60-minute session ceiling".
 
 This module only *reports*. It never sends anything, holds no Home Assistant imports, and is
 deliberately separable from whatever a caller chooses to do with the answer.
@@ -266,14 +311,14 @@ class ZoneCutoffDetector:
         configured for the outlets in that zone (empty where the valve has not said).
 
         A zone counts as *flowing* when it has a non-empty mask and is not paused. A cutoff
-        is a flowing zone that stops flowing **while paused**, having flowed for one of its
-        limits.
+        is a flowing zone that stops flowing — paused (`0x40`) **or** stopped (`0x00`) —
+        having flowed for one of its limits.
 
-        Requiring the pause is what stops a deliberate stop that happens to land on the limit
-        from being undone. **A run-time cutoff always pauses (`0x40`), never stops
-        (`0x00`)** — it is internally the same `{preset, action:"Off"}` the cloud API
-        exposes, and that pauses by definition. Measured across every known cutoff, while
-        every stop issued from Home Assistant or the Anthem Plus controller wrote `0x00`.
+        **The pause flag is recorded but no longer required**, changed 2026-08-17 at the
+        owner's instruction after a 60-minute session ceiling ended a shower with `0x00` and
+        Endless Shower let it stay off. The reasoning, the measurement behind it and what
+        safety it gives up are in this module's docstring; `paused` still reaches the journal
+        on every `flow_end` so the distinction survives for analysis.
         """
         now = time.monotonic()
         fired: list[ZoneCutoff] = []
@@ -400,14 +445,17 @@ class ZoneCutoffDetector:
                 )
                 continue
             if not is_paused:
-                _LOGGER.debug(
-                    "Zone %s stopped at its %ss limit but without the pause flag, so this "
-                    "was a stop rather than the valve's timer — ignoring",
+                # Kept as a log line, not a veto. A cutoff issued as a stop is the session
+                # ceiling (see the module docstring); a stop at this timing that is *not*
+                # one is somebody ending their shower within 10 s of the limit, and it now
+                # gets restarted. That trade was made deliberately — the alternative left a
+                # real cutoff unhandled with the owner still under the water.
+                _LOGGER.info(
+                    "Zone %s stopped (0x00) at its %ss limit rather than pausing (0x40). "
+                    "Treating it as the valve's timer anyway",
                     zone,
                     match,
                 )
-                stop("stopped (0x00) rather than paused (0x40) — not the valve's timer")
-                continue
             if suppressed(zone):
                 _LOGGER.debug(
                     "Zone %s closed at its %ss limit, but Home Assistant closed that zone "
