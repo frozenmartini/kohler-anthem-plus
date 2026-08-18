@@ -257,45 +257,47 @@ failing to report the shower. There was, as far as it was concerned, no shower t
 
 ## 7. What this establishes
 
-### ⭐ The controller never interpreted this as a shower — and that is a HUB fault, not an MQTT one
+### ⭐ The controller never knew this shower was running — the result is solid, the reason is not
 
-**Owner's conclusion, 2026-08-18, and it is the right reading of the whole session.**
+**Owner's conclusion, 2026-08-18. Amended the same day after
+[case study 4](04_two_touchscreens_and_what_off_means.md); read the amendment before relying
+on any mechanism stated here.**
 
-> ✅ **Confirmed by positive control.** [Case study 3](03_both_ceilings_at_15_minutes.md) §7 put
-> both ceilings at 15 minutes on a controller-owned session: the controller commanded its
-> shutoff at 901.004 s, on its own clock, *even though the valve had already paused the zone a
-> second earlier*. So the mechanism is live and enforced unconditionally when a session is
-> known. It did not fire once in this session's 86 minutes — 26 minutes past its own
-> 60-minute ceiling — which can only mean the condition was never met.
-
-The chain is short. The controller pushes a card update when its own model of the shower
-changes. It pushed nothing for 86 minutes. Under the app-UI-channel model
-([`intro.md`](intro.md) §1) that means **its model never changed** — and its model is built
-from what it observes over the **RJ wired link**, not from MQTT. So the controller, wired to
-the valve the entire time, **did not interpret the valve opening outlets as a shower having
-started.**
-
-**This is therefore a controller-side interpretation gap, not an artefact of the message
-channel.** MQTT reported the situation correctly: there was nothing to render, because as far
-as the controller was concerned nothing was happening.
-
-Two independent lines converge on it, and they share no failure mode:
+**The result stands, and it rests on device behaviour rather than on messages:**
 
 | evidence | class | what it shows |
 |---|---|---|
-| No card update, for 86 minutes | the app UI channel | the controller's model of the shower never changed |
-| **Its 15-minute clock never ran** | **device behaviour** | no session existed to count. [Case study 2](02_hub_commanded_shower_15min.md) proves that clock works and fires within 0.6 s |
+| **Its 60-minute ceiling never fired** in 86 minutes | **device behaviour** | no session existed to count |
+| No card update, for 86 minutes | the app UI channel | consistent, but weak on its own — silence is also what "no card change" looks like |
 
-The second crosses the wired link and is decisive on its own.
+The first line is decisive by itself. [Case study 3](03_both_ceilings_at_15_minutes.md) §7 put
+both ceilings at 15 minutes on a controller-owned session: the controller commanded its own
+shutoff at 901.004 s **even though the valve had already paused the zone a second earlier**,
+so the command was redundant when it landed. The mechanism is live and enforced
+**unconditionally** whenever a session is known. It did not fire once here — 26 minutes past
+its own ceiling — which can only mean the condition was never met.
 
-⚠️ **What this does NOT separate.** "Did not receive the valve's state over the wire" and
-"received it and did not count it as a session" are both controller-side, and nothing here
-tells them apart. The controller is demonstrably *not* blind to the valve in general — during
-the 2026-08-17 shower it reported every one of the valve's pauses, sessions it had itself
-commanded. The precise, defensible claim is: **the controller does not treat a valve-side
-open it did not command as a session** — it neither renders it nor starts its clock. Which of
-the two mechanisms produces that is unmeasured, and probably unmeasurable without sniffing a
-link we cannot reach.
+> ### ⚠️ AMENDED 2026-08-18 — the mechanism originally given here was wrong
+>
+> This section previously argued that the controller "did not interpret the valve opening
+> outlets as a shower having started", i.e. that a `solowritesystem` open is inherently
+> invisible to it.
+>
+> **[Case study 4](04_two_touchscreens_and_what_off_means.md) §8 falsifies that.** The
+> controller acknowledged a Home-Assistant-driven open in **285 ms** — no preset, no
+> `valveOnOff`, no screen touched — and again 33 minutes later in 382 ms. Across the whole
+> corpus, plain `solowritesystem` opens are seen immediately **51 times out of 80**.
+>
+> So the controller usually *does* see these. **What we do not know is why it sometimes sees
+> and sometimes does not.** The corpus narrows it without closing it: it has **never** seen
+> the opening of a preset-driven session (0 of 15), and never-seen episodes skew short and
+> quiet — but this session had no preset and ran 86 minutes, so neither explains it.
+>
+> **What survives unchanged:** the controller did not know, its ceiling did not fire, and
+> Home Assistant's restores went by a route it was not party to. **What is withdrawn:** any
+> claim about *why*, including "it does not treat a valve-side open it did not command as a
+> session". That was a plausible rule fitted to one session, and it did not survive contact
+> with the next three.
 
 ### ✅ Started by `solowritesystem`, the HUB does not count
 
