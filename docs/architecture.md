@@ -631,8 +631,9 @@ The table above answers "where does the physical water state come from". It was 
 positive: `switch.anthem_plus_shower` and `switch.anthem_plus_system` reported showers the
 controller had never been told about.
 
-The measurement that settled it. An 86-minute shower on 2026-08-18 — zone 2 outlet 4 open
-07:52:01 local, the valve's 3600 s pause and our restore at 08:52, stopped by hand at
+The measurement that settled it, written up in full as
+[case study 1](case_studies/01_ha_driven_shower_hub_blind.md). An 86-minute shower on
+2026-08-18 — zone 2 outlet 4 open 07:52:01 local, the valve's 3600 s pause and our restore at 08:52, stopped by hand at
 09:18 — driven entirely through `solowritesystem`. The capture
 (`mqtt_raw_20260818T052055Z_71_0b22dd90.jsonl`) holds **five `GCS_SOLO_STS` messages and
 nothing else**: no `SHOWER_VALVE_STS`, no HUB message of any code, for the whole shower.

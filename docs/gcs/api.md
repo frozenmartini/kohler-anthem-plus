@@ -666,6 +666,24 @@ clocks coincide again. **It is the zone's timer**; see the correction above.
 
 #### ⭐ CONFIRMED 2026-08-17 — the 60-minute session ceiling, and it stops rather than pauses
 
+> ### ⚠️ SCOPED 2026-08-18 — this ceiling does **not** count when Home Assistant starts the shower
+>
+> Everything below is accurate for a session the Anthem Plus controller commanded, which is
+> what was measured on 2026-08-17. A shower started through `solowritesystem` is a different
+> case, and the controller's clock does not run for it at all.
+>
+> Measured 2026-08-18: a `solowritesystem`-started shower ran **5172.7 s wall clock** — 86
+> minutes — past a 60-minute ceiling that never fired, while the controller published **zero**
+> MQTT messages for the entire session. A clock anchored at the open would have expired at
+> 08:52:01.179 local; the shower ran until 09:18:13.
+>
+> Full walkthrough, both capture files quoted in full:
+> [case study 1](../case_studies/01_ha_driven_shower_hub_blind.md).
+>
+> **What still holds:** the mechanism, the arithmetic, the `0x00` signalling, and the ceiling
+> itself for panel-started showers. **What is now scoped:** who it applies to. A GCS
+> *preset*-started shower remains unmeasured.
+
 **There is a third timer.** Beyond the per-outlet `maximumRunTime` and a preset's own `time`,
 the valve ends a zone **3600 s after that zone first started flowing** — and that clock keeps
 running while the water is off between restarts, so nothing that reopens the valve can
