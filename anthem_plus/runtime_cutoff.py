@@ -352,14 +352,18 @@ class ZoneCutoffDetector:
         configured for the outlets in that zone (empty where the valve has not said).
 
         A zone counts as *flowing* when it has a non-empty mask and is not paused. A cutoff
-        is a flowing zone that stops flowing — paused (`0x40`) **or** stopped (`0x00`) —
-        having flowed for one of its limits.
+        is a flowing zone that stops flowing **with the `0x40` pause flag set**, having
+        flowed for one of its limits.
 
-        **The pause flag is recorded but no longer required**, changed 2026-08-17 at the
-        owner's instruction after a 60-minute session ceiling ended a shower with `0x00` and
-        Endless Shower let it stay off. The reasoning, the measurement behind it and what
-        safety it gives up are in this module's docstring; `paused` still reaches the journal
-        on every `flow_end` so the distinction survives for analysis.
+        **The pause flag is required**, restored 2026-08-18 at the owner's instruction after
+        five case studies showed the `0x00` that had motivated dropping it was the Anthem
+        Plus controller's own ceiling, fired because the two Max Shower Durations were set to
+        different values. Only the valve cuts with `0x40`, and it fires marginally early, so
+        with the durations matched its pause always arrives first and is always the
+        actionable signal. A `0x00` at a matching duration is declined, logged at WARNING
+        naming the likely cause, and journalled with its own `reason`. The full reasoning and
+        what it costs are in this module's docstring; `paused` reaches the journal on every
+        `flow_end` either way, so the two populations stay separable in analysis.
         """
         now = time.monotonic()
         fired: list[ZoneCutoff] = []
