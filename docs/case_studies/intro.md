@@ -42,7 +42,10 @@ about what a device "knew" is an inference from something else.
 2. **Absence of a message means there was no card change to push.** It does **not** mean the
    device was silent, offline, broken, or unaware. Silence is weak evidence.
 3. **Presence of a message is evidence about the cloud's model of the app UI**, not directly
-   about device state. The cloud can push a redundant or stale card update.
+   about device state. The cloud can push a redundant or stale card update — and it can be
+   **actively wrong**: in [case study 5](05_three_restarts_and_the_unexplained_00.md) §7 the
+   controller pushed a card showing one zone paused and the other running, for ~200 ms, when
+   the valve had stopped both in a single word. It refreshes its two zones independently.
 4. **To learn what a device actually knows, use device *behaviour*, not messages** — did its
    timer fire, did water move, did a mask change. Behaviour crosses the wired link; messages
    do not.
@@ -175,4 +178,5 @@ function and is **not** a shower timer. An earlier reading of it as one was wron
 | **[1](01_ha_driven_shower_hub_blind.md)** | 2026-08-18, 86 min, started by `solowritesystem` | The controller does not know, does not count, and does not render. Its 60-minute ceiling never fired. Silence explained by §1. |
 | **[2](02_hub_commanded_shower_15min.md)** | 2026-08-18, 15 min, started by `valveOnOff` | The controller owns the session, cuts at exactly its configured 15 min with `0x00`, and renders every transition. **Warm-up counts toward the ceiling and carries no pause.** `maxshowerduration` is readable over the local API. |
 | **[3](03_both_ceilings_at_15_minutes.md)** | 2026-08-18, both ceilings at 15 min, started by `valveOnOff` | The control. **Both devices fired — valve `0x40` at 899.918 s, controller `0x00` at 901.004 s, 1.087 s apart, neither deferring.** That closes case study 1: a mechanism that enforces unconditionally and did not fire there proves the controller never knew the shower existed. Endless Shower caught the pause and, incidentally, overrode the controller's ceiling too. |
+| **[5](05_three_restarts_and_the_unexplained_00.md)** | 2026-08-18, two zones 8 min apart, both maximums 900 s | Three cutoffs. Restarts 1 and 3 normal; **restart 2 threw an unexplained `00/00` that zeroed both zones, reset the other zone's clock, and merged the two timers into one** — which is what caused restart 3. `configWriteAllowedFlag` established as the valve's own idle marker and the first window into state the command word does not carry. **The controller published a zone state the valve never held.** No temperature drift across three restores. Retracts case study 3's `00/00` attribution. |
 | **[4](04_two_touchscreens_and_what_off_means.md)** | 2026-08-18, exploratory: HA-opened, then driven from both physical screens | **Pressing off on the first-generation screen writes `0x40` — a pause, both zones — and that pause self-terminates into `0x00` after ~2 minutes**, resetting the setpoint to default. `atTemp` is inert across 16 setpoint changes. The two touchscreens are indistinguishable on the wire. And the controller acknowledged an HA-driven open in **285 ms**, which amends case study 1's stated mechanism. |

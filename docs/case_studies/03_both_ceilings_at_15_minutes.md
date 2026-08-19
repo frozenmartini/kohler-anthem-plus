@@ -94,7 +94,21 @@ The bias is consistent, not noise: the controller also overshot in
 [case study 2](02_hub_commanded_shower_15min.md), by **+0.557 s**. Two measurements, both
 sub-second-and-a-bit late. The valve, by contrast, fires marginally early.
 
-### The `0x00` at 14:35:17.521 is the controller's, not ours
+### ~~The `0x00` at 14:35:17.521 is the controller's, not ours~~ — ⚠️ RETRACTED
+
+> **This attribution is withdrawn, 2026-08-18. See
+> [case study 5](05_three_restarts_and_the_unexplained_00.md) §11.** That `0x00` belongs to a
+> corpus-wide population of **nine sub-60-second teardowns** spanning three start routes and
+> eleven days, including one where no controller deadline existed at that moment. The
+> `configWriteAllowedFlag` evidence points to the **valve**, not the controller: `cfgW` is a
+> field the valve reports about itself, and in case study 5 it changed *before* the `0x00`
+> while the command word stayed identical.
+>
+> **Everything else in this case study is unaffected** — both ceilings firing 1.087 s apart,
+> the restore winning the race, and the ordering-dependence all rest on the `0x40` and the
+> timings, not on who sent the `0x00`. The reasoning below is left in place as the record of
+> what was argued and why it did not hold.
+
 
 Worth stating explicitly, because it lands inside our restore window and could be mistaken for
 an echo of our own write:
