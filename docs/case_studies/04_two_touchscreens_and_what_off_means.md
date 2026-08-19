@@ -110,6 +110,15 @@ preset-driven cutoff** on the wire, which is the other case that pauses every zo
 
 ## 5. ⭐ A pause self-terminates after ~2 minutes
 
+> ### ⚠️ SUPERSEDED — 2026-08-19, [case study 7 §6](07_the_controller_sweeps.md)
+>
+> The measurement below stands; the mechanism does not. **The ~120 s clock is not attached to the
+> pause — it is the shower session ending, and it runs from ALL WATER OFF whatever stopped it.**
+> Three showers on 2026-08-19 contained **no `0x40` at all** and produced the same ~120 s revert to
+> `defaultTemp`. The valve ends its own session separately at `0x40/0x40`, with its own summary
+> screen; the controller's runs 2 minutes longer. Read that section before using this one.
+
+
 ```text
 15:03:23.930   0579C840 / 1179C840   PAUSE, setpoint 377 (100 °F)
 15:05:23.120   0584C840 / 1184C840   PAUSE, setpoint 388 (102 °F)   +119.19 s

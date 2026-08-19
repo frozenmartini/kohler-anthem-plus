@@ -244,6 +244,24 @@ anyone resumes first.
 
 ## 10. ❌ What we could NOT determine
 
+> ### ✅ RESOLVED — 2026-08-19, [case study 7 §7a](07_the_controller_sweeps.md)
+>
+> **It was the controller's 900 s ceiling.** The `00/00` landed **900.792 s** after zone 1 began
+> flowing, inside the +900.30…+901.16 s band measured across seven controller cuts with the valve
+> held inert at 60 min. The objection below — that a HUB clock would predict stops at restarts 1
+> and 3 too — does not hold: the controller's per-zone arming is unreliable (zone 1 armed 1 of 4
+> there), which §7 of this study had already established from the other direction.
+>
+> **Why zone 2 was zeroed at 492 s:** the cut is a **sweep** over both zones, and zone 2's
+> *controller* clock was never reset by our restore — only its valve clock was. The sweep saw zone 2
+> at 1393.5 s. Both zones over limit, both cut, one word.
+>
+> The `configWriteAllowedFlag` argument in §11 is also falsified: the same word-identical `cfgW`
+> precursor appears 0.117 s and 0.224 s ahead of stops the controller provably authored.
+>
+> The knock-on is unchanged — the `00/00` still merged both clocks and still caused restart 3.
+
+
 **Why the `00/00` appeared at restart 2.** This is the one real failure of the session, and it
 resisted every hypothesis tested:
 
@@ -293,8 +311,8 @@ is what makes restart 3 an artefact of restart 2 rather than an independent even
 
 ## 12. Open
 
-1. **The unexplained `00/00`** (§10). Highest value: its two clean instances both follow a
-   restore.
+1. ~~**The unexplained `00/00`** (§10)~~ — **CLOSED 2026-08-19**, the controller's ceiling
+   fired as a sweep. See [case study 7 §7a](07_the_controller_sweeps.md).
 2. **Why individual zone tracking staggers** (§7) — controller pipeline lag, or the controller
    seeing finer detail over the wired link than the valve's coalesced cloud publish.
 3. **A genuine max-duration `0x40` left alone**, with Endless Shower off, to watch the hold play
