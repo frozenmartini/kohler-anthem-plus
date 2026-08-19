@@ -282,6 +282,40 @@ The valve accepts off-ladder values perfectly happily — this is not a protocol
 What it cost was that a setpoint written from Home Assistant no longer sat where the
 touchscreen would have put it, so the next panel adjustment started from a value one tenth off.
 
+### ✅ The reported symptom has not recurred — 2026-08-18
+
+**Session 9 left the whole-degree jump the owner actually reported ("lowered to 101, restored
+to 102") open, with an experiment planned. Four sessions of evidence later it has not
+reappeared.**
+
+Every valve temperature in the corpus was re-checked against the ladder — **2892 readings
+across all 89 capture files**. Excluding whole-degree Celsius values, which are the
+Celsius-native path and legitimate, the off-ladder population is:
+
+| value | count | dates |
+|---|---|---|
+| **`0x185` (389)** — our arithmetic fingerprint | **66** | 08-07, 08-08, 08-11, 08-12, **last on 08-14** |
+| a `*8` block, `0x09E` (158) … `0x17A` (378) | 3–4 each | **08-12 only** — a systematic sweep from the preset-decompile work |
+
+**Nothing has been off-ladder since 2026-08-14**, and the fix landed 2026-08-17.
+
+The symptom itself was also directly exercised:
+
+* **[Case study 5](../case_studies/05_three_restarts_and_the_unexplained_00.md) §8a** — three
+  Endless Shower restores at three different setpoints, `383` → `383`, `377` → `377`,
+  `366` → `366`. Byte-exact, no drift, no whole-degree jump.
+* **[Case study 4](../case_studies/04_two_touchscreens_and_what_off_means.md) §7** — sixteen
+  setpoint changes from both physical touchscreens, every intermediate value on the ladder,
+  mirrored exactly by the controller.
+
+> ⚠️ **What this does and does not prove.** The restore path preserves
+> `word.temperature_celsius` directly and never converts from Fahrenheit, so **case study 5
+> exercises preservation, not the ladder.** `unit_to_celsius` — the function that was fixed —
+> runs only when a temperature is set from the Home Assistant entity, and no such write appears
+> in any capture since the fix. So: **the reported symptom is not reproducible and the
+> fingerprint is gone, but the ladder itself has not been re-verified on hardware.**
+> `test_temperature_ladder.py` pins it offline against all 34 slider values in both directions.
+
 Outside 59–122 °F the app returns **0**, which on a device that opens water valves would mean
 full cold. `unit_to_celsius` falls back to the arithmetic instead of copying that.
 

@@ -131,6 +131,50 @@ toggle and a stored favourite. `valveOnOff` takes no parameters: it runs whateve
 
 ---
 
+## 3a. What the five case studies established
+
+Findings that outlived the session they came from. Each links to where it is argued in full.
+
+### The valve
+
+| finding | where |
+|---|---|
+| **A `0x40` pause left alone is held for ~120 s, then torn down** — the session ends and the setpoint reverts to `defaultTemp`. 29 of 38 teardowns in the corpus land at 119.6–120.7 s, on every start route. | [5 §9](05_three_restarts_and_the_unexplained_00.md), [4 §5](04_two_touchscreens_and_what_off_means.md) |
+| **`configWriteAllowedFlag`: `1` = writes allowed, and it tracks zone 1 — the primary — being idle** (775 of 781). It is **not derivable from the command word**, so it is the only window found into valve state the four bytes do not carry. The primary goes idle ~0.8 s after its water stops. | [5 §6](05_three_restarts_and_the_unexplained_00.md) |
+| **`atTemp` is a session latch, not a thermostat.** It survives a `0x40` pause, clears only on a full stop, and does not move across setpoint changes — sixteen of them, a 7 °F swing, both touchscreens. Most likely how the system decides whether to run warm-up. | [4 §6](04_two_touchscreens_and_what_off_means.md), [5 §8b](05_three_restarts_and_the_unexplained_00.md) |
+| **Temperature survives a pause and a restore byte-exactly** — three restores at three setpoints, no drift. The whole-degree jump reported in session 9 has not recurred, and the `0x185` (389) arithmetic fingerprint last appeared 2026-08-14. | [5 §8a](05_three_restarts_and_the_unexplained_00.md), [`../gcs/valve_hex.md`](../gcs/valve_hex.md) |
+| **Pressing off on the first-generation touchscreen writes `0x40` — a pause, both zones** — not a stop. Indistinguishable on the wire from a preset-driven cutoff. | [4 §4](04_two_touchscreens_and_what_off_means.md) |
+| **The two touchscreens cannot be told apart on the wire.** Same message shape, one word per intermediate value, both zones. Apparent differences are drag speed. | [4 §7](04_two_touchscreens_and_what_off_means.md) |
+
+### The controller
+
+| finding | where |
+|---|---|
+| **Its ceiling is enforced unconditionally whenever it knows a session is running** — it fired even when the valve had already paused the zone a second earlier. That is the positive control behind case study 1. | [3 §7](03_both_ceilings_at_15_minutes.md) |
+| **The ceiling equals the configured Max Shower Duration exactly**: 60 min → 3600.20 s, 15 min → 900.557 s. It overshoots by ~0.5–1.0 s. | [2 §6b](02_hub_commanded_shower_15min.md), [3 §4](03_both_ceilings_at_15_minutes.md) |
+| **`maxshowerduration` is readable — but only over the LOCAL API**, `GET /web/api/v1/device/get_valve_settings`. Minutes as a string; the dropdown offers only 15/30/45/60. The same object predicts a controller-commanded shower completely. | [2 §8](02_hub_commanded_shower_15min.md), [`../hub/local_api.md`](../hub/local_api.md) |
+| **Warm-up counts toward the ceiling**, runs the configured `warmupOutlets` (five here), ends on the controller's own judgement rather than the valve's `atTemp`, and carries **no pause** at the handoff. | [2 §6a](02_hub_commanded_shower_15min.md), [3 §8a](03_both_ceilings_at_15_minutes.md), [2 §6e](02_hub_commanded_shower_15min.md) |
+| **It refreshes its two zones independently** and will push a card showing a state the valve never held — measured at ~200 ms. | [5 §7](05_three_restarts_and_the_unexplained_00.md) |
+| **It has never reported `status: ON` at the opening of a preset-driven session — 0 of 15.** Ten times silent, three times publishing a confident `status: OFF` while water ran. `resolve_outlet_source()` is right to prefer the valve word; its stated cause (`solowritesystem`) is wrong. | [4 §8](04_two_touchscreens_and_what_off_means.md) |
+
+### Home Assistant's own effects
+
+| finding | where |
+|---|---|
+| **A restore can re-anchor the *other* zone's run-time clock**, merging two independent timers into one. Two zones that started 492.7 s apart were cut together fifteen minutes later. | [5 §4, §5](05_three_restarts_and_the_unexplained_00.md) |
+| **Endless Shower can override the controller's ceiling**, not just the valve's — incidentally, because the restore is in flight when the stop lands. | [3 §5](03_both_ceilings_at_15_minutes.md) |
+| **The restore's end-to-end latency is ~1.3–1.7 s** (POST ~0.6–1.0 s, valve application ~0.68 s), which is why it consistently lands *after* a competing stop rather than before. | [3 §5](03_both_ceilings_at_15_minutes.md), [5 §4](05_three_restarts_and_the_unexplained_00.md) |
+| **The detector clears a zone's timer on any `flow_end`**, regardless of verdict — so a momentary mask-zeroing resets the clock even when the cutoff is ignored. | [5 §4](05_three_restarts_and_the_unexplained_00.md) |
+
+### Open, and important
+
+* **Why the controller sometimes registers a shower and sometimes does not.** Presets are one categorical answer; case study 1 had no preset. See §1's worked example.
+* **Why a `00/00` teardown sometimes arrives in under a second** instead of at ~120 s. Nine such cases against 29 normal ones; the two clean instances both immediately follow a restore. [5 §10](05_three_restarts_and_the_unexplained_00.md)
+* **Whether the controller counts a Home-Assistant-started session** toward its ceiling. Never run long enough to find out.
+* **Whether a GCS preset starts the controller's clock.** The last unmeasured row of the start-route table.
+
+---
+
 ## 4. Three classes of evidence, in order of strength
 
 | class | what it is | how much to trust it |

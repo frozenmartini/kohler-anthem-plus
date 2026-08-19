@@ -39,10 +39,10 @@ all 107 events on one `+0.000s` timeline, filterable by source.
 | Endless Shower | **enabled** | fired three times |
 | Home Assistant Core | restarted 15:41:05 | new capture file, PID 71 |
 
-⚠️ **How this session was started is not recorded.** The first word is a bare
-`1184c80100000001` with no warm-up recipe, so it was **not** `valveOnOff`; beyond that,
-Home Assistant switches and the first-generation touchscreen are indistinguishable on the
-wire. Owner confirmation still needed.
+**Started from Home Assistant** — the outlet switches, via `solowritesystem`. Owner-confirmed:
+the first-generation touchscreen was not used to start any shower that day. The wire agrees as
+far as it can: the first word is a bare `1184c80100000001` with no warm-up recipe, so it was
+certainly not `valveOnOff`.
 
 ## 2. The three restarts
 
@@ -313,7 +313,7 @@ is what makes restart 3 an artefact of restart 2 rather than an independent even
 | The words Home Assistant sent | reproduced by running `anthem_plus.valve_hex.encode_word` against the captured state |
 | `cfgW` meaning, 1446-message correlation | all 89 capture files, scripted analysis |
 | The 120 s hold, 38 teardowns, route breakdown | all 89 capture files, scripted analysis |
-| How the session was started | **not recorded** — see §1 |
+| How the session was started | **owner-reported** — Home Assistant outlet switches; the first-gen screen was not used that day |
 
 ---
 
