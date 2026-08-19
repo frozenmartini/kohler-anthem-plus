@@ -1319,14 +1319,21 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         turning the shower off and the valve timing out looked identical on the wire, leaving
         only `note_local_write()`'s 30 s grace between "stopped" and "helpfully restarted".
 
-        ⚠️ **That reasoning no longer holds, and this call is back on the timing window.**
-        On 2026-08-17 the detector stopped requiring the pause flag, because the valve ends a
-        60-minute session with ``0x00`` and a real cutoff was being ignored (see
-        `anthem_plus/runtime_cutoff.py`). A stop issued from here is now protected by
-        `note_local_write()`'s 30 s grace and nothing else — which is sound, since
-        `async_apply_valve` records the write before it sends and the valve's echo arrives in
-        about a second, but it is a window rather than a rule. Writing ``0x00`` is still
-        right: it keeps the *journal* able to tell our stop from the valve's pause.
+        ✅ **The strong guarantee is back, 2026-08-18: a stop issued from here can never be
+        undone by Endless Shower.** The detector requires the ``0x40`` pause flag again, and
+        this method writes ``0x00``, so its stops are outside the restart-eligible set
+        entirely — by shape, not by timing.
+
+        The requirement was briefly dropped on 2026-08-17, when a real cutoff arrived as
+        ``0x00`` and was ignored. Five case studies established that as **two maximum
+        durations set to different values** rather than a protocol gap: only the GCS valve
+        cuts with ``0x40`` and only the Anthem Plus controller with ``0x00``, the valve fires
+        marginally early and the controller marginally late, so with the two durations equal
+        the pause always arrives first. See `anthem_plus/runtime_cutoff.py` and
+        `docs/case_studies/`.
+
+        `note_local_write()`'s 30 s grace still applies and is now belt-and-braces rather than
+        the only protection.
 
         Still routed through `async_apply_valve` rather than `GcsDevice.async_turn_off()`,
         which would write a flat 38.0 °C to both zones — this preserves each zone's own

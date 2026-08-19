@@ -166,6 +166,24 @@ Findings that outlived the session they came from. Each links to where it is arg
 | **The restore's end-to-end latency is ~1.3–1.7 s** (POST ~0.6–1.0 s, valve application ~0.68 s), which is why it consistently lands *after* a competing stop rather than before. | [3 §5](03_both_ceilings_at_15_minutes.md), [5 §4](05_three_restarts_and_the_unexplained_00.md) |
 | **The detector clears a zone's timer on any `flow_end`**, regardless of verdict — so a momentary mask-zeroing resets the clock even when the cutoff is ignored. | [5 §4](05_three_restarts_and_the_unexplained_00.md) |
 
+### What this changed in the integration
+
+**`runtime_cutoff.py` requires the `0x40` pause flag again, as of 2026-08-18.** Session 9 had
+removed that requirement after the controller's ceiling ended a shower with `0x00` and Endless
+Shower let it stay off. These case studies showed that was **two maximum durations set to
+different values** (valve 900 s, controller 3600 s), not a protocol gap.
+
+With the two set equal, the valve's early bias and the controller's late bias mean **the `0x40`
+always arrives first**, so it is always the actionable signal and `0x00` never needs to be
+acted on. A `0x00` at a matching duration is now declined, journalled with its own verdict, and
+logged at WARNING naming mismatched durations as the likely cause — the safe failure direction
+is water off, and it says why.
+
+⚠️ **The accepted risk:** pressing off on the first-generation touchscreen writes `0x40` on
+**both zones**, byte-identical to a preset-driven cutoff, so ending a shower within 10 s of the
+limit restarts the water. No discriminator exists in the data. At a realistic 60-minute
+setting that is a ten-second window in an hour.
+
 ### Open, and important
 
 * **Why the controller sometimes registers a shower and sometimes does not.** Presets are one categorical answer; case study 1 had no preset. See §1's worked example.

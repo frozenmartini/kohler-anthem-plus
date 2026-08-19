@@ -69,7 +69,48 @@ Note what the third row *used to* buy: requiring the pause flag removed 91 of th
 from consideration outright, including every stop issued from Home Assistant or the Anthem
 Plus controller. Duration then only had to separate 11 cutoffs from 54 other pauses.
 
-### ⚠️ The pause flag is no longer required — 2026-08-17, owner's decision
+### ⚠️ REQUIRED AGAIN — 2026-08-18, owner's decision, after five case studies
+
+**A cutoff must carry `0x40`.** The 2026-08-17 change below is reverted; the section is kept
+because its measurement is still the best description of the corpus, and because the reason it
+was made turned out to be a configuration problem rather than a protocol one.
+
+**What we did not know on 2026-08-17:** the Anthem Plus controller runs its own maximum
+shower duration, independently of the valve's `maximumRunTime`, and the two were set to
+different values — 900 s on the valve, 3600 s on the controller. The controller's longer clock
+expired mid-leg and stopped a shower still in use. That looked like a valve behaviour the
+detector was missing. It was two timers disagreeing.
+
+**What five case studies established** (`docs/case_studies/`):
+
+* Only the **GCS valve** cuts with `0x40`. Only the **controller** cuts with `0x00`.
+* The valve fires slightly **early** — measured −0.08 to −0.23 s against its limit.
+* The controller fires slightly **late** — measured +0.20, +0.557 and +1.004 s.
+* So **with both durations set to the same value the valve's pause always arrives first**,
+  by ~1.1 s in the one session where both were at 900 s, and it is always the actionable
+  signal. The controller's `0x00` then lands on a zone already restored.
+* Across the whole corpus, **not one genuine max-duration cutoff took the shape "both zones
+  transitioned from flowing to zero"** — all 16 such transitions are `stopall`, test scripts
+  or somebody ending a shower.
+
+**So the rule is: match the two Max Shower Durations, and require the pause flag.** That
+restores the strong property the 2026-08-17 change gave up — a deliberate stop is never
+undone, whoever issued it — and costs nothing as long as the durations agree.
+
+⚠️ **If they do not agree**, the controller can fire alone with `0x00` and the shower will not
+come back. That is the safe failure direction (water off, not water on), and it is logged at
+WARNING naming the likely cause, plus journalled with its own verdict so it is visible in
+analysis. Do not re-fix it by accepting `0x00` again; fix the configuration.
+
+⚠️ **Known accepted risk, unchanged:** pressing off on the **first-generation touchscreen**
+writes `0x40` on **both zones** (case study 4), which is byte-identical to a preset-driven
+cutoff. Ending a shower from that screen within `CUTOFF_TOLERANCE_SECONDS` of the limit will
+restart the water. There is no discriminator in the data — requiring both zones to match would
+break the preset case, which is exactly what `also_paused` exists for. The owner has weighed
+this: a real installation sets the longest available duration (60 min), so the window is ten
+seconds in an hour, and 15 min was only ever used to make experiments run faster.
+
+### The 2026-08-17 reasoning, superseded but kept for the record
 
 **A `0x00` stop is now treated exactly like a `0x40` pause.** The rule above described the
 corpus accurately and still does; what it missed is that the valve has a *second* way to end
@@ -445,17 +486,33 @@ class ZoneCutoffDetector:
                 )
                 continue
             if not is_paused:
-                # Kept as a log line, not a veto. A cutoff issued as a stop is the session
-                # ceiling (see the module docstring); a stop at this timing that is *not*
-                # one is somebody ending their shower within 10 s of the limit, and it now
-                # gets restarted. That trade was made deliberately — the alternative left a
-                # real cutoff unhandled with the owner still under the water.
-                _LOGGER.info(
-                    "Zone %s stopped (0x00) at its %ss limit rather than pausing (0x40). "
-                    "Treating it as the valve's timer anyway",
+                # **The pause flag is required again, 2026-08-18.** See the module docstring
+                # for the full reasoning; in short, the GCS valve is the only device that
+                # cuts with `0x40`, it fires a fraction of a second EARLY, and the Anthem
+                # Plus controller fires a fraction of a second LATE — so when the two maximum
+                # durations are set to the same value the valve's pause always arrives first
+                # and is always the signal worth acting on. A `0x00` at a matching duration
+                # is then either the controller's redundant follow-up to a cut we have
+                # already restored, or somebody deliberately ending their shower.
+                #
+                # Logged at WARNING rather than swallowed: if the two durations are ever set
+                # to DIFFERENT values, the controller can fire alone and this line is the
+                # only thing that will say why the shower did not come back.
+                _LOGGER.warning(
+                    "Zone %s STOPPED (0x00) after %.0f s, which matches its %s s limit, but a "
+                    "cutoff must carry the pause flag (0x40) and this did not. Not restarting. "
+                    "If the shower ended by itself, check that the Anthem valve's Max Shower "
+                    "Duration and the Anthem Plus controller's are set to the SAME value",
                     zone,
+                    duration,
                     match,
                 )
+                stop(
+                    "stopped (0x00) at a limit rather than paused (0x40) — a cutoff must "
+                    "carry the pause flag",
+                    matched=match,
+                )
+                continue
             if suppressed(zone):
                 _LOGGER.debug(
                     "Zone %s closed at its %ss limit, but Home Assistant closed that zone "

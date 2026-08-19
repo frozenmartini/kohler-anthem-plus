@@ -683,6 +683,19 @@ clocks coincide again. **It is the zone's timer**; see the correction above.
 > **What still holds:** the mechanism, the arithmetic, the `0x00` signalling, and the ceiling
 > itself for panel-started showers. **What is now scoped:** who it applies to. A GCS
 > *preset*-started shower remains unmeasured.
+>
+> ### ✅ And the mitigation is now the fix — 2026-08-18
+>
+> **Set the valve's `maximumRunTime` and the controller's Max Shower Duration to the SAME
+> value.** Measured across five case studies: the valve fires slightly **early** (−0.08 to
+> −0.23 s against its limit) and the controller slightly **late** (+0.20 to +1.00 s), so with
+> equal durations the valve's `0x40` pause always arrives first — by 1.087 s in the one
+> session where both were at 900 s — and is always the actionable signal. The controller's
+> `0x00` then lands on a zone Endless Shower has already restored.
+>
+> That is why `runtime_cutoff.py` **requires the pause flag again** as of 2026-08-18. A `0x00`
+> at a matching duration is now declined and logged at WARNING naming this configuration as
+> the likely cause. See [`../case_studies/03_both_ceilings_at_15_minutes.md`](../case_studies/03_both_ceilings_at_15_minutes.md).
 
 **There is a third timer.** Beyond the per-outlet `maximumRunTime` and a preset's own `time`,
 the valve ends a zone **3600 s after that zone first started flowing** — and that clock keeps

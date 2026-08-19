@@ -36,6 +36,7 @@ from .const import (
     CONF_RESTART_ON_RUNTIME_CUTOFF,
     DOMAIN,
     ENDLESS_SHOWER_NOT_SET_UP,
+    ENDLESS_SHOWER_MATCH_DURATIONS,
     ENDLESS_SHOWER_ON,
     SHOWER_ON_PRESET_ID,
 )
@@ -162,6 +163,17 @@ class EndlessShowerSwitch(KohlerValveEntity, SwitchEntity):
     `CONF_RESTART_ON_RUNTIME_CUTOFF` in `const.py`. Every restart is logged at WARNING, and
     every decision, including the declines, goes to the cutoff debug log.
 
+    ⚠️ **On an account with BOTH an Anthem valve and an Anthem Plus controller, the two Max
+    Shower Durations must be set to the same value.** They are separate timers on separate
+    devices and they signal differently — the valve **pauses** (`0x40`), the controller
+    **stops** (`0x00`) — and this feature acts on the pause, because that is the only cut it
+    can tell apart from somebody deliberately ending their shower. Measured across five case
+    studies (`docs/case_studies/`), the valve fires marginally early and the controller
+    marginally late, so with equal durations the valve always cuts first and there is always a
+    pause to act on. **If the controller's is shorter, it stops the shower and nothing
+    restarts it.** The warning is emitted at WARNING when this switch is turned on, but only
+    where a controller is present — a valve-only install has nothing to match.
+
     State lives in the config entry's **options**, the same key the options flow writes, so
     the two always agree and the setting survives a restart. Writing options does not trigger
     a reload — `_async_update_listener` compares `entry.data`, which is untouched — and the
@@ -233,6 +245,13 @@ class EndlessShowerSwitch(KohlerValveEntity, SwitchEntity):
             return
 
         _LOGGER.warning(ENDLESS_SHOWER_ON, describe_duration(known))
+
+        # Both products on one account means two independent maximum-duration timers, and
+        # Endless Shower can only act on the valve's. Say so at the moment the feature is
+        # switched on, when the owner can still go and match them. Valve-only installs have
+        # nothing to match, so they are not told to.
+        if self.coordinator.hub_device is not None:
+            _LOGGER.warning(ENDLESS_SHOWER_MATCH_DURATIONS, describe_duration(known))
 
     @property
     def extra_state_attributes(self) -> dict[str, object]:
