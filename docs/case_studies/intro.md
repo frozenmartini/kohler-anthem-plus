@@ -214,7 +214,7 @@ agree, say so — that is what makes a finding durable.
 ## 5. Conventions
 
 * **Device values are stated hex first, decimal in parentheses** — `0xC8` (200) — because the
-  same quantity has up to three encodings. Full detail in [`../../intro.md`](../../intro.md).
+  same quantity has up to three encodings. Full detail in [`../gcs/valve_hex.md`](../gcs/valve_hex.md).
 * Times are **local (PDT, UTC−7)** in narrative, **UTC** in quoted records, and both in
   timelines. ⚠️ The controller's own clock runs an hour ahead of local
   ([`../hub/local_api.md`](../hub/local_api.md)) — never correlate against a hub-side log

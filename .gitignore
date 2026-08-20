@@ -27,3 +27,16 @@ __pycache__/
 #
 # ⚠️ They are the project's memory. Back them up separately — git is not doing it.
 docs/handoff/
+
+# Agent/owner working layer — deliberately NOT published, purged from history 2026-08-20.
+#
+# `CLAUDE.md` is Claude Code's project-instructions file and `intro.md` is the orientation
+# document it points at. Both describe *this machine* — the Home Assistant add-on container,
+# the venv at /homeassistant/scripts/kohler-work, which restart does what — and would mislead
+# anyone who cloned the repo, since none of those paths exist for them. They also name the
+# owner. Nothing published links to either; the protocol content they summarise lives in
+# docs/ where it belongs.
+#
+# ⚠️ Like docs/handoff/, git is not backing these up.
+CLAUDE.md
+intro.md
