@@ -213,7 +213,7 @@ where the disarm does not happen.
 
 Consequence for anyone running this hardware: **with the controller as the authority, zone 1's
 15-minute limit is not enforced** whenever zone 2 has timed out during the session. It overran
-by **28:05, 10:32 and 11:07** here, and was only ever stopped as collateral.
+by **13:05, 10:32 and 11:07** here, and was only ever stopped as collateral.
 
 ## 6. ⭐ The shower does not end when the water stops
 
