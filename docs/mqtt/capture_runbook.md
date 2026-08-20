@@ -368,7 +368,7 @@ GCS status often has `payload.data.attributes[0]` with fields such as `primaryVa
 [prefix][temperature][flow][outlet mask]
 ```
 
-The same layout is used for reads and writes, so `scripts.yaml`'s `anthem_valve_hex_convert` encoder and this script's decoder agree. Full byte-by-byte reference, mask tables, worked examples, and the verification evidence: [GCS valve hex reference](gcs_valve_hex.md). Keep that document as the single source of truth — do not restate the tables here.
+The same layout is used for reads and writes, so `scripts.yaml`'s `anthem_valve_hex_convert` encoder and this script's decoder agree. Full byte-by-byte reference, mask tables, worked examples, and the verification evidence: [GCS valve hex reference](../gcs/valve_hex.md). Keep that document as the single source of truth — do not restate the tables here.
 
 The GCS valve word leads the HUB's `SHOWER_VALVE_STS` by up to ~2 seconds. In the captured logs the HUB briefly reports pre-transition outlets, temperature, and flow before catching up, which is why the GCS word is the better source for outlet state.
 
@@ -457,15 +457,20 @@ The source timestamp precision is microseconds. The payload's `timestamp` field 
 
 ## Reference Documents
 
-- [GCS valve hex reference](gcs_valve_hex.md) — encode/decode of the valve
+- [GCS valve hex reference](../gcs/valve_hex.md) — encode/decode of the valve
   command word: temperature, flow, outlet masks, preset byte order, and the
   `ValveMode` misreading to avoid.
 
 ## Existing Capture Artifacts
 
-- [GCS MQTT report](mqtt_capture_gcs-sio32343h7_20260806T181200Z.md)
-- [GCS physical-controller raw capture](mqtt_capture_physical_gcs-sio32343h7_20260806T202651.055917Z.json)
-- [HUB raw capture](mqtt_capture_hub_gcs-sious0103D_20260806T204431.714291Z.json)
+- ~~GCS MQTT report~~ `mqtt_capture_gcs-sio32343h7_20260806T181200Z.md`
+- ~~GCS physical-controller raw capture~~ `mqtt_capture_physical_gcs-sio32343h7_20260806T202651.055917Z.json`
+- ~~HUB raw capture~~ `mqtt_capture_hub_gcs-sious0103D_20260806T204431.714291Z.json`
+
+  ⚠️ **These three 2026-08-06 files are no longer on disk** (checked 2026-08-20) — they went
+  with the legacy trees removed in `1b77372`. They are also below the corpus floor, so they
+  could not be used for analysis even if recovered. Named here only as the provenance of the
+  findings above.
 
 ## Standalone Capture Script
 
@@ -520,7 +525,7 @@ The per-run JSONL capture log is also off by default
 (`ENABLE_TEMPORARY_RAW_MQTT_LOGGING = False`), but it is switched rather than
 commented out: pass `--raw-log` to record a single run without editing the
 script. Existing logs under `log/` are untouched and remain the evidence base
-for the decode in [gcs_valve_hex.md](gcs_valve_hex.md).
+for the decode in [`gcs/valve_hex.md`](../gcs/valve_hex.md).
 
 ### Retained-payload cleanup
 

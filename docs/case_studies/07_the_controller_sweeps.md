@@ -329,7 +329,29 @@ if not is_paused:
 
 With the valve at 3600 s, a 900 s stop matches no announced limit, so it takes the silent
 branch. **The warning session 10 added to catch mismatched durations can only fire when the
-durations already agree** — the one case where it is not needed. Not yet fixed.
+durations already agree** — the one case where it is not needed.
+
+### 8a. ✅ Fixed the same day — but never yet exercised on hardware
+
+**Corrected 2026-08-20; §12 item 3 and session 11 §4b both still said "not fixed".** The silent
+branch stopped being silent in `1f19b33`, rebuilt in `4aa2fc5`: `match is None` now calls
+`suspected_controller_limit(duration)` and, when that returns a limit, logs a WARNING naming the
+controller's ceiling and telling the owner to match the two durations. Two qualifications, both
+real:
+
+* It fires only for a stop **on a whole-minute boundary overshot by `CONTROLLER_LATE_WINDOW`
+  = (0.2, 2.0) s** and only when the stop carries no pause flag. That is the discriminator §11's
+  measurements support — 15 of 15 journalled cutoffs, one false positive in 62 stops — not a
+  guarantee that every mismatched stop is named.
+* **It has never fired on hardware.** Core was restarted at 18:46 on 2026-08-19, between
+  `1f19b33` (18:43) and `4aa2fc5` (20:44), so that evening's showers ran the superseded
+  four-value table and its controller-shaped stops at **300.78 s** and **180.46 s** — 5 min and
+  3 min, dead centre of the late window — were journalled with no hint. The minutes rule went
+  live at the **2026-08-20 00:53** Core restart. First real controller cutoff after that date is
+  the test.
+
+The complementary half is `fd2b3ff`'s arm-time warning, which fires on every start regardless of
+what stops the shower, and was observed working at 00:54 on 2026-08-20.
 
 ## 9. ❌ Falsified here: message ordering says nothing about authorship
 
@@ -349,7 +371,10 @@ inert at 60 min — and the **GCS message arrived first every single time**, by 
 | CS4 §5: "a `0x40` pause self-terminates after ~2 min" | **the session ends ~120 s after all water stops**, pause or no pause. Three counterexamples here with zero `0x40`. |
 | `intro.md` §3a: "40 of 61 teardowns at 119.6–120.7 s" | same measurements, different mechanism — session end, not pause teardown |
 | Session 11: HUB-message-first implies controller-initiated | **falsified**, §9 |
-| "The controller times each zone" | it arms timers on events and **sweeps all zones** when one fires |\n| "Zone 1 arms only when zone 2 is idle" (this study, first draft) | a correlation, not the cause. **Zone 1 always arms; a zone-2 sweep disarms it** — §5 |\n| "Zone 1's arming is unreliable" | **it is not.** With zone 2 never opened, zone 1 armed 4 of 4 (§11) |\n| The ~120 s session-end delay as a constant | one measurement at **40.1 s** — §6a |
+| "The controller times each zone" | it arms timers on events and **sweeps all zones** when one fires |
+| "Zone 1 arms only when zone 2 is idle" (this study, first draft) | a correlation, not the cause. **Zone 1 always arms; a zone-2 sweep disarms it** — §5 |
+| "Zone 1's arming is unreliable" | **it is not.** With zone 2 never opened, zone 1 armed 4 of 4 (§11) |
+| The ~120 s session-end delay as a constant | one measurement at **40.1 s** — §6a |
 
 ## 11. ✅ The experiment, run 2026-08-19 16:11–17:19
 
@@ -433,7 +458,8 @@ as a contradiction, not folded into the model.
    14:43:15.423, with no zone starting then. `sweep_sim.py` does not model this, and it is the
    one controller-driven stop the model cannot produce.
 2. **§5a's condition, confirmed only by simulation.** The direct test is §11a.
-3. **§8's warning bug.** Cheap fix, not done.
+3. ~~**§8's warning bug.** Cheap fix, not done.~~ **Done in `1f19b33` / `4aa2fc5`** — see
+   §8a. What is still open is *evidence*: the fix has never met a real controller cutoff.
 4. **The session-end delay is not a constant** — six cases at ~120 s, one at 40.1 s (§6a).
    Timer-stopped versus hand-stopped is the visible candidate.
 5. **Whether the disarm survives a firmware update.** Everything here is
@@ -447,4 +473,8 @@ as a contradiction, not folded into the model.
 | Valve words, `cfgW`, message ordering | `mqtt_raw_20260819T{194552,202559,212223}Z_*.jsonl` |
 | Session-end revert table | all captures on or after 2026-08-15 |
 | Two independent session ends, screen behaviour | **owner, 2026-08-19** — physical screens, not the wire |
-| CS5 arithmetic | `05_three_restarts_and_the_unexplained_00.md` §2, §4 |\n| The experiment, four legs | `cutoff_20260819T212223Z_72_701402e1.jsonl`, `mqtt_raw_20260819T212223Z_72_52ea9d5b.jsonl` (same connection, appended) |\n| Model scoring, 14 hits / 0 false alarms | `kohler-work/sweep_sim.py`, five sessions |\n| Controller firmware 2.88 / OS 5.4 | `captures/20260810_133428_hub_config.json` `/configuration/about/firmware` |\n| The mechanism itself | **owner's hypothesis, 2026-08-19**; simulated and confirmed here |
+| CS5 arithmetic | `05_three_restarts_and_the_unexplained_00.md` §2, §4 |
+| The experiment, four legs | `cutoff_20260819T212223Z_72_701402e1.jsonl`, `mqtt_raw_20260819T212223Z_72_52ea9d5b.jsonl` (same connection, appended) |
+| Model scoring, 14 hits / 0 false alarms | `kohler-work/sweep_sim.py`, five sessions |
+| Controller firmware 2.88 / OS 5.4 | `captures/20260810_133428_hub_config.json` `/configuration/about/firmware` |
+| The mechanism itself | **owner's hypothesis, 2026-08-19**; simulated and confirmed here |

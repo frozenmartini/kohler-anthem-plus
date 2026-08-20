@@ -527,10 +527,68 @@ for **both**. Filter on `payload.deviceid` and `payload.sku`.
 | GCS | `GCS_SOLO_STS`, `GCS_WARM_STS`, `READ_GCS_EXPERIENCE_STS` |
 | HUB | `SHOWER_VALVE_STS`, `STEAM_STS`, `MUSIC_STS`, `LIGHT_STS`, `FAVORITE_STS` |
 
+### ⚠️ `sysid` names the message, not the device — never filter on it
+
+**Measured 2026-08-20.** `payload.sysid` looks like a device serial and is not one. Across every
+live capture, each message `code` carries exactly **one** `sysid`, and each `sysid` belongs to
+exactly one `code` — a fixed token per message type, which is what
+[`case_studies/intro.md`](case_studies/intro.md) means when it says the `sku` / `sysid` "names
+the card, not a sender":
+
+| `data.code` | `sysid` |
+|---|---|
+| `GCS_SOLO_STS` | `GCS-INJK966T6G` |
+| `GCS_WARM_STS` | `GCS-INCB786T2CZ` |
+| `READ_GCS_EXPERIENCE_STS` | `GCS-INXR739U7S` |
+| `READ_GCS_OUTLET_CONFIG_CFG` | `GCS-INSN096T8W` |
+| `READ_GCS_UI_CFG` | `GCS-INBL458T7I` |
+| `GCS_PRESET_STS` | `GCS-INRB916T7R` |
+| `GCS_RECIEVED_STS` | `GCS-HJNJ78U97P` |
+| `DEVICE_REBOOT_STS` | `GCS-INKR097T9K` |
+
+So **several different `sysid` values arrive from one device in one connection**, and two
+captures showing different `sysid`s may be the same device seen through different message
+types.
+
+**The mapping is identical before and after the 2026-08-14 factory reset, on the same
+`deviceid` (`gcs-sio32343h7` for the valve, `gcs-sious0103D` for the HUB)** — checked against
+`captures/2026-08-14_valve_reboot_fault/`. A factory reset changed neither. `deviceid` and
+`sku` are the identity fields; `sysid` is not.
+
 **When both report the same fact, trust the GCS word.** The HUB's `SHOWER_VALVE_STS` lags
 the GCS valve word by 0.3–2 seconds and briefly reports pre-transition outlets, temperature,
 and flow. Verified across 315 correlated messages — every mismatch was HUB lag, never a
 decode error.
+
+### ⚠️ Silence is not state — a restored zone went 176.77 s without a valve message
+
+**Measured 2026-08-19, confirmed with the owner 2026-08-20.** Across the 18 restores in the
+clean corpus, 17 drew a `GCS_SOLO_STS` within **0.06–1.08 s**. One drew none for **176.77 s**:
+
+```text
+23:48:34.109  GCS  primaryValve1 0584c840   zone 1 cut at 900.01 s, byte 3 = 0x40
+23:48:35      journal: restore_done, mask 0x04 (outlet 3), write_seconds 1.0
+23:48:40.518  HUB  SHOWER_VALVE_STS  zone 1 ON, outlets [0,0,1,0,0,0]
+              ... 176.77 s, no valve message ...
+23:51:31.888  GCS  primaryValve1 0584c804  secondaryValve1 1184c801
+```
+
+**The water never stopped.** Owner-established 2026-08-20: outlet 3 came back a few seconds
+after the cutoff and ran throughout, and the 23:51:31 message is the owner opening other
+outlets from the Anthem Plus screen — which republished zone 1's *unchanged* state alongside
+the new ones. Temperature `0x184` (388) = 101.8 °F and flow `0xC8` (200) = 100 % are identical
+either side of the gap. This is the app-channel framing in
+[`case_studies/intro.md`](case_studies/intro.md) behaving exactly as described: no card change,
+no push. **Do not read valve silence as the valve being idle, stuck, or offline.**
+
+**The consequence is ours, not Kohler's.** `ZoneCutoffDetector` anchors a zone's clock in
+`update()`, on the first message that shows the zone flowing; the restore path calls only
+`note_local_write()`, which never sets that anchor. So the detector logged `flow_start` for
+zone 1 at **23:51:31**, water having run since **23:48:35** — an anchor 176.77 s late. Had the
+shower continued to the valve's next cutoff, the detector would have measured ~723 s against a
+900 s limit and, at `CUTOFF_TOLERANCE_SECONDS = 2`, ignored a real cutoff: no restore, water
+off, nothing in the log saying why. **Not observed** — that shower ended at 23:55:38 — and it
+is **1 case in 18**. Recorded as a risk, not a rule.
 
 ### The HUB does not reflect a valve driven directly
 
