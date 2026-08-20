@@ -267,6 +267,12 @@ getValveSettings() { return this.commonHttpService.httpGet("web/api/v1/device/ge
 **Minutes, as a string.** The UI dropdown that writes it offers exactly four values —
 `15 / 30 / 45 / 60`:
 
+> ⚠️ **The dropdown is the UI's range, NOT the field's.** Corrected 2026-08-20: the local
+> API accepts **any** value and the valve enforces it — 3, 5, 75 and 120 minutes were all
+> written and honoured on fw 2.88. A 3-minute setting cut both zones at 180.46 s and
+> 180.64 s. See [`../hub/local_api.md`](../hub/local_api.md) §3b.
+
+
 ```js
 this.maxShowerDurationData = [{text:"15 Min",value:15},{text:"30 Min",value:30},
                               {text:"45 Min",value:45},{text:"60 Min",value:60}]

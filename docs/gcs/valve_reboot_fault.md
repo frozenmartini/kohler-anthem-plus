@@ -1092,7 +1092,7 @@ open — not tested by the capture that answered the rest of this.
 No. The detector never reads `presetOrExperienceId`, so the latching quirk is invisible to it by
 construction. A real cutoff pauses every zone the preset owns in one atomic message; the
 manual-reactivation pattern is staggered over several seconds and involves durations of
-seconds-to-minutes, which can never fall within `CUTOFF_TOLERANCE_SECONDS` (10 s) of a real
+seconds-to-minutes, which can never fall within `CUTOFF_TOLERANCE_SECONDS` (2 s since 2026-08-19, 10 s before) of a real
 900s/3600s limit — so it's never misread as a cutoff.
 
 **Q: What about a GCS preset started *from Home Assistant* rather than the touchscreen — any
