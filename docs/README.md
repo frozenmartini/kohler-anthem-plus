@@ -18,6 +18,30 @@ references below assume it.
 Most Home Assistant Kohler integrations only handle GCS, because the upstream
 `yon/kohler-anthem` library only reverse-engineered that device.
 
+## ⚠️ About the file references in these documents
+
+**Almost every claim here is followed by the capture it came from** — filenames like
+`mqtt_raw_20260818T201525Z_72_d536f3df.jsonl`, scripts like `kohler-work/sweep_sim.py`, and
+paths under `/homeassistant/scripts/`. **None of those are in this repository**, and most of
+them exist only on the machine this was written on.
+
+They are cited the way a paper cites its dataset: so that a claim can be traced to the
+evidence that produced it, and so a future reader can tell a measurement from a guess. Treat
+them as provenance, not as instructions to open a file.
+
+What that means in practice:
+
+| you see | what it is |
+|---|---|
+| `mqtt_raw_*.jsonl`, `cutoff_*.jsonl`, `warmup_*.jsonl` | MQTT captures and journals from the author's own system. Not published. **Your install writes its own** to `/config/kohler_anthem_plus_raw/`, in the same formats. |
+| `kohler-work/…`, `kohler_konnect_custom/…`, `/homeassistant/scripts/…` | Analysis scripts and an experiment workspace kept outside this repo. Not published. |
+| `tests/…`, `run_offline.sh` | The regression suite, also outside this repo. |
+| `captures/…` | Archived evidence from specific incidents, kept with the workspace above. |
+
+The **protocol documentation itself is complete without them** — every finding is written out
+here, in full, including the raw messages it rests on. The references say where each one came
+from; they are not a dependency.
+
 ## Documents
 
 | Path | Covers |

@@ -138,7 +138,7 @@ cd /root/homeassistant/scripts/kohler_konnect_custom
 Use Home Assistant's virtual environment:
 
 ```sh
-/homeassistant/.venv/bin/python3
+python3
 ```
 
 Do not run the helper while the current working directory is `/homeassistant/custom_components/kohler`. Its `select.py` can shadow Python's standard-library `select` module and cause imports such as `asyncio` to fail.
@@ -483,7 +483,7 @@ Run a continuous capture from the scripts directory:
 
 ```sh
 cd /root/homeassistant/scripts/kohler_konnect_custom
-/homeassistant/.venv/bin/python3 mqtt_capture.py --listen-seconds 0
+python3 mqtt_capture.py --listen-seconds 0
 ```
 
 Use a positive `--listen-seconds` value for a bounded capture. The Home

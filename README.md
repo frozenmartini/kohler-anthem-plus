@@ -1,7 +1,8 @@
 # Kohler Anthem Plus
 
-A Home Assistant integration for the **Kohler Anthem** digital shower valve and the
-**Anthem Plus** controller. Unofficial, not affiliated with or endorsed by Kohler.
+Home Assistant integration for **Kohler Digital Anthem** and **Anthem+** shower systems —
+either one, through the Kohler Konnect cloud. Unofficial, not affiliated with or endorsed
+by Kohler.
 
 > ⚠️ **Placeholder README.** Structure and presentation still to be done.
 
@@ -16,9 +17,12 @@ MQTT stream and updates when the device reports a change (`iot_class: cloud_push
 
 ## Who it's for
 
-Owners of a Kohler Anthem valve, an Anthem Plus controller, or both, who want them in Home
-Assistant. It is aimed at people comfortable with a custom integration and an undocumented
-cloud API — not a supported product.
+Owners of a Kohler Digital Anthem or Anthem+ system who want it in Home Assistant. Aimed at
+people comfortable with a custom integration and an undocumented cloud API — not a supported
+product.
+
+⚠️ **Digital Anthem, not the mechanical Anthem.** Kohler sells both under the Anthem name;
+only the digital, network-connected one has an API to talk to.
 
 ## Requirements
 

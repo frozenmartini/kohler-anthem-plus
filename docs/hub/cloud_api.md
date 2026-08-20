@@ -53,7 +53,7 @@ curl -s -X POST \
 > The refresh token **rotates** on every refresh — save the new one each time.
 > B2C refresh tokens last up to ~90 days; when it finally expires you must re-run the
 > interactive sign-in. The helper `kohler_hub_music.py authurl|exchange` performs the
-> one-time browser flow and stores tokens in `D:\kohler-work\state\token.json`.
+> one-time browser flow and caches the tokens locally.
 
 ### 1.2 IDs you need
 
