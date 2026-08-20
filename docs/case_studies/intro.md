@@ -129,6 +129,11 @@ flow for the card to *display*, but the only things that can be *pressed* are on
 toggle and a stored favourite. `valveOnOff` takes no parameters: it runs whatever
 `get_valve_settings` holds as the default.
 
+⚠️ **Updated 2026-08-20: `maxshowerduration` is not read-only and its range is not the UI's.**
+It is writable over the local API to **any** value — 3, 5, 75 and 120 minutes were accepted and
+**enforced by the valve** on fw 2.88. Any claim resting on "the dropdown only offers
+15/30/45/60" is unsafe. See [`../hub/local_api.md`](../hub/local_api.md) §3b.
+
 ---
 
 ## 3a. What the case studies established

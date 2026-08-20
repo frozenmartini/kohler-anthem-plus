@@ -23,7 +23,7 @@ own logs; each row names its source. Nothing here is inferred from anything outs
 |---|---|---|
 | setting | `maximumRunTime` | `maxshowerduration` |
 | granularity | **per outlet**, but **timed per zone** | one value for the controller |
-| values seen | 900 / 1800 / 3600 s | dropdown offers only **15 / 30 / 45 / 60 min** |
+| values seen | 900 / 1800 / 3600 s | UI offers 15/30/45/60 min — but ⚠️ **the local API accepts ANY value and the valve enforces it**: 3, 5, 75 and 120 min all written and honoured on fw 2.88 ([`../hub/local_api.md`](../hub/local_api.md) §3b) |
 | how to read it | MQTT `READ_GCS_OUTLET_CONFIG_CFG`, or REST `gcsadvancestate` | local API `GET /web/api/v1/device/get_valve_settings` [[2 §8]](02_hub_commanded_shower_15min.md) |
 | **stop signal** | **`0x40`** — pause flag set in byte 3, mask cleared | **`0x00`** — plain mask clear, no flag |
 | **timing** | **early, always** | **late, always** |
@@ -54,8 +54,12 @@ independent zone cutoffs 136.7 s apart [[6 §4b]](06_two_cutoffs_and_a_predictio
 | 900.557 s | **+0.557 s** | [2](02_hub_commanded_shower_15min.md) |
 | 901.004 s | **+1.004 s** | [3](03_both_ceilings_at_15_minutes.md) |
 | 900.30 · 900.33 · 900.41 · 900.45 · 900.51 · 900.55 · 900.60 · 900.85 · 901.12 · 901.16 · 901.25 s | **+0.30 to +1.25 s** | [7](07_the_controller_sweeps.md) |
+| 300.78 · 300.57 s (5-min setting) | +0.78 / +0.57 s | 2026-08-19 evening |
+| 180.46 · 180.64 s (3-min setting) | +0.46 / +0.64 s | 2026-08-19 evening |
 
-→ **+0.30 to +1.25 s, never early.** A fourteenth, at **900.792 s**, is derived rather than
+→ **+0.30 to +1.25 s, never early — and the signature holds at every setting.** Because
+`maxshowerduration` is stored in **minutes**, a controller cutoff always lands on a minute
+boundary overshot by a fraction of a second, whatever the value. A fourteenth, at **900.792 s**, is derived rather than
 observed directly — case study 5's `00/00` [[7 §7a]](07_the_controller_sweeps.md).
 
 **Consequence: with both durations set to the same value, the valve always fires first**, by
@@ -134,6 +138,16 @@ zones independently and pushes after updating only one
 
 Three times in the corpus it published `status: OFF` while water was running
 [[4 §8]](04_two_touchscreens_and_what_off_means.md).
+
+### B4a. 🚨 The API accepts unsafe values with no validation
+
+The controller's Max Shower Duration is **writable over the LAN to any value** — 3, 5, 75 and
+120 minutes were all accepted with `200 {"status":"true"}`, read back verbatim, and **physically
+enforced by the valve**. Measured: a 3-minute setting cut both zones at 180.46 s and 180.64 s.
+
+No clamping, no validation, no error, on an endpoint that shares its record with `maxtemp` —
+the **scald limit**. A whole-record replace that drops a field is a silent edit.
+[`../hub/local_api.md`](../hub/local_api.md) §3b.
 
 ### B4. Mismatched durations fail silently
 

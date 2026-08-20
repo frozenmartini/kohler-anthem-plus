@@ -388,8 +388,46 @@ condition directly rather than by simulation:
 > Cut → the disarm needs zone 2 to actually be swept, as §5a says and case study 5 implies.
 > Not cut → the disarm happens on expiry regardless, and case study 5 needs another explanation.
 
+## 11b. ⚠️ CONTRADICTED — 2026-08-19 evening, zone 1's timer survived a zone-2 sweep
+
+Three showers later the same evening, with `maxshowerduration` written to short values over the
+local API ([`../hub/local_api.md`](../hub/local_api.md) §3b), produced a case §5's rule does not
+predict.
+
+**Shower at 20:15:17, controller set to 3 min, Endless Shower OFF, GCS at 900 s:**
+
+```text
+20:15:17.262  zone 2 opens
+20:16:22.057  zone 1 opens          (zone 2 already running, 64.8 s in)
+20:18:17.723  zone 2 CUT at 180.46 s  (+0.46 s)   ← a zone-2 sweep, which by §5a
+                                                    should have disarmed zone 1
+20:19:22.695  zone 1 CUT at 180.64 s  (+0.64 s)   ← but zone 1's timer fired on schedule
+```
+
+Zone 1 was at 115.7 s when zone 2's sweep ran — correctly **spared**, as the sweep model says.
+But its timer was **not** disarmed: it fired 65 s later on its own anchor, +0.64 s late, exactly
+like a healthy controller cutoff.
+
+**§5's disarm rule predicts zone 1 runs on unwatched here. It did not.**
+
+Also from the same evening, a second thing §5 does not model: in the 19:53 shower, zone 1 was
+turned off **by hand** at 46.3 s and reopened after a **64.4 s** gap, and its cutoff came at
+**300.57 s measured from its FIRST start** — the gap did not re-anchor its controller clock.
+The 2026-08-19 afternoon experiment had shown re-anchoring at **18.0 s** and **15.3 s**.
+Those two observations cannot both be explained by a single gap threshold.
+
+⚠️ **Not resolved here, and deliberately not patched.** The disarm is well evidenced across
+five sessions (§5b: 14 hits, 0 false alarms, and removing it produces exactly the three
+overruns). This is one session against it. Whether the difference is the duration (180 s vs
+900 s), the Endless Shower switch being off, or something else is unknown. **Case study 6
+exists because this project has twice turned an n≈5 pattern into a confident rule.** Recorded
+as a contradiction, not folded into the model.
+
 ## 12. Open
 
+0. ⭐ **§11b's contradiction.** A zone-2 sweep did not disarm zone 1 on 2026-08-19 evening,
+   and a 64.4 s hand-off gap did not re-anchor a controller clock that an 18.0 s gap did.
+   Highest-value open item — it bears directly on §5.
 1. **What else arms a timer.** Flow starts do; a **setpoint change** apparently does too — the
    14:58:15.743 sweep traces back 900.32 s to the owner's touchscreen temperature change at
    14:43:15.423, with no zone starting then. `sweep_sim.py` does not model this, and it is the

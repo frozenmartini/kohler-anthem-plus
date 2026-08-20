@@ -273,6 +273,92 @@ activity.
 
 ---
 
+## 3b. 🚨 `maxshowerduration` is WRITABLE — and the valve enforces whatever you write
+
+**Established 2026-08-19 against firmware 2.88, live, by a decompile-and-probe session.
+Confirmed on hardware the same evening by three showers in this project's own captures.**
+
+```
+POST /web/api/v1/device/req_update_command
+{"req_command": "update_valve_settings", "data": { ...the WHOLE record... }}
+→ 200 {"status":"true"}
+```
+
+**The vendor UI offers 15 / 30 / 45 / 60 minutes. The API accepts anything.** Five writes,
+every one accepted with `200 {"status":"true"}` and read back verbatim:
+
+| sent | before | after | vs the UI's range |
+|---|---|---|---|
+| 75 | `"15"` | `"75"` | 25 % above the maximum |
+| 5 | `"75"` | `"5"` | one third of the minimum |
+| 120 | `"5"` | `"120"` | double the maximum — 7200 s |
+| 3 | `"120"` | `"3"` | one fifth of the minimum |
+| 120 | `"3"` | `"120"` | restored |
+
+No clamping, no validation, no error. In every case `maxshowerduration` was the only field
+that changed between the before and after records.
+
+### ⚠️ The valve physically enforces it — measured
+
+This is not a config store that the valve ignores. Three showers on 2026-08-19 evening, from
+this project's own captures:
+
+| setting | zone | measured | offset |
+|---|---|---|---|
+| **5 min** (300 s) | 2 | **300.78 s** | +0.78 s |
+| **5 min** (300 s) | 1 | **300.57 s** | +0.57 s |
+| **3 min** (180 s) | 2 | **180.46 s** | +0.46 s |
+| **3 min** (180 s) | 1 | **180.64 s** | +0.64 s |
+
+Same late-by-a-fraction-of-a-second signature as every controller cutoff measured at 900 s
+(+0.30 to +1.25 s). **The write reaches the valve and the valve acts on it**, on the wall panel
+and every other surface, with no warning to whoever is standing in the water.
+
+> **A three-minute shower is a setting this API will accept without comment.** Treat a low
+> value as a safety-relevant write, not a preference.
+
+### Writing it safely
+
+* **WHOLE-RECORD REPLACE.** An omitted field is a silent edit. Read `get_valve_settings`
+  first, change one key, send everything back. Scalars read back as **strings** and the web UI
+  POSTs them as **numbers**; both are accepted.
+* ⚠️ **The same record carries `maxtemp` — the SCALD LIMIT** (113 °F on this install).
+  **Assert it is unchanged after every write.** This is the same rule
+  `kohler-work/write_outlet_runtime.py` already follows for the cloud path, and for the same
+  reason.
+* **Idle gate.** The web UI calls `get_hub_running_state` before every POST and silently
+  aborts if `running` is true. Mirror that. **Do not write mid-shower.**
+* **200 means ACCEPTED, not applied.** The response is only `{"status":"true"}` — no echo, no
+  error code. Always verify with a read-back.
+* **No valve-side read-back exists locally.** `get_valve_settings` reflects the hub's store.
+  `gcs_system_profile`, `get_valvecard_info` and `get_flowrate_calibration_details` were all
+  checked and none carries a runtime key. A valve-side echo needs the cloud `gcsadvancestate`
+  or MQTT `READ_GCS_OUTLET_CONFIG_CFG` — **both in seconds**, where this is in **minutes**.
+* **Sibling commands share the identical data block**: `valve_settings_calibration` (same
+  payload, but also starts flow calibration) and `valve_config_init` /
+  `valve_config_completed` (the setup wizard). Use `update_valve_settings`.
+
+### ⚠️ The Kohler phone app will clobber it
+
+The app's picker only reaches 15–30 min, and its snapping helper collapses any value ≥ 30 that
+is not exactly 30 down to **25 min**. One Save from the phone writes 1500 s over whatever you
+set. **Anything above 30 minutes is fragile by design.**
+
+### Not established
+
+* Where the firmware actually clamps. 3 and 120 are the tested extremes; neither bound is known.
+* Long values are accepted and presumed honoured by the same mechanism, but **120 min has never
+  been timed out in practice**.
+* Whether the value propagates per-outlet or valve-wide is not visible from the local API.
+* The config drift observed between the first and second probe writes (`warmupmode` off→on,
+  both zones' `defaultOutlets` swapped) was **not caused by those writes** and its source was
+  not identified. Always build the body from a fresh read.
+
+**Provenance:** endpoint and payload shape reverse-engineered from the hub's Angular bundle
+pulled from the hub itself; every read, write and read-back executed live on 2026-08-19 against
+firmware 2.88. Enforcement is owner-observed and corroborated by the captures above.
+
+
 ## 4. WATER / VALVE — setup & self-test only (NOT control)
 
 > **This section does not control the shower.** (See the Scope callout up top.)

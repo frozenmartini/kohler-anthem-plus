@@ -230,39 +230,52 @@ CUTOFF_TOLERANCE_SECONDS = 2.0
 # ---------------------------------------------------------------------------
 # DIAGNOSIS ONLY — naming the Anthem Plus controller's ceiling in the log
 # ---------------------------------------------------------------------------
-# ⚠️ These two values are used **exclusively to write a clearer WARNING**. They are never a
-# source of limits to fire on, and they cannot become one: they are read only inside the
-# branch that has already decided no announced limit matched, and that branch always declines.
-# `test_no_limit_guessing.py` asserts the property directly.
+# ⚠️ Used **exclusively to write a clearer WARNING**. Never a source of limits to fire on, and
+# it cannot become one: it is read only inside the branch that has already decided no announced
+# limit matched, and that branch always declines. `test_no_limit_guessing.py` and
+# `test_controller_limit_hint.py` assert the property from both sides.
 #
 # Why this is not the removed `MissedCutoffWatcher` in disguise: that inferred a *valve* limit
-# from repeated durations and offered to promote it into the firing set. This infers nothing.
-# The Anthem Plus controller's Max Shower Duration dropdown offers exactly four values and no
-# others (`docs/hub/local_api.md`, read live from `get_valve_settings`), so a stop landing on
-# one of them is not a guess about unknown hardware — it is the only ceiling the other product
-# on the account is capable of having.
-CONTROLLER_DURATION_CHOICES = (900, 1800, 2700, 3600)
-
-# The controller fires **late, never early** — 13 measurements spanning +0.30 to +1.25 s across
-# case studies 2, 3 and 7, with not one early. The valve fires **early**, -0.08 to -0.23 s. So
-# a late-only window separates the controller's ceiling from a hand on a touchscreen far better
-# than a symmetric one, and it cannot collide with the valve's own signature.
+# from repeated durations and offered to promote it into the firing set. This holds no state,
+# looks at one duration, and promotes nothing.
 #
-# Measured against the clean corpus: 12 of 12 stops inside this window are genuine controller
-# cutoffs, and no manual stop has ever landed in it.
+# **The rule: a whole number of MINUTES, overshot by a fraction of a second.**
+#
+# `maxshowerduration` is stored in **minutes** (`docs/hub/local_api.md` §3a), so the
+# controller's ceiling always lands on a minute boundary whatever it is set to. And the
+# controller always fires **late, never early** — every measurement, across every setting:
+#
+#     900 s setting   +0.30 .. +1.25 s   thirteen cutoffs, case studies 2, 3, 7
+#     300 s setting   +0.57, +0.78 s     2026-08-19
+#     180 s setting   +0.46, +0.64 s     2026-08-19
+#
+# The valve, by contrast, fires **early** (-0.08 to -0.23 s), so a late-only window separates
+# the two devices cleanly. It also excludes the 1800 s preset timer, which fires early at
+# 1799.9 s.
+#
+# ⚠️ **Superseded 2026-08-20: the four-value dropdown is NOT the candidate set.** This started
+# life as a fixed `(900, 1800, 2700, 3600)` because the vendor UI only offers 15/30/45/60 min.
+# The local API accepts **anything** — 3, 5, 75 and 120 minutes were all written and enforced
+# on firmware 2.88 (`docs/hub/local_api.md` §3b) — so enumerating the UI's values would miss
+# every custom setting, including the 3- and 5-minute cutoffs measured above.
+#
+# Measured against the clean corpus: **15 of 15** journalled controller cutoffs match, with
+# **one** false positive in 62 stops (a 420.86 s stop, 0.86 s past 7 minutes). A false positive
+# costs a log line and nothing else.
 CONTROLLER_LATE_WINDOW = (0.2, 2.0)
 
 
 def suspected_controller_limit(duration: float) -> int | None:
-    """The controller Max Shower Duration a `0x00` stop looks like, or None.
+    """The controller Max Shower Duration this `0x00` stop looks like, in seconds, or None.
 
-    Diagnosis only — see `CONTROLLER_DURATION_CHOICES`. Nothing acts on the result.
+    Diagnosis only — see the note above. Nothing acts on the result.
     """
+    minutes = round(duration / 60)
+    if minutes < 1:
+        return None
     early, late = CONTROLLER_LATE_WINDOW
-    for choice in CONTROLLER_DURATION_CHOICES:
-        if early <= duration - choice <= late:
-            return choice
-    return None
+    limit = minutes * 60
+    return limit if early <= duration - limit <= late else None
 
 
 # A close is ignored if the integration itself **closed that zone** within this window.
