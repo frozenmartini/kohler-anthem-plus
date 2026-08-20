@@ -47,7 +47,7 @@ see [What would actually settle it](#what-would-actually-settle-it).
 
 **⚠️ The Zigbee radio had switched itself off.** At the start of this session
 `get_zigbee_status → {"status":"false"}` and `get_hub_settings.zigbeeEnabled → false`,
-even though [`../handoff/2026-08-10_hub_local.md`](../handoff/2026-08-10_hub_local.md) §2
+even though `../handoff/2026-08-10_hub_local.md` (`docs/handoff/2026-08-10_hub_local.md`, local only) §2
 recorded it as enabled on 2026-08-10. Something turned it back off in between — plausibly
 the controller reboots documented in
 [`../gcs/valve_reboot_fault.md`](../gcs/valve_reboot_fault.md), which were frequent in that

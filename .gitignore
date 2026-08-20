@@ -17,3 +17,13 @@ __pycache__/
 *token*
 *credential*
 *secret*
+
+# Session handoffs — deliberately NOT published.
+#
+# These are working notes for continuing the project, not documentation anyone else can use,
+# and they carry the owner's email and the hub's LAN address. They live here rather than
+# outside the repo so every doc pointer and every session's habits keep working; they are
+# simply never committed. Purged from history 2026-08-20, before the first push.
+#
+# ⚠️ They are the project's memory. Back them up separately — git is not doing it.
+docs/handoff/

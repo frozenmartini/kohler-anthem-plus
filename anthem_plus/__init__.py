@@ -11,9 +11,10 @@ Covers both products:
 * **Anthem Plus** (SKU ``HUB``) — the Linux system controller that drives the valves and
   integrates music, lighting, and steam. Control is organised around favourites.
 
-Written against the protocol documentation in ``docs/``, which is capture-derived. Where
-the ``kohler-anthem`` library disagrees, see ``docs/gcs/valve_hex.md`` — three of its
-behaviours are confirmed bugs.
+Written against the protocol documentation in ``docs/``, which is capture-derived. The
+``kohler-anthem`` library reads three of these behaviours differently; it was decompiled from
+the same APK but not checked against captures, so where the two disagree see
+``docs/gcs/valve_hex.md``.
 """
 
 from __future__ import annotations

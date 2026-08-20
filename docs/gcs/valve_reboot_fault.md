@@ -47,7 +47,7 @@ owner's current mitigation and the open experiment; leave it running before chan
 > **Every instruction in this document to "read the outage counter" is therefore
 > unfollowable.** To confirm a clean run now, use the raw MQTT capture (the
 > `SYSTEM_READY` signature works retroactively) or `moes_correlation.py`. Rationale:
-> [`../handoff/2026-08-15_session7_current.md`](../handoff/2026-08-15_session7_current.md) §0.
+> `../handoff/2026-08-15_session7_current.md` (`docs/handoff/2026-08-15_session7_current.md`, local only) §0.
 >
 > Everything below is retained as the evidence record — it is what the counters showed while
 > they ran, and the conclusion it supports still stands.
@@ -185,7 +185,7 @@ its `time` is **1800 — 30 minutes**, the valve's own default, which the owner 
 all six outlets within **5–11 seconds of every reboot**, so a run-time limit set on the panel
 can silently revert after any reboot — a direct interaction between this fault and the "keep
 shower on" feature. Detail in
-[`../handoff/2026-08-14_session6_current.md`](../handoff/2026-08-14_session6_current.md).
+`../handoff/2026-08-14_session6_current.md` (`docs/handoff/2026-08-14_session6_current.md`, local only).
 
 No error is ever reported. `errorCode: null`, `errorstate: 0`, `currentSystemState:
 normalOperation` throughout, and the HUB reports `SYSTEM_READY`.

@@ -45,7 +45,7 @@ Temperatures below are the wire value: `0x184` (388) = 101.8 °F is the configur
 99.9 °F from the touchscreen. Flow was `0xC8` (200) = 100 % throughout, against a `0xC8` (200)
 ceiling on every outlet.
 
-**This is the mismatched configuration [session 10](../handoff/2026-08-18_session10_current.md)
+**This is the mismatched configuration session 10 (`docs/handoff/2026-08-18_session10_current.md`, local only)
 §1a warns against for normal use.** That is the point: it makes the controller the sole
 authority, so every cut observed here is unambiguously its own.
 
@@ -355,7 +355,7 @@ what stops the shower, and was observed working at 00:54 on 2026-08-20.
 
 ## 9. ❌ Falsified here: message ordering says nothing about authorship
 
-[Session 11](../handoff/2026-08-19_session11_current.md) floated that a HUB status message
+Session 11 (`docs/handoff/2026-08-19_session11_current.md`, local only) floated that a HUB status message
 *preceding* the GCS one might mark a controller-initiated stop, on a 0.037 s inversion.
 
 **Dead.** All eight stops here are unambiguously controller-authored — its own timer, the valve

@@ -747,6 +747,12 @@ Both of these came from the Konnect 3.0.1 decompile and were carried in the olde
 `GCS_NOTES.md`. Both are **wrong**; they are recorded here so the same guesses are not
 re-derived from the app source later.
 
+> **On the corrections in this section.** These readings came from the *same* Konnect 3.0.1
+> APK this project decompiled — the difference is not a newer source, it is that they were
+> checked against live MQTT captures. A decompile shows what the app believes; a capture shows
+> what the wire does. Where the two disagree the wire wins, and that is the only reason these
+> were catchable at all.
+
 ### Temperature: `°C = 15 + byte × 0.146`
 
 Superseded by `°C = 25.6 + byte / 10`. The old formula **fails its own worked examples**:

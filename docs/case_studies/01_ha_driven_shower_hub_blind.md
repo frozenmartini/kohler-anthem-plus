@@ -45,7 +45,7 @@ question that had no data behind it since 2026-08-17.
 | Flow ceiling | `maximumFlowRate`, all outlets | `0xC8` (200) — so 100% is the true full scale |
 
 **Both maximums were deliberately set to the same 60 minutes.** That was the mitigation
-adopted after [session 9](../handoff/2026-08-17_session9_current.md) §1, where a GCS limit of
+adopted after session 9 (`docs/handoff/2026-08-17_session9_current.md`, local only) §1, where a GCS limit of
 900 s underneath a HUB limit of 3600 s let the controller's longer clock expire mid-leg and
 stop a shower still in use. This session is the first run with them matched.
 
@@ -301,7 +301,7 @@ its own ceiling — which can only mean the condition was never met.
 
 ### ✅ Started by `solowritesystem`, the HUB does not count
 
-[Session 9](../handoff/2026-08-17_session9_current.md) §1 left this explicitly open — three
+Session 9 (`docs/handoff/2026-08-17_session9_current.md`, local only) §1 left this explicitly open — three
 ways to start water, and the countdown was **confirmed** only for a HUB-commanded start:
 
 | started by | does the HUB command it? | HUB countdown |
