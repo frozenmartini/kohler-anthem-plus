@@ -17,9 +17,12 @@ Three things this has to get right:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 import uuid
+from collections import deque
+from datetime import datetime, timezone
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -50,10 +53,15 @@ from .anthem_plus import (
     KohlerClient,
     KohlerError,
     CutoffDebugLog,
+    WARMUP_README,
     RawMqttLog,
     ZoneCutoff,
     ZoneCutoffDetector,
     ZoneReading,
+    MSG_GCS_SOLO_STATUS,
+    WARMUP_DISABLED,
+    WARMUP_MODES_CURRENT,
+    should_restore_warmup,
     get_valve_model,
     model_for_topology,
     unit_to_celsius,
@@ -80,6 +88,11 @@ from .const import (
     CONF_VALVE_MODEL,
     CONF_ZONE_OUTLETS,
     CUTOFF_DEBUG_LOG_KEEP_FILES,
+    ENABLE_WARMUP_DEBUG_LOG,
+    WARMUP_CONTEXT_AFTER_SECONDS,
+    WARMUP_CONTEXT_BEFORE_SECONDS,
+    WARMUP_CONTEXT_MAX_MESSAGES,
+    WARMUP_DEBUG_LOG_KEEP_FILES,
     DEFAULT_FLOW_PERCENT,
     DEFAULT_PRESET_ID,
     DEFAULT_PRESET_TIMER_SECONDS,
@@ -94,6 +107,15 @@ from .const import (
     ENDLESS_SHOWER_NOT_SET_UP,
     ENDLESS_SHOWER_NOTHING_TO_RESTORE,
     ENDLESS_SHOWER_ON,
+    CONF_LAST_WARMUP_MODE,
+    CONF_WARMUP_AUTO_RESTORE,
+    WARMUP_AUTO_RESTORE_DELAY_SECONDS,
+    WARMUP_AUTO_RESTORE_GIVING_UP,
+    WARMUP_AUTO_RESTORE_MAX_CONSECUTIVE,
+    WARMUP_AUTO_RESTORE_NO_TARGET,
+    WARMUP_AUTO_RESTORE_SETTLED_SECONDS,
+    WARMUP_READBACK_DELAYS,
+    WARMUP_SELF_WRITE_GRACE_SECONDS,
     ENDLESS_SHOWER_RESTARTED,
     ISSUE_NOT_SET_UP,
     RELOAD_IGNORED_OPTION_KEYS,
@@ -263,6 +285,15 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.gcs: GcsDevice | None = None
         self.hub: HubDevice | None = None
         self.gcs_state: GcsState | None = None
+        # Warmup auto-restore bookkeeping. `_warmup_self_write_*` is the same idea as
+        # `ZoneCutoffDetector.note_local_write`: a change we caused must not be treated
+        # as the device misbehaving, or turning warmup off from the dropdown would be
+        # undone a minute later.
+        self._warmup_self_write_at: float | None = None
+        self._warmup_self_write_mode: str | None = None
+        self._warmup_restore_task: asyncio.Task | None = None
+        self._warmup_restores = 0
+        self._warmup_restored_at: float | None = None
         self.hub_state: HubState | None = None
         self.hub_capabilities = HubCapabilities()
         self.favorites: list[dict[str, Any]] = []
@@ -270,6 +301,10 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.raw_log: RawMqttLog | None = None
         # CUTOFF DEBUG LOG: built in `async_setup`, once `hass.config.path` is usable.
         self.cutoff_log: CutoffDebugLog | None = None
+        self.warmup_log: CutoffDebugLog | None = None
+        # Rolling record of recent messages, so a warmup disable can be journalled
+        # with what surrounded it. Bounded by count and trimmed by age on read.
+        self._recent_messages: deque = deque(maxlen=WARMUP_CONTEXT_MAX_MESSAGES)
         # Tracks how long each zone has been flowing, so a valve-timer close can be told from
         # a real stop. Always fed, even with the option off — the cost is a dict update per
         # message, and it means enabling the option takes effect immediately rather than from
@@ -366,6 +401,25 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         self._cutoff.journal = self.cutoff_log
         await self.hass.async_add_executor_job(self.cutoff_log.prepare)
+
+        # WARMUP JOURNAL: a second journal in the same directory, on the same clock, for a
+        # different open question — see `WARMUP_README`. Separate from the cutoff log because
+        # the two are read for different reasons and `pause_resolution.py` and friends glob
+        # `cutoff_*.jsonl`; mixing warmup records into that corpus would silently change what
+        # those tools count.
+        self.warmup_log = CutoffDebugLog(
+            self.hass.config.path(RAW_MQTT_LOG_DIR),
+            forced=ENABLE_WARMUP_DEBUG_LOG,
+            keep_files=WARMUP_DEBUG_LOG_KEEP_FILES,
+            prefix="warmup",
+            readme=WARMUP_README,
+            readme_fields={
+                "before": int(WARMUP_CONTEXT_BEFORE_SECONDS),
+                "after": int(WARMUP_CONTEXT_AFTER_SECONDS),
+            },
+            label="Warmup journal",
+        )
+        await self.hass.async_add_executor_job(self.warmup_log.prepare)
 
         self.stream = AnthemMqttStream(
             self.client,
@@ -560,6 +614,8 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # ride on, so it is released here. Blocking close — off the loop.
         if self.cutoff_log is not None:
             await self.hass.async_add_executor_job(self.cutoff_log.close)
+        if self.warmup_log is not None:
+            await self.hass.async_add_executor_job(self.warmup_log.close)
 
     # ------------------------------------------------------------------ #
     # Push
@@ -572,7 +628,10 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             and self.gcs_device is not None
             and envelope.device_id == self.gcs_device.device_id
         ):
+            was_warmup = self.gcs_state.warmup_mode
             changed |= self.gcs_state.apply_envelope(envelope)
+            self._remember_message(envelope)
+            self._handle_warmup_mode_change(was_warmup, self.gcs_state.warmup_mode)
             self._remember_open_masks()
             self._check_runtime_cutoff()
         if (
@@ -581,6 +640,7 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             and envelope.device_id == self.hub_device.device_id
         ):
             changed |= self.hub_state.apply_envelope(envelope)
+            self._remember_message(envelope)
             if self.hub_state.favorites:
                 self.favorites = self.hub_state.favorites
         if changed:
@@ -1357,6 +1417,379 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         setpoint while clearing its outlets.
         """
         await self.async_apply_valve(zone_masks={1: 0, 2: 0})
+
+    async def async_set_warmup(self, mode: str) -> None:
+        """Set the valve's warmup mode. **This does not run water now.**
+
+        Warmup is a stored mode, not an action: an enabled mode means the valve warms up by
+        itself at the start of a session. The setting persists — it survives a power cycle,
+        and the valve re-announces it about 4 s after every boot.
+
+        ``mode`` must be one of ``WARMUP_MODES_CURRENT`` — the three the current Konnect app
+        offers. The two legacy delayed-start values are rejected here rather than passed
+        through: the valve may still be *holding* one, and `select.py` shows it when it is,
+        but nothing knows what their delay does and writing one would be guessing.
+
+        ⚠️ **Refused while water is running.** The Konnect app checks whether any outlet on
+        either valve is on and silently reverts its own control rather than calling the API;
+        this mirrors that check, but says so instead of reverting. Whether the *device*
+        enforces it is untested — the guard is client-side in the app, so a write during a
+        shower might land, might be ignored, and there is no way to tell which from the
+        response. Raising keeps us on the app's side of a question nobody has answered.
+        """
+        if self.gcs is None:
+            raise HomeAssistantError("No Anthem valve on this account")
+        if mode not in WARMUP_MODES_CURRENT:
+            raise HomeAssistantError(
+                f"{mode!r} is not a warmup mode this integration writes. Expected one of: "
+                + ", ".join(WARMUP_MODES_CURRENT)
+            )
+        state = self.gcs_state
+        if state is not None and state.is_running:
+            raise HomeAssistantError(
+                "Warmup cannot be changed while the shower is running. The Konnect app "
+                "blocks this too. Turn the water off and try again."
+            )
+        # Recorded before the call, not after: the valve's echo can arrive while the POST
+        # is still in flight, and a disable we caused must be recognisable by then.
+        self._warmup_self_write_at = time.monotonic()
+        self._warmup_self_write_mode = mode
+        try:
+            await self.gcs.async_set_warmup(mode)
+        except DeviceOffline as err:
+            raise HomeAssistantError(
+                "The Anthem valve is offline. Check that it is powered on and connected "
+                "to Wi-Fi, then try again."
+            ) from err
+        except KohlerError as err:
+            raise HomeAssistantError(f"Kohler command failed: {err}") from err
+
+        # Read the field back rather than trusting the write. A 200 here means the *cloud*
+        # accepted the command; the valve can still ignore it, and does when warmup is
+        # disabled on the fixture itself. `warmUpState.warmUp` is the device's own answer.
+        #
+        # ⚠️ **The first read is too early and will disagree.** Measured live 2026-08-20:
+        # `gcs-state` still returned the OLD mode immediately after a successful POST and
+        # only caught up by t+3 s, while the valve's own `GCS_WARM_STS` echo landed at
+        # +3.42 s. So a single immediate read-back reports a false mismatch on every write.
+        # Hence the retries: disagreement only means something after the device has had a
+        # few seconds to answer.
+        confirmed = None
+        for delay in WARMUP_READBACK_DELAYS:
+            if delay:
+                await asyncio.sleep(delay)
+            confirmed = await self.async_read_warmup_mode()
+            if confirmed == mode:
+                self._remember_warmup_mode(mode)
+                _LOGGER.info("Warmup mode set to %s and confirmed by the valve", mode)
+                return
+        if confirmed is None:
+            _LOGGER.info(
+                "Warmup mode %s sent to the Anthem valve; the read-back did not answer, so "
+                "the stored mode is whatever the valve reports next over MQTT",
+                mode,
+            )
+        else:
+            # Past the settle window, so this is a real disagreement rather than lag. The
+            # known cause is warmup being disabled on the fixture itself, where the cloud
+            # accepts the command and the valve ignores it.
+            _LOGGER.warning(
+                "Warmup mode was set to %s but the valve still reports %s after %.0f s. The "
+                "cloud accepted the command and the valve did not apply it — the usual cause "
+                "is warmup being disabled on the fixture. Nothing has been retried.",
+                mode,
+                confirmed,
+                sum(WARMUP_READBACK_DELAYS),
+            )
+
+    async def async_read_warmup_mode(self) -> str | None:
+        """Read the warmup mode from the REST API and apply it, returning what it said.
+
+        The source is `gcs-state`'s `warmUpState.warmUp` — the same field the Konnect app
+        reads, and the same read that seeds this at setup and on every MQTT reconnect. It
+        carries the mode axis; `warmUpState.state` beside it carries whether a warm-up is
+        running, and `apply_rest_state` takes both.
+
+        ⚠️ **REST reads here are partly cached** — `amplifierSettings.monoVolume` famously
+        did not follow a live change (`docs/architecture.md`). So this is authoritative about
+        what Kohler's cloud believes, which is not always what the valve did a second ago.
+        The device's own push, `GCS_WARM_STS`, remains the final word and arrives by itself.
+
+        Returns `None` if the read failed or carried no warmup field — never a guess, since
+        "Off" and "we could not tell" are different answers and only one of them is safe to
+        show on a control.
+        """
+        if self.gcs_device is None or self.gcs_state is None:
+            return None
+        try:
+            payload = await self.client.async_request(
+                "GET", GCS_STATE_PATH.format(device_id=self.gcs_device.device_id)
+            )
+        except KohlerError as err:
+            _LOGGER.debug("Could not read warmup mode: %s", err)
+            return None
+        self.gcs_state.apply_rest_state(payload)
+        # Same notification path as an MQTT update, so the dropdown lands on the confirmed
+        # value and drops its optimistic guess exactly as it would on a device push.
+        self.async_set_updated_data(self._snapshot())
+        return self.gcs_state.warmup_mode
+
+    # ------------------------------------------------------------------ #
+    # Warmup auto-restore
+    # ------------------------------------------------------------------ #
+    @property
+    def warmup_auto_restore(self) -> bool:
+        """Whether to put the warmup mode back after something else disables it.
+
+        Read live from the entry options, like `restart_on_runtime_cutoff`, so the switch
+        takes effect immediately. Off unless explicitly enabled.
+        """
+        return bool(self.entry.options.get(CONF_WARMUP_AUTO_RESTORE, False))
+
+    @property
+    def last_warmup_mode(self) -> str | None:
+        """The last *enabled* warmup mode seen on the valve, or None if we have never seen one.
+
+        Persisted in the entry options so a restore after a Home Assistant restart reinstates
+        the mode the fixture actually had. `None` is a real answer and is treated as one: with
+        no prior, auto-restore does nothing rather than picking a default, because "all
+        outlets" and "selected outlets" are different fixtures' worth of water.
+        """
+        stored = self.entry.options.get(CONF_LAST_WARMUP_MODE)
+        return stored if stored in WARMUP_MODES_CURRENT else None
+
+    @callback
+    def _remember_message(self, envelope: Envelope) -> None:
+        """Keep a light record of every message, for the warmup journal's context windows.
+
+        Deliberately small: a code, a sku, a timestamp, and — only for the valve's own status
+        message — the four fields that tell a configuration write apart from an ordinary
+        status. The raw capture beside this holds every payload in full; duplicating it here
+        would make the journal unreadable for the one thing it is for.
+        """
+        record: dict[str, Any] = {
+            # The same stamp shape the journal and the raw capture use, so the three sort
+            # together on one clock.
+            "ts": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "at": time.monotonic(),
+            "sku": envelope.sku,
+            "code": envelope.code,
+        }
+        if envelope.code == MSG_GCS_SOLO_STATUS:
+            attribute = envelope.attribute() or {}
+            for key in (
+                "configChangeIndent",
+                "configWriteAllowedFlag",
+                "currentSystemState",
+                "warmUpStatus",
+            ):
+                if key in attribute:
+                    record[key] = attribute[key]
+        self._recent_messages.append(record)
+
+    def _message_window(self, since: float, until: float | None = None) -> list[dict]:
+        """Messages between two monotonic instants, oldest first, without the clock field."""
+        return [
+            {k: v for k, v in item.items() if k != "at"}
+            for item in self._recent_messages
+            if item["at"] >= since and (until is None or item["at"] <= until)
+        ]
+
+    @callback
+    def _warmup_journal(self, event: str, **fields: Any) -> None:
+        """Append to the warmup journal. Mirrors `_journal`, including the deferred open."""
+        if self.warmup_log is None:
+            return
+        self.warmup_log.note(event, **fields)
+        if self.warmup_log.wants_open:
+            self.hass.async_add_executor_job(self.warmup_log.prepare)
+
+    async def _async_journal_warmup_context(self, at: float) -> None:
+        """Record what arrived *after* a disable.
+
+        Separate from the disable record because the most distinctive marker seen so far —
+        `SYSTEM_STS: SYSTEM_READY` — landed 7 to 9 s afterwards in the two clearest of the
+        four known cases. A record written at the moment of the disable cannot contain it.
+        """
+        await asyncio.sleep(WARMUP_CONTEXT_AFTER_SECONDS)
+        state = self.gcs_state
+        self._warmup_journal(
+            "context",
+            after_window=self._message_window(at),
+            window_seconds=WARMUP_CONTEXT_AFTER_SECONDS,
+            mode_now=None if state is None else state.warmup_mode,
+        )
+
+    @callback
+    def _remember_warmup_mode(self, mode: str) -> None:
+        """Record an enabled mode as what auto-restore should reinstate.
+
+        Called from both directions — the valve announcing a mode over MQTT, and a write of
+        ours confirming — because either alone leaves a gap. MQTT alone means a mode chosen
+        while the stream is down is never remembered; the write alone means a mode set from
+        the Konnect app or the touchscreen is never remembered, and those are most of them.
+
+        Seeing an enabled mode also ends any fight in progress: the counter that stops an
+        endless restore loop is reset here, because the mode staying enabled is exactly the
+        outcome that counter exists to wait for.
+        """
+        if mode == WARMUP_DISABLED:
+            return
+        self._warmup_restores = 0
+        self._warmup_restored_at = None
+        if mode != self.entry.options.get(CONF_LAST_WARMUP_MODE):
+            self.hass.config_entries.async_update_entry(
+                self.entry,
+                options={**self.entry.options, CONF_LAST_WARMUP_MODE: mode},
+            )
+
+    @callback
+    def _handle_warmup_mode_change(self, before: str | None, after: str | None) -> None:
+        """React to the valve announcing a new warmup mode.
+
+        Two jobs: remember any enabled mode as the restore target, and notice a transition
+        *into* disabled that this integration did not cause.
+        """
+        if after is None or after == before:
+            return
+
+        write_age = (
+            None
+            if self._warmup_self_write_at is None
+            else time.monotonic() - self._warmup_self_write_at
+        )
+        ours = (
+            self._warmup_self_write_mode == after
+            and write_age is not None
+            and write_age <= WARMUP_SELF_WRITE_GRACE_SECONDS
+        )
+        # Every announcement is journalled, not only the disables. Establishing what a normal
+        # week looks like is half of recognising the abnormal event.
+        self._warmup_journal("mode", before=before, after=after, ours=ours)
+
+        if after != WARMUP_DISABLED:
+            self._remember_warmup_mode(after)
+            return
+
+        restoring = should_restore_warmup(
+            before,
+            after,
+            enabled=self.warmup_auto_restore,
+            self_write_mode=self._warmup_self_write_mode,
+            self_write_age=write_age,
+            grace_seconds=WARMUP_SELF_WRITE_GRACE_SECONDS,
+        )
+        now = time.monotonic()
+        state = self.gcs_state
+        self._warmup_journal(
+            "disabled",
+            before=before,
+            ours=ours,
+            restoring=restoring,
+            auto_restore=self.warmup_auto_restore,
+            restores_to=self.last_warmup_mode,
+            water_running=None if state is None else state.is_running,
+            before_window=self._message_window(now - WARMUP_CONTEXT_BEFORE_SECONDS, now),
+            window_seconds=WARMUP_CONTEXT_BEFORE_SECONDS,
+        )
+        # The after-window is worth having whether or not we restore — an unrestored disable
+        # is the cleaner observation of the two, since nothing of ours is in the way.
+        self.hass.async_create_task(self._async_journal_warmup_context(now))
+
+        if not restoring:
+            return
+        if self._warmup_restore_task is not None and not self._warmup_restore_task.done():
+            self._warmup_journal("restore_skipped", reason="a restore is already pending")
+            return
+        self._warmup_restore_task = self.hass.async_create_task(
+            self._async_restore_warmup()
+        )
+
+    async def _async_restore_warmup(self) -> None:
+        """Wait out the delay, re-check, and put the mode back.
+
+        Re-checks rather than cancels: during the wait the mode may have been re-enabled by
+        hand, the switch turned off, or the shower started. Every one of those means do
+        nothing, and asking at the end is simpler than keeping a cancellation path correct
+        for each.
+        """
+        target = self.last_warmup_mode
+        if target is None:
+            _LOGGER.warning(WARMUP_AUTO_RESTORE_NO_TARGET)
+            self._warmup_journal(
+                "restore_skipped", reason="no enabled mode has ever been seen"
+            )
+            return
+
+        if (
+            self._warmup_restores >= WARMUP_AUTO_RESTORE_MAX_CONSECUTIVE
+            and self._warmup_restored_at is not None
+            and time.monotonic() - self._warmup_restored_at
+            < WARMUP_AUTO_RESTORE_SETTLED_SECONDS
+        ):
+            self._warmup_journal(
+                "restore_skipped",
+                reason="gave up after %d restores that did not stick"
+                % WARMUP_AUTO_RESTORE_MAX_CONSECUTIVE,
+            )
+            return
+
+        self._warmup_journal(
+            "restore_scheduled",
+            target=target,
+            delay_seconds=WARMUP_AUTO_RESTORE_DELAY_SECONDS,
+        )
+        await asyncio.sleep(WARMUP_AUTO_RESTORE_DELAY_SECONDS)
+
+        if not self.warmup_auto_restore:
+            self._warmup_journal("restore_skipped", reason="switched off during the wait")
+            return
+        state = self.gcs_state
+        if state is None or state.warmup_mode != WARMUP_DISABLED:
+            # Someone got there first. Nothing to do, and saying so beats a silent return
+            # when the owner is watching the log to see whether this feature works.
+            _LOGGER.info(
+                "Warmup was re-enabled before auto-restore ran; leaving it alone"
+            )
+            self._warmup_journal(
+                "restore_skipped",
+                reason="re-enabled during the wait",
+                mode_now=None if state is None else state.warmup_mode,
+            )
+            return
+
+        self._warmup_restores += 1
+        self._warmup_restored_at = time.monotonic()
+        if self._warmup_restores > WARMUP_AUTO_RESTORE_MAX_CONSECUTIVE:
+            _LOGGER.warning(
+                WARMUP_AUTO_RESTORE_GIVING_UP, WARMUP_AUTO_RESTORE_MAX_CONSECUTIVE
+            )
+            self._warmup_journal(
+                "restore_gave_up", attempts=WARMUP_AUTO_RESTORE_MAX_CONSECUTIVE
+            )
+            return
+
+        _LOGGER.warning(
+            "Warmup was disabled by something other than Home Assistant. Setting it back "
+            "to %s (attempt %d).",
+            target,
+            self._warmup_restores,
+        )
+        self._warmup_journal("restore", target=target, attempt=self._warmup_restores)
+        try:
+            await self.async_set_warmup(target)
+        except HomeAssistantError as err:
+            # Not retried. The known refusal is water running, and a shower is exactly when
+            # nobody wants this fighting the valve; the next disable will schedule another.
+            _LOGGER.warning("Warmup auto-restore could not write: %s", err)
+            self._warmup_journal("restore_failed", target=target, error=str(err))
+            return
+        self._warmup_journal(
+            "restore_done",
+            target=target,
+            attempt=self._warmup_restores,
+            mode_now=None if self.gcs_state is None else self.gcs_state.warmup_mode,
+        )
 
     async def async_activate_favorite(self, favorite_id: Any, name: str) -> None:
         """Start a controller favourite. **This runs water.**

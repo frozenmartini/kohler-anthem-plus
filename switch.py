@@ -34,11 +34,15 @@ from homeassistant.helpers.entity import EntityCategory
 
 from .const import (
     CONF_RESTART_ON_RUNTIME_CUTOFF,
+    CONF_WARMUP_AUTO_RESTORE,
     DOMAIN,
     ENDLESS_SHOWER_NOT_SET_UP,
     ENDLESS_SHOWER_MATCH_DURATIONS,
     ENDLESS_SHOWER_ON,
     SHOWER_ON_PRESET_ID,
+    WARMUP_AUTO_RESTORE_DELAY_SECONDS,
+    WARMUP_AUTO_RESTORE_NO_TARGET,
+    WARMUP_AUTO_RESTORE_ON,
 )
 from .coordinator import KohlerAnthemPlusCoordinator, describe_duration
 from .entity import KohlerControllerEntity, KohlerValveEntity
@@ -61,6 +65,7 @@ async def async_setup_entry(
         model = coordinator.model
         entities.append(ShowerSwitch(coordinator))
         entities.append(EndlessShowerSwitch(coordinator))
+        entities.append(WarmupAutoRestoreSwitch(coordinator))
         entities.extend(
             ZoneOutletSwitch(coordinator, zone, outlet)
             for zone in model.zones
@@ -268,6 +273,95 @@ class EndlessShowerSwitch(KohlerValveEntity, SwitchEntity):
             "run_time_limits_seconds": {str(k): v for k, v in sorted(known.items())},
             "awaiting_run_time_limit": self.coordinator.outlets_awaiting_run_time,
         }
+
+
+class WarmupAutoRestoreSwitch(KohlerValveEntity, SwitchEntity):
+    """Put the warmup mode back when something outside Home Assistant turns it off.
+
+    **The problem this exists for.** The valve's warmup mode does not stay where it is put.
+    Four times between 2026-08-13 and 08-18 it reverted to `warmUpDisabled` on its own, each
+    time inside a burst of configuration re-sync traffic, with no command on the MQTT channel
+    and nothing from this integration. Reboots are ruled out — the mode survives those. The
+    writer is unidentified; the leading candidate is the Anthem Plus controller over the RJ
+    wired link, which cannot be observed. See `docs/gcs/api.md` §3e.
+
+    **What this does.** When the valve announces `warmUpDisabled` over MQTT, and this
+    integration did not cause it, wait 60 seconds and set the mode back to the last enabled
+    one seen on the valve. That target is remembered in the entry options, so it survives a
+    restart and reinstates what the fixture actually had — never a default, because "all
+    outlets" and "selected outlets" are different fixtures' worth of water. With no remembered
+    mode it does nothing and says so.
+
+    ⚠️ **This treats a symptom.** It does not find or fix whatever is rewriting the field, and
+    a restore is a write to Kohler's cloud like any other. It is diagnostic and off by default
+    for that reason: turn it on when the reverting is actually bothering you.
+
+    Three things it deliberately will not do:
+
+    * **Undo you.** Choosing `Off` on the Warmup dropdown is a write this integration made,
+      and a disable it caused is recognised and ignored. Otherwise `Off` would be unusable.
+    * **Fight forever.** If the mode is disabled again after each restore, it stops after five
+      consecutive attempts and logs why. A retry loop against something actively rewriting the
+      field is not a fix, it is just traffic.
+    * **Interrupt a shower.** The write is refused while water is running, mirroring the
+      Konnect app. The next disable schedules another attempt.
+
+    State lives in the config entry's options, read live by the coordinator, so a toggle takes
+    effect on the next message rather than needing a restart.
+    """
+
+    _attr_name = "Warmup Auto-Restore"
+    _attr_icon = "mdi:restore-alert"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    # Off unless someone goes looking for it: this is a workaround for a device fault, not a
+    # feature of the shower, and an owner who has never seen the mode revert does not need it.
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: KohlerAnthemPlusCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{self._device_id}_warmup_auto_restore"
+
+    @property
+    def available(self) -> bool:
+        """A setting, not a reading — usable before any valve state has arrived."""
+        return self.coordinator.last_update_success
+
+    @property
+    def is_on(self) -> bool:
+        return self.coordinator.warmup_auto_restore
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """What it would restore to, and how long it waits."""
+        return {
+            "restores_to": self.coordinator.last_warmup_mode,
+            "delay_seconds": WARMUP_AUTO_RESTORE_DELAY_SECONDS,
+        }
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        await self._async_set(True)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        await self._async_set(False)
+
+    async def _async_set(self, value: bool) -> None:
+        entry = self.coordinator.entry
+        self.hass.config_entries.async_update_entry(
+            entry, options={**entry.options, CONF_WARMUP_AUTO_RESTORE: value}
+        )
+        if not value:
+            _LOGGER.info("Warmup Auto-Restore disabled")
+        elif self.coordinator.last_warmup_mode is None:
+            # On but inert, which is indistinguishable from broken unless it says so — the
+            # same failure mode Endless Shower's readiness logging exists to prevent.
+            _LOGGER.warning(WARMUP_AUTO_RESTORE_NO_TARGET)
+        else:
+            _LOGGER.warning(
+                WARMUP_AUTO_RESTORE_ON,
+                self.coordinator.last_warmup_mode,
+                WARMUP_AUTO_RESTORE_DELAY_SECONDS,
+            )
+        self.async_write_ha_state()
 
 
 class ZoneOutletSwitch(KohlerValveEntity, SwitchEntity):

@@ -22,8 +22,6 @@ from .const import (
     GCS_WARMUP,
     GCS_WRITE_PRESET,
     SKU_GCS,
-    WARMUP_ALL_OUTLETS_NOW,
-    WARMUP_DISABLED,
 )
 from .models import DEFAULT_VALVE_MODEL, ValveModel, get_valve_model
 from .valve_hex import (
@@ -422,12 +420,37 @@ class GcsDevice:
     async def async_set_warmup(self, mode: str) -> Any:
         """Set the warmup mode.
 
-        Warmup is a **mode toggle**, not a run-now command — once enabled it runs
-        automatically per the chosen mode. The upstream library omits the ``warmUp`` field
-        entirely, so the device accepts the request and ignores it.
+        Warmup is a **mode toggle**, not a run-now command — there is no separate start and
+        stop. The mode *is* the on/off state, and once enabled the valve runs it by itself.
 
-        The app blocks this while the system is active, so set it when idle.
+        The four fields below are the whole request model
+        (``AnthemWriteWarmUpRequestModel``): there is no duration, no delay, no outlet list
+        and no temperature. Re-confirmed against Konnect Android 3.0.1 on 2026-08-20.
+
+        ⚠️ **``warmUp`` is required, and omitting it fails silently** — Kohler's cloud
+        returns 200 and the device ignores the request. That is the single most common bug in
+        implementations of this call, because the published curl examples show a three-field
+        body; the upstream ``kohler-anthem`` library has it. Hence the guard: a caller that
+        cannot name a mode must not reach the API at all, because the failure it would get
+        back is indistinguishable from success.
+
+        The app blocks this while the system is active, so set it when idle — see
+        ``KohlerAnthemPlusCoordinator.async_set_warmup``, which mirrors that guard.
+
+        ⚠️ **Turning warmup off means writing ``warmUpDisabled`` here.** It is *not* posting
+        ``presetOrExperienceId: 0`` to ``controlpresetorexperience``, which is what
+        ``kohler-anthem``'s ``stop_warmup`` does: that clears a running preset and leaves the
+        warmup mode exactly as it was — a different field on a different endpoint.
+
+        ``mode`` is validated by the caller, not here. ``WARMUP_MODES_CURRENT`` in
+        ``const.py`` holds the three the current app offers; the two legacy delayed-start
+        values are decodable but should not be written. See ``docs/gcs/api.md`` §3.
         """
+        if not mode or not mode.strip():
+            raise ValueError(
+                "warmUp mode is required: an empty mode is accepted by Kohler's cloud with "
+                "HTTP 200 and then ignored by the valve"
+            )
         payload = {
             "deviceId": self.device_id,
             "sku": SKU_GCS,
@@ -436,10 +459,3 @@ class GcsDevice:
         }
         return await self._client.async_request("POST", GCS_WARMUP, json_body=payload)
 
-    async def async_enable_warmup(self) -> Any:
-        """Enable warmup on all outlets with no start delay (what the app's toggle sends)."""
-        return await self.async_set_warmup(WARMUP_ALL_OUTLETS_NOW)
-
-    async def async_disable_warmup(self) -> Any:
-        """Turn warmup off."""
-        return await self.async_set_warmup(WARMUP_DISABLED)

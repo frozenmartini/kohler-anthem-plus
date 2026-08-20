@@ -2,8 +2,8 @@
 
 Two unrelated groups live here:
 
-* **Valve diagnostics** — stream health and whether warmup is enabled. Mostly disabled by
-  default; they matter when something is not behaving, not day to day.
+* **Valve diagnostics** — stream health, and per-zone and at-temperature readings. Mostly
+  disabled by default; they matter when something is not behaving, not day to day.
 * **Controller outlets** — created *only* on accounts with no Anthem Valve. Where a valve
   exists it owns the outlets, as switches.
 
@@ -45,7 +45,6 @@ async def async_setup_entry(
         entities += [
             ValveAtTemperatureSensor(coordinator),
             MqttConnectionSensor(coordinator),
-            ValveWarmupEnabledSensor(coordinator),
             ValvePresetActiveSensor(coordinator),
         ]
         # One per zone the model actually has. A single-zone valve must not get a "Zone 2"
@@ -249,34 +248,6 @@ class ControllerMqttConnectionSensor(
         self._attr_unique_id = f"{self._device_id}_mqtt_connection"
 
 
-class ValveWarmupEnabledSensor(ValveDiagnosticBinarySensor):
-    """Whether warmup is enabled on the fixture itself.
-
-    Worth exposing because of a genuinely confusing failure: with warmup disabled, Kohler's
-    cloud still accepts a warmup command and returns HTTP 200, and the valve then ignores
-    it. Without this, that looks like a broken integration rather than a device setting.
-    """
-
-    _attr_name = "Warmup Enabled"
-    _attr_icon = "mdi:thermometer-check"
-
-    def __init__(self, coordinator: KohlerAnthemPlusCoordinator) -> None:
-        super().__init__(coordinator)
-        self._attr_unique_id = f"{self._device_id}_warmup_enabled"
-
-    @property
-    def is_on(self) -> bool | None:
-        state = self._state
-        return None if state is None else state.warmup_enabled
-
-    @property
-    def extra_state_attributes(self) -> dict[str, object]:
-        state = self._state
-        if state is None or state.warmup_mode is None:
-            return {}
-        return {"warmup_mode": state.warmup_mode}
-
-
 class ValveZoneActiveSensor(KohlerValveEntity, BinarySensorEntity):
     """Whether this zone is actually delivering water.
 
@@ -376,8 +347,7 @@ class ValvePresetActiveSensor(KohlerValveEntity, BinarySensorEntity):
     in the capture corpus carry a preset id of `0`. This is the device's behaviour, not a
     decode problem, and it is reported rather than papered over: guessing "a preset is
     probably running" from a warm-up flag would be inventing state. Pair it with
-    `binary_sensor.anthem_valve_warmup_enabled` and the valve word if the distinction
-    matters. Full evidence in `docs/gcs/api.md`.
+    `select.anthem_valve_warmup` and the valve word if the distinction matters. Full evidence in `docs/gcs/api.md`.
     """
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC

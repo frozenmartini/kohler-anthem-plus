@@ -141,6 +141,27 @@ WARMUP_ALL_OUTLETS = "warmUpAllOutlets"
 WARMUP_SELECTED_OUTLETS_NOW = "warmUpSelectedOutletsWithNoStartDelay"
 WARMUP_SELECTED_OUTLETS = "warmUpSelectedOutlets"
 
+#: The three the **current** Konnect app offers, and the only ones anything should write.
+#: Owner-established 2026-08-20 against the app in their hands. A 2026-08-20 decompile of
+#: Konnect Android 3.0.1 had reported only two — disabled and all-outlets — and called
+#: selected-outlets unverified; this install's own captures settle it, because the valve
+#: held `warmUpSelectedOutletsWithNoStartDelay` three separate times on 2026-08-13 with no
+#: other client in play. **The app moved on; the decompile was of an older build.**
+WARMUP_MODES_CURRENT = (
+    WARMUP_DISABLED,
+    WARMUP_ALL_OUTLETS_NOW,
+    WARMUP_SELECTED_OUTLETS_NOW,
+)
+
+#: The two delayed-start variants, kept because the firmware still parses them and a valve
+#: could be holding one. **Decodable, not writable**: nothing defines what their delay is —
+#: the app has no control that sets one, and "delay" appears nowhere in its string
+#: resources. See `docs/gcs/api.md` §3e.
+WARMUP_MODES_LEGACY = (WARMUP_ALL_OUTLETS, WARMUP_SELECTED_OUTLETS)
+
+#: Every value the firmware recognises.
+WARMUP_MODES = WARMUP_MODES_CURRENT + WARMUP_MODES_LEGACY
+
 # warmUpState carries two independent axes: `warmUp` is the mode above, `state` is whether
 # it is running right now.
 WARMUP_IN_PROGRESS = "warmUpInProgress"

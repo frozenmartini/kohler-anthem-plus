@@ -141,6 +141,79 @@ name set to `info` — no restart needed. This does not survive a restart; set
 ENABLE_CUTOFF_DEBUG_LOG = True in const.py to keep it on."""
 
 
+WARMUP_README = """\
+Kohler Anthem Plus — warmup journal
+==================================
+
+These `warmup_*.jsonl` files exist to answer one open question: **what keeps setting the
+Anthem valve's warmup mode back to `warmUpDisabled`?**
+
+It happened four times between 2026-08-13 and 2026-08-18. Ruled out already: valve reboots
+(the mode survives them, and the valve merely restates it ~4 s after every boot), Home
+Assistant (this integration made no such write), and a cloud command (no `GCS_RECIEVED_STS`
+landed within 447 s of any of them). What every one of them *did* sit inside was a burst of
+configuration re-sync traffic. The leading suspect is the Anthem Plus controller writing over
+the RJ wired link, which cannot be sniffed — so the only evidence available is what happens
+either side on the channels that can be seen. That is what these records hold.
+
+{keep_desc}
+
+Records
+-------
+  mode              a warmup mode announcement. `before` -> `after`, and `source`.
+  disabled          the mode went to `warmUpDisabled`. Carries `ours` (did we write it),
+                    `restoring` (is auto-restore acting), and `before_window`: every MQTT
+                    message seen in the {before}s leading up to it.
+  context           written {after}s later, holding `after_window` — the messages that
+                    followed. `SYSTEM_STS: SYSTEM_READY` appearing here is the signature seen
+                    7-9 s after two of the four known disables. The window deliberately
+                    closes before auto-restore could act, so this record never contains our
+                    own write.
+  restore*          what auto-restore did: scheduled, skipped, done, or failed.
+
+Reading them
+------------
+Every record has an ISO-8601 UTC `ts`, the same clock as the raw capture beside it, so the two
+interleave:
+
+    jq -c '{{ts, src:"warmup", event, before, after, ours}}' warmup_*.jsonl > /tmp/a.jsonl
+    jq -c '{{ts, src:"raw", topic}}' mqtt_raw_*.jsonl > /tmp/b.jsonl
+    sort -m /tmp/a.jsonl /tmp/b.jsonl
+
+What to look for
+----------------
+Compare the `before_window` and `after_window` of several `disabled` records and find what
+they share and a quiet hour does not. Candidates worth ranking:
+
+  * `SYSTEM_STS` / `STATUS_SNAPSHOT` — the controller announcing it has come up.
+  * `configChangeIndent` stepping on `GCS_SOLO_STS` — configuration writes landing.
+  * A burst of `READ_GCS_OUTLET_CONFIG_CFG` / `GCS_PRESET_STS` — a full config re-read.
+  * `SHOWER_EXP_SNAPSHOT` and friends — the Konnect app or a touchscreen asking for state.
+
+⚠️ Absence of a message means "nothing was pushed", never "nothing happened" — MQTT here is
+the Konnect app's UI channel, not device-to-device traffic. See docs/case_studies/intro.md.
+
+Auto-restore and this journal
+-----------------------------
+A single disable is recorded identically whether the Warmup Auto-Restore switch is on or off:
+both windows close before a restore could fire.
+
+Where it matters is a *repeat*. A restore is itself a write — a POST, then the valve's echo
+about 3.4 s later — and if the culprit disables the mode again soon afterwards, that traffic
+lands inside the new event's `before_window`. It is identifiable (the `restore` records carry
+timestamps, and the `mode` record that follows one is flagged `ours: true`), but it is our
+noise in the middle of the evidence, and a restore might itself provoke whatever is doing
+this. **For the cleanest series of observations, leave auto-restore off.** For a shower that
+warms up reliably while the question stays open, turn it on and subtract our own records
+during analysis.
+
+
+Turning it off
+--------------
+Set ENABLE_WARMUP_DEBUG_LOG = False in const.py and restart Home Assistant Core.
+"""
+
+
 class CutoffDebugLog:
     """Append cutoff-detector decisions to a JSONL file, when switched on."""
 
@@ -150,10 +223,24 @@ class CutoffDebugLog:
         *,
         forced: bool = False,
         keep_files: int | None = DEFAULT_KEEP_FILES,
+        prefix: str = "cutoff",
+        readme: str | None = None,
+        readme_fields: dict[str, Any] | None = None,
+        label: str = "Cutoff debug log",
     ) -> None:
+        """`prefix` names the files and scopes pruning; `readme` is the note left beside them.
+
+        Parameterised 2026-08-20 so the warmup journal can reuse this writer rather than
+        copy it. Pruning matches on the prefix, so two journals in one directory never
+        delete each other's files.
+        """
         self._directory = directory
         self._forced = forced
         self._keep_files = keep_files
+        self._prefix = prefix
+        self._readme = readme
+        self._readme_fields = readme_fields or {}
+        self._label = label
         self._lock = threading.Lock()
         self._handle: Any = None
         self._path: str | None = None
@@ -197,7 +284,7 @@ class CutoffDebugLog:
                 try:
                     self._open_locked()
                 except OSError as err:
-                    _LOGGER.warning("Cutoff debug log could not open a file: %s", err)
+                    _LOGGER.warning("%s could not open a file: %s", self._label, err)
 
     def note(self, event: str, **fields: Any) -> None:
         """Record one decision or transition. Cheap no-op when switched off."""
@@ -232,7 +319,7 @@ class CutoffDebugLog:
                 self._handle.flush()
             except OSError as err:
                 # A diagnostic must never take the integration down with it.
-                _LOGGER.warning("Cutoff debug log write failed, disabling: %s", err)
+                _LOGGER.warning("%s write failed, disabling: %s", self._label, err)
                 self._close_locked()
                 self._forced = False
 
@@ -243,22 +330,25 @@ class CutoffDebugLog:
         stamp = time.strftime("%Y%m%dT%H%M%S", time.gmtime())
         suffix = binascii.hexlify(os.urandom(4)).decode("ascii")
         self._path = os.path.join(
-            self._directory, f"cutoff_{stamp}Z_{os.getpid()}_{suffix}.jsonl"
+            self._directory, f"{self._prefix}_{stamp}Z_{os.getpid()}_{suffix}.jsonl"
         )
         self._handle = open(self._path, "a", encoding="utf-8")
         self._prune()
         if not self._announced:
             self._announced = True
-            _LOGGER.info("Cutoff debug log is ON, writing to %s", self._path)
+            _LOGGER.info("%s is ON, writing to %s", self._label, self._path)
 
     def _write_readme(self) -> None:
         """Leave a note saying what these files are and how to stop them."""
         try:
             with open(
-                os.path.join(self._directory, "README-cutoff.txt"), "w", encoding="utf-8"
+                os.path.join(self._directory, f"README-{self._prefix}.txt"),
+                "w",
+                encoding="utf-8",
             ) as fh:
                 fh.write(
-                    _README.format(
+                    (self._readme or _README).format(
+                        **self._readme_fields,
                         why=_WHY_FORCED if self._forced else _WHY_LOGGER,
                         keep_desc=(
                             "No limit on the number of files — every one is kept."
@@ -283,7 +373,7 @@ class CutoffDebugLog:
                 (
                     os.path.join(self._directory, name)
                     for name in os.listdir(self._directory)
-                    if name.startswith("cutoff_") and name.endswith(".jsonl")
+                    if name.startswith(f"{self._prefix}_") and name.endswith(".jsonl")
                 ),
                 key=os.path.getmtime,
             )
@@ -327,7 +417,7 @@ class CutoffDebugLog:
             except OSError:  # pragma: no cover
                 pass
             if self._announced:
-                _LOGGER.info("Cutoff debug log is OFF (%s)", self._path)
+                _LOGGER.info("%s is OFF (%s)", self._label, self._path)
                 self._announced = False
         self._handle = None
         self._path = None

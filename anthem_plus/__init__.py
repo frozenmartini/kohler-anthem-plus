@@ -35,13 +35,21 @@ from .client import (
     KohlerClient,
     KohlerError,
 )
+from .const import (
+    MSG_GCS_SOLO_STATUS,
+    WARMUP_DISABLED,
+    WARMUP_MODES,
+    WARMUP_MODES_CURRENT,
+    WARMUP_MODES_LEGACY,
+)
 from .gcs import GcsDevice
 from .hub import HubCapabilities, HubDevice, zone_number, zone_outlet_flags
 from .mqtt import AnthemMqttStream, Envelope
-from .cutoff_log import CutoffDebugLog
+from .cutoff_log import CutoffDebugLog, WARMUP_README
 from .raw_log import RawMqttLog
 from .runtime_cutoff import ZoneCutoff, ZoneCutoffDetector, ZoneReading
 from .state import GcsPreset, GcsState, HubState, HubZone
+from .warmup import should_restore_warmup
 from .topology import (
     describe as describe_topology,
     topology_from_hub_configuration,
@@ -78,6 +86,12 @@ from .valve_hex import (
 
 __all__ = [
     "AuthError",
+    "MSG_GCS_SOLO_STATUS",
+    "WARMUP_DISABLED",
+    "WARMUP_MODES",
+    "WARMUP_MODES_CURRENT",
+    "WARMUP_MODES_LEGACY",
+    "should_restore_warmup",
     "AuthUnavailable",
     "Customer",
     "Device",
@@ -109,6 +123,7 @@ __all__ = [
     "KohlerClient",
     "KohlerError",
     "CutoffDebugLog",
+    "WARMUP_README",
     "RawMqttLog",
     "ZoneCutoff",
     "ZoneCutoffDetector",

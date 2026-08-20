@@ -399,20 +399,128 @@ UI_TEMPERATURE_MAX_F = 113
 DEFAULT_FLOW_PERCENT = 100.0
 
 # ---------------------------------------------------------------------------
+# Warmup dropdown labels
+# ---------------------------------------------------------------------------
+# The device's mode strings are camel-case protocol values and make a poor dropdown. These
+# are the names the Konnect app uses for the same three choices, so what someone picks here
+# matches what they see on the phone and the touchscreen.
+#
+# The two legacy delayed-start modes get labels too, but they are never *offered* — they are
+# only added to the dropdown when the valve is already holding one, so the entity can report
+# the truth instead of blanking. See `select.py`.
+WARMUP_LABELS = {
+    "warmUpDisabled": "Off",
+    "warmUpAllOutletsWithNoStartDelay": "All outlets",
+    "warmUpSelectedOutletsWithNoStartDelay": "Selected outlets",
+    "warmUpAllOutlets": "All outlets (delayed start)",
+    "warmUpSelectedOutlets": "Selected outlets (delayed start)",
+}
+
+# ---------------------------------------------------------------------------
 # Services
 # ---------------------------------------------------------------------------
-SERVICE_SET_OUTLETS = "set_outlets"
+# **One service, and this is the whole list.** Everything else this integration does is an
+# entity — a switch, a select, a number — because an entity shows state as well as accepting
+# a command, and a service only accepts one.
+#
+# Twelve more names lived here until 2026-08-20: `set_outlets`, `start_preset`,
+# `activate_favorite`, `stop_all`, `set_warmup` and their `ATTR_*` fields. **None was ever
+# registered** — they were scaffolding for a service-shaped design that entities replaced,
+# and the two warmup ones additionally described an older Konnect build. A constant nothing
+# reads is a claim that something exists; these claimed five services that did not.
+# `tests/test_warmup_select.py` fails if the warmup pair reappears.
 SERVICE_SEND_VALVE_HEX = "send_valve_hex"
-SERVICE_START_PRESET = "start_preset"
-SERVICE_ACTIVATE_FAVORITE = "activate_favorite"
-SERVICE_STOP_ALL = "stop_all"
-SERVICE_SET_WARMUP = "set_warmup"
 
-ATTR_OUTLETS = "outlets"
-ATTR_TEMPERATURE = "temperature"
-ATTR_FLOW_PERCENT = "flow_percent"
-ATTR_VALVE1_HEX = "valve1_hex"
-ATTR_VALVE2_HEX = "valve2_hex"
-ATTR_FAVORITE = "favorite"
-ATTR_PRESET = "preset"
-ATTR_WARMUP_MODE = "warmup_mode"
+# ---------------------------------------------------------------------------
+# Warmup auto-restore
+# ---------------------------------------------------------------------------
+# Something outside Home Assistant sets the valve's warmup mode back to `warmUpDisabled` —
+# four times between 2026-08-13 and 08-18, each inside a burst of configuration re-sync
+# traffic, with no command on the MQTT channel and nothing from this integration. The cause is
+# unidentified (`docs/gcs/api.md` §3e). This feature does not diagnose it; it puts the mode
+# back, once, a minute later.
+CONF_WARMUP_AUTO_RESTORE = "warmup_auto_restore"
+
+# The last *enabled* mode seen on the valve, persisted so a restore reinstates what was
+# actually in force rather than a default. Without it there is nothing to restore to, and
+# guessing "all outlets" would silently change a fixture set to "selected outlets".
+CONF_LAST_WARMUP_MODE = "last_warmup_mode"
+
+# One minute, as asked for. Long enough that a re-sync burst has finished writing before we
+# write back — restoring into the middle of one would just be overwritten again.
+WARMUP_AUTO_RESTORE_DELAY_SECONDS = 60.0
+
+# A disable *we* caused, from the dropdown, must never be undone by this — otherwise choosing
+# `Off` becomes impossible. Our own writes are recorded and any matching disable inside this
+# window is ignored. Generous because the device echo itself takes ~3.4 s.
+WARMUP_SELF_WRITE_GRACE_SECONDS = 30.0
+
+# If the mode is disabled again immediately after each restore, something is actively fighting
+# us and a restore loop would hammer Kohler's API forever. Stop after this many consecutive
+# restores that failed to stick, and say so.
+WARMUP_AUTO_RESTORE_MAX_CONSECUTIVE = 5
+
+# A restore that stayed put for this long counts as successful, and resets the counter above.
+WARMUP_AUTO_RESTORE_SETTLED_SECONDS = 900.0
+
+WARMUP_AUTO_RESTORE_ON = (
+    "Warmup Auto-Restore is ON. If something sets the Anthem valve's warmup mode to Off, "
+    "Home Assistant will set it back to %s after %.0f seconds. Turning warmup off from the "
+    "Warmup dropdown is not affected — only changes this integration did not make."
+)
+
+WARMUP_AUTO_RESTORE_NO_TARGET = (
+    "Warmup Auto-Restore is ON but no enabled warmup mode has been seen yet, so there is "
+    "nothing to restore to. Pick a mode on the Warmup dropdown and it will be remembered."
+)
+
+WARMUP_AUTO_RESTORE_GIVING_UP = (
+    "Warmup Auto-Restore has put the mode back %d times and it keeps being disabled again. "
+    "Something on the system is actively rewriting it, and retrying is not fixing that — "
+    "stopping until the mode stays enabled or Home Assistant restarts. See "
+    "docs/gcs/api.md section 3e."
+)
+
+# ---------------------------------------------------------------------------
+# Warmup diagnostic journal
+# ---------------------------------------------------------------------------
+# Forced on, like the cutoff journal. The event it is here to catch fired four times in six
+# days, so a log that has to be switched on first would miss it — and the volume is a handful
+# of records a day, against a raw capture that already writes every message.
+ENABLE_WARMUP_DEBUG_LOG = True
+
+# Unlimited, matching the cutoff journal: this is evidence for an open question, and the
+# whole point is comparing an event to ones weeks earlier.
+WARMUP_DEBUG_LOG_KEEP_FILES = None
+
+# How much wire traffic to carry in a disable record, either side of the event.
+#
+# 120 s back and 45 s forward, chosen from what the four known disables actually look like:
+# the config re-sync burst around them (outlet configs, presets, experience snapshots) runs
+# for roughly a minute beforehand, and `SYSTEM_STS: SYSTEM_READY` — the most distinctive
+# marker — landed 7 to 9 s AFTER the disable in the two clearest cases. A window that only
+# looked backwards would miss the strongest signal there is.
+#
+# ⚠️ **The forward window must stay shorter than WARMUP_AUTO_RESTORE_DELAY_SECONDS**, and
+# `test_warmup_journal.py` fails if it does not. Both were 60 s when first written, which put
+# the close of the evidence window at the exact instant auto-restore writes to the valve —
+# so whether our own traffic landed inside the evidence depended on which coroutine the loop
+# happened to run first. 45 s ends the window a clear 15 s before any intervention, which
+# costs nothing: the marker being hunted arrives within 10 s.
+WARMUP_CONTEXT_BEFORE_SECONDS = 120.0
+WARMUP_CONTEXT_AFTER_SECONDS = 45.0
+
+# Cap on the rolling buffer of recent messages, so a chatty hour cannot grow it without bound.
+WARMUP_CONTEXT_MAX_MESSAGES = 400
+
+# ---------------------------------------------------------------------------
+# Warmup write confirmation
+# ---------------------------------------------------------------------------
+# How long to wait, cumulatively, before treating a read-back that disagrees with the write
+# as a real failure rather than lag.
+#
+# Measured live 2026-08-20 against this valve: a POST accepted at 08:01:34 still read back
+# the OLD mode at t+0 and the new one by t+3, with the valve's own MQTT echo at +3.42 s. An
+# immediate single read therefore reports a false mismatch every time. Three attempts spanning
+# 6 s clears that with margin while keeping the service call short enough for a UI action.
+WARMUP_READBACK_DELAYS = (0.0, 2.0, 4.0)

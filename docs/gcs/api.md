@@ -1800,18 +1800,49 @@ where the valve came up at the preset's flow 50 (`0xC8`, 100%) rather than a def
 
 ## 3. Warmup is a **setting/mode toggle**, NOT a "run now" command
 
+*Re-confirmed 2026-08-20 against Konnect Android 3.0.1, with the enable path exercised live.*
+
 `POST /platform/api/v1/commands/gcs/warmup`
 Body `AnthemWriteWarmUpRequestModel` = `{deviceId, sku:"GCS", tenantId, warmUp:"<mode>"}`.
 
+**Exactly four fields exist.** No duration, no delay, no outlet list, no temperature — the
+request model has four `@SerializedName` fields and nothing else. Path is templated in the APK
+as `/platform/api/{version}/commands/gcs/warmup`; the app substitutes `v1`.
+
 `warmUp` mode values (from the decompile — `Si\y.java`, `p218gj\q.java`):
 
-| `warmUp` value | Meaning |
-|---|---|
-| `warmUpDisabled` | Off |
-| `warmUpAllOutletsWithNoStartDelay` | Enable — all outlets, **start immediately** (what the app toggle sends on ON) |
-| `warmUpAllOutlets` | Enable — all outlets, with configured start delay |
-| `warmUpSelectedOutletsWithNoStartDelay` | Enable — selected outlets only, start immediately |
-| `warmUpSelectedOutlets` | Enable — selected outlets only, with start delay |
+| `warmUp` value | Meaning | Current app offers it? | Status |
+|---|---|---|---|
+| `warmUpDisabled` | Off | **yes** | decompile |
+| `warmUpAllOutletsWithNoStartDelay` | Enable — all outlets, start immediately | **yes** | ✅ **live 2026-08-20** |
+| `warmUpSelectedOutletsWithNoStartDelay` | Enable — selected outlets only, start immediately | **yes** | ✅ **held by this valve right now** — live GET, 2026-08-20 |
+| `warmUpAllOutlets` | Enable — all outlets, with configured start delay | no — legacy | ⚠️ unverified |
+| `warmUpSelectedOutlets` | Enable — selected outlets only, with start delay | no — legacy | ⚠️ unverified |
+
+> ⚠️ **The 2026-08-20 decompile was of an older build and undercounts this.** It reported only
+> two modes as app-writable and filed `warmUpSelectedOutletsWithNoStartDelay` as unverified.
+> **The current Konnect app offers three** — off, all outlets, selected outlets, all with no
+> start delay — established by the owner against the app in their hands, 2026-08-20. Our own
+> captures agree: this valve *held* `warmUpSelectedOutletsWithNoStartDelay` three separate
+> times on 2026-08-13 with no other client in play, which no two-value app could have produced.
+>
+> **Write three, decode five.** The two delayed-start variants stay decodable because a valve
+> could be holding one, but nothing establishes what their delay is — the app has no control
+> that sets one, and "delay" appears nowhere in its 3,278 string resources.
+>
+> ✅ **Settled deliberately, 2026-08-20.** The owner set each mode from the current Konnect
+> app to confirm the names, and `gcs-state` read back
+> `warmUpSelectedOutletsWithNoStartDelay` — the value the decompile called unverified and
+> never-sent. It is in the app, and it is writable.
+>
+> ✅ **And the write path is proven from this integration.** `GcsDevice.async_set_warmup()`
+> posted `warmUpAllOutletsWithNoStartDelay` to a live valve on 2026-08-20; the cloud returned
+> a `correlationId`, the field changed, and the valve pushed the matching `GCS_WARM_STS`. See
+> `tests/probe_warmup_write.py`.
+>
+> ⚠️ **`warmUpEnabled` does not exist.** It appears in some older Python projects. It is not in
+> the APK. Do not send it. `tests/test_warmup_select.py` fails if that string — or either of
+> the removed `set_warmup` service constants — reappears in this integration's source.
 
 State is separate, on two axes (`AnthemWarmupStateModel`):
 
@@ -1831,7 +1862,178 @@ State is separate, on two axes (`AnthemWarmupStateModel`):
   warmup command but the device silently ignores it. The HA integration reads
   `warmUpState.warmUp` to surface this rather than appearing to no-op.
 
-### ⚠️ Library bug — `start_warmup` sends no mode
+### 3a. ⚠️ Four ways this call fails while returning success
+
+Established by decompile 2026-08-20. Every one of these gets a success code back, so **a 200
+means accepted, never applied** — the only confirmation is the valve's own `GCS_WARM_STS` echo.
+
+| # | The trap | What we do about it |
+|---|---|---|
+| 1 | **Omitting `warmUp` gives a 200 that does nothing.** The most common bug in existing implementations, because published curl examples show the three-field body — `kohler-anthem` has it. | `GcsDevice.async_set_warmup()` raises `ValueError` on an empty or blank mode, so a caller that cannot name one never reaches the API. |
+| 2 | **`presetOrExperienceId: "0"` does not stop warmup.** Posting id `0` to `controlpresetorexperience` clears a running preset and leaves the mode enabled — a different field on a different endpoint. `kohler-anthem`'s `stop_warmup` does this. | `async_disable_warmup()` writes `warmUp: "warmUpDisabled"`. A test asserts nothing warmup-related ever posts to `controlpresetorexperience`. |
+| 3 | **The mode is not "warming up right now".** `warmUpState.warmUp` is the mode; `warmUpState.state` is `warmUpInProgress` / `warmUpNotInProgress`. A control bound to the wrong axis reads off almost always, since a warm-up is over in seconds. | The `Warmup` dropdown *is* the mode, with `Off` as one of its choices. In-progress stays on the Status sensor, and both appear as attributes on the dropdown. |
+| 4 | **The app refuses the toggle while water is running** — it checks whether any outlet on either valve is on and reverts its own toggle rather than calling the API. Whether the *device* enforces this is untested; the guard is client-side. | `KohlerAnthemPlusCoordinator.async_set_warmup()` raises if `is_running`, saying so rather than reverting silently. |
+
+### 3b. Reading it back
+
+`GET /devices/api/v1/device-management/gcs-state/gcsadvancestate/{deviceId}` — captured live
+2026-08-20 from a valve with warmup on:
+
+```json
+{"state": {
+  "warmUpState": {"warmUp": "warmUpAllOutletsWithNoStartDelay",
+                  "state": "warmUpNotInProgress"},
+  "currentSystemState": "normalOperation",
+  "presetOrExperienceId": "0"}}
+```
+
+✅ **Read live 2026-08-20**, both `gcs-state/{deviceId}` and
+`gcs-state/gcsadvancestate/{deviceId}` returning byte-identical `warmUpState`:
+
+```json
+{"warmUp": "warmUpSelectedOutletsWithNoStartDelay", "state": "warmUpNotInProgress"}
+```
+
+**The plain `gcs-state` read is enough** — it carries the same `warmUpState` as
+`gcsadvancestate`, and it is the read this integration already makes at setup, on every MQTT
+reconnect, and after every warmup write. No second endpoint is needed for this field.
+
+Two fields not to use: **`setting.warmUpMode` returns `null`** — confirmed live 2026-08-20; the
+field exists on the model, nothing populates it, and the app never reads it — and
+`setting.uiConfig[].delayStart` is a control-panel setting, not a warmup field.
+
+### The settle window — measured 2026-08-20
+
+**A write is not visible to the next read.** Timed against this valve:
+
+```text
+08:01:34.815  POST .../commands/gcs/warmup   accepted, correlationId returned
+08:01:34      GET gcs-state  -> still warmUpSelectedOutletsWithNoStartDelay   ← the OLD mode
+08:01:38.2    GCS_WARM_STS   -> warmUpAllOutletsWithNoStartDelay   (+3.42 s, MQTT)
+08:01:3x      GET gcs-state  -> warmUpAllOutletsWithNoStartDelay   (by t+3 s)
+```
+
+So **an immediate read-back reports a false mismatch every time.** Anything confirming a write
+has to allow a few seconds first — `WARMUP_READBACK_DELAYS` in `const.py` spans 6 s over three
+attempts, and only the last disagreement is treated as a failure.
+
+**Both channels are reliable and they agree.** Two mode changes on 2026-08-20 — one from the
+Konnect app at 07:47:12, one from this integration's own POST at 08:01:34 — each produced a
+`GCS_WARM_STS` push *and* an updated REST field. ⚠️ *An earlier draft of this section claimed
+the app's change was never pushed over MQTT. That was wrong: it compared a fresh REST read
+against a capture analysed before the change landed.*
+
+Over MQTT the same mode arrives as `GCS_WARM_STS.warmup`, spelled **all lowercase**, where REST
+spells it `warmUp`. `GcsState` matches both.
+
+### 3c. In Home Assistant
+
+**`select.anthem_valve_warmup`** — a CONFIG-category dropdown on the valve device. Its state
+*is* the mode, shown under the app's own names:
+
+| dropdown | writes |
+|---|---|
+| `Off` | `warmUpDisabled` |
+| `All outlets` | `warmUpAllOutletsWithNoStartDelay` |
+| `Selected outlets` | `warmUpSelectedOutletsWithNoStartDelay` |
+
+Attributes carry `warmup_mode` (the raw string) and `warmup_in_progress` (the other axis).
+
+**A valve holding a legacy delayed-start mode is shown, not hidden**: that mode is appended to
+the options for as long as it is in force, because Home Assistant logs an error on every update
+when the current option is missing from the list. It is refused as a write target and drops off
+the list once the mode moves on.
+
+⚠️ Which outlets count as "selected" is **not** exposed by any cloud API — it is per-zone
+`warmupOutlets` on the controller's local API. So the dropdown picks the mode; the selection
+itself is configured on the device.
+
+*Superseded 2026-08-20: this was briefly `switch.anthem_valve_warmup`, and before that the
+read-only `binary_sensor.anthem_valve_warmup_enabled`. Both are gone — a two-state control
+cannot express three modes, and the binary sensor duplicated what the dropdown now shows.*
+
+### 3f. `switch.anthem_valve_warmup_auto_restore` — putting the mode back
+
+A **diagnostic switch, off by default**, that answers §3e's unexplained reverts by undoing
+them. When the valve announces `warmUpDisabled` over MQTT and this integration did not cause
+it, the mode is set back **60 s later** to the last enabled mode seen on the valve.
+
+| | |
+|---|---|
+| **Restores to** | the last enabled mode observed — never a default. Remembered from both the MQTT announcement and our own confirmed writes, and persisted in the entry options so it survives a restart. With no remembered mode it does nothing and logs why. |
+| **Ignores our own `Off`** | choosing `Off` on the dropdown is a write we made; the echo that follows it is recognised for 30 s and not undone. Otherwise `Off` could never be selected. Scoped to the *mode written*: a write that enabled warmup does not excuse a disable arriving after it. |
+| **Ignores restatements** | the valve re-announces its mode ~4 s after every boot, and it rebooted 25 times in a week here. Only a transition out of a *known enabled* mode counts, so the first mode seen after a restart is never treated as something being taken away. |
+| **Stops fighting** | five consecutive restores that fail to stick and it gives up with a WARNING. A retry loop against something actively rewriting the field is traffic, not a fix. Seeing the mode enabled again resets the count. |
+| **Never during a shower** | the write is refused while water is running, mirroring the app. The next disable schedules another attempt. |
+
+The decision — *is this a disable we should undo?* — is
+[`anthem_plus/warmup.py`](../../anthem_plus/warmup.py)'s `should_restore_warmup()`, kept out of
+the Home Assistant layer so `tests/test_warmup_auto_restore.py` can test the real function
+rather than a copy of it.
+
+⚠️ **It treats a symptom.** It does not identify what rewrites the field, and left to itself
+it would make the fault *less* visible by papering over it. §3g is the answer to that.
+
+### 3g. The warmup journal — evidence for §3e
+
+`/config/kohler_anthem_plus_raw/warmup_*.jsonl`, beside the raw MQTT capture and the cutoff
+journal, on the same UTC clock so all three interleave. **On by default** and independent of
+the auto-restore switch: the event fires a few times a week, so a log that had to be switched
+on first would miss it, and an *unrestored* disable is the cleaner observation of the two.
+`README-warmup.txt` is written alongside and carries the analysis notes.
+
+| record | when | what it carries |
+|---|---|---|
+| `mode` | every warmup announcement | `before`, `after`, `ours` — the baseline a rare event has to stand out from |
+| `disabled` | the mode went to `warmUpDisabled` | `ours`, `restoring`, `water_running`, and **`before_window`**: every MQTT message in the preceding 120 s |
+| `context` | 60 s after a disable | **`after_window`** — what followed |
+| `restore`, `restore_done`, `restore_skipped`, `restore_failed`, `restore_gave_up` | auto-restore acting | target, attempt number, and the reason for every decline |
+
+**Why both windows.** The four known disables sit inside a burst of configuration re-sync
+traffic, but the most distinctive marker — `SYSTEM_STS: SYSTEM_READY` — landed **7 to 9 s
+after** the disable in the two clearest cases, along with `configChangeIndent` stepping on
+`GCS_SOLO_STS`. A record written at the moment of the event cannot contain its own strongest
+evidence, so the after-window is a separate record written a minute later.
+
+Each windowed message keeps only `ts`, `sku`, `code`, and for `GCS_SOLO_STS` the four fields
+that distinguish a configuration write from an ordinary status — `configChangeIndent`,
+`configWriteAllowedFlag`, `currentSystemState`, `warmUpStatus`. The raw capture beside it holds
+every payload in full; duplicating that here would bury the one thing this file is for.
+
+**The method:** collect several `disabled` records, then look for what their windows share and
+a quiet hour does not. ⚠️ Absence of a message means "nothing was pushed", never "nothing
+happened" — MQTT here is the Konnect app's UI channel, not device-to-device traffic.
+
+#### Does auto-restore spoil the evidence?
+
+**For one disable, no.** Both windows close before a restore could fire — the forward window is
+45 s against a 60 s restore delay, and `test_warmup_journal.py` fails if that ordering is ever
+reversed. It was not always so: both were 60 s when first written, which put the close of the
+evidence window at the same instant as the write, leaving it to coroutine scheduling whether
+our own traffic landed inside the evidence.
+
+**For a repeat, yes, mildly.** A restore is a write — a POST plus the valve's echo ~3.4 s later
+— so if the mode is disabled again within a couple of minutes, our traffic sits inside that
+second event's `before_window`. It is identifiable (`restore` records are timestamped and the
+`mode` record after one carries `ours: true`), but it is noise in the middle of the evidence,
+and a restore may itself provoke whatever is doing this.
+
+**Widening the windows is not the answer.** The marker being hunted lands within 10 s; a longer
+window collects noise, not signal. The trade is simply: **off** for the cleanest series,
+**on** for a shower that warms up reliably while the question stays open.
+
+⚠️ **Something disables this setting on its own.** Four times between 2026-08-13 and 08-18 the
+mode reverted to `warmUpDisabled` with no command on the MQTT channel and nothing from Home
+Assistant, each time inside a burst of configuration re-sync traffic. **It is not reboots** — the
+mode survives those, and the ~4 s post-boot `GCS_WARM_STS` is the valve restating what it already
+had, not changing it. The writer is unidentified; the leading candidate is the Anthem Plus
+controller over the RJ wired link, which cannot be observed. Not established — see
+`docs/handoff/` for the session that measured it.
+
+### 3d. ⚠️ Library bug — `start_warmup` sends no mode
+
+*This is §3a traps 1 and 2 as they appear in real code — kept because it is the specific
+implementation most likely to be copied from.*
 
 `kohler-anthem`'s `start_warmup` sends `{tenantId, deviceId, sku}` with **no `warmUp`
 field** → the device ignores it (200 but no-op). `stop_warmup` sends
@@ -1839,6 +2041,15 @@ field** → the device ignores it (200 but no-op). `stop_warmup` sends
 
 Fix: `start_warmup` → `warmUp:"warmUpAllOutletsWithNoStartDelay"`; disable →
 `warmUp:"warmUpDisabled"`.
+
+### 3e. Still open
+
+| question | what is known | how to settle it |
+|---|---|---|
+| What *is* the "start delay"? | Nothing defines it. Zero occurrences of "delay" in the app's 3,278 string resources, and no timing field on any warmup model — the phrase exists only inside the enum string. | Send `warmUpAllOutlets` and time when outlets open against the `…WithNoStartDelay` baseline. |
+| Is `delayStart` the referent? | A real per-panel UI-config field, observed `"Disabled"`. In the APK it is only ever copied through — never branched on, never bound to a control. It is the only start-delay concept in the system. | Flip it via `writeuiconfig`, re-read `gcsadvancestate`, see whether the mode suffix changes. ⚠️ That write is a **whole-record replace**. |
+| Which outlets are "selected"? | Not exposed by the cloud API. The per-outlet `warmup` flag exists only on the MQTT **read** model; the writable outlet-config model has no such field. The local hub has per-zone `warmupOutlets` arrays. | The local hub API — [`../hub/local_api.md`](../hub/local_api.md), not the cloud one. |
+| What keeps disabling it? | Four unexplained reverts to `warmUpDisabled`, 2026-08-13 to 08-18. Not reboots, not Home Assistant, no `GCS_RECIEVED_STS` within 447 s of any of them. ⚠️ The two mode changes on 2026-08-20 are **not** instances — both were deliberate, one from the app and one from this integration, and both pushed a `GCS_WARM_STS` as they should. Still four. | Enable it, then open the Konnect app / wake the Anthem Plus screen and watch for a `GCS_WARM_STS` within ~60 s. |
 
 ## 4. Where to look in the decompile
 

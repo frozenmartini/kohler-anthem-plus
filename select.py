@@ -20,9 +20,11 @@ from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN, PRESET_HIDDEN_IDS
+from .anthem_plus import WARMUP_MODES_CURRENT
+from .const import DOMAIN, PRESET_HIDDEN_IDS, WARMUP_LABELS
 from .coordinator import KohlerAnthemPlusCoordinator
 from .entity import KohlerControllerEntity, KohlerValveEntity
 
@@ -42,6 +44,7 @@ async def async_setup_entry(
     entities: list[SelectEntity] = []
     if coordinator.gcs_device is not None:
         entities.append(FavouriteSelect(coordinator))
+        entities.append(ValveWarmupSelect(coordinator))
     if coordinator.hub_device is not None:
         # The controller keeps its own favourites on a different command surface. Both can
         # exist on one account, on their own devices, which is why they are separate
@@ -157,6 +160,121 @@ class FavouriteSelect(KohlerValveEntity, SelectEntity):
             await action
         except Exception:
             # The command failed, so stop showing a state the valve never reached.
+            self._optimistic = None
+            self.async_write_ha_state()
+            raise
+
+
+class ValveWarmupSelect(KohlerValveEntity, SelectEntity):
+    """The valve's warmup mode — the dropdown, and the state, are the mode itself.
+
+    Warmup runs water up to temperature before the session proper. This entity is the
+    **mode**: which warmup the valve will do, with ``Off`` as one of the choices. It is not
+    whether a warm-up is happening at this instant — those are two independent axes in the
+    device's own state (``warmUpState.warmUp`` vs ``warmUpState.state``), and a control bound
+    to the second reads "off" almost always, because a warm-up is over in seconds. "Warming
+    Up" is reported by the valve Status sensor; both axes appear in the attributes here.
+
+    **Three options, matching the current Konnect app** — Off, All outlets, Selected
+    outlets, all with no start delay. Which outlets count as "selected" is not exposed by
+    any cloud API: it is per-zone `warmupOutlets` on the controller's local API, so this
+    dropdown chooses the *mode* and the selection itself is configured on the device.
+
+    ⚠️ **A valve can hold a mode this list does not offer.** Two legacy delayed-start values
+    still parse in firmware. If the valve reports one, it is appended to the options for as
+    long as it is in force, so the entity reports the truth rather than an error — but it is
+    never on the menu otherwise, because nothing establishes what their delay does.
+
+    ⚠️ **Something outside Home Assistant keeps setting this back to Off.** Four times
+    between 2026-08-13 and 08-18 the mode reverted with no command visible on the MQTT
+    channel and nothing from this integration. It is not the reboots: the mode survives
+    those. The writer is unidentified; the leading candidate is the Anthem Plus controller
+    over the RJ wired link, which cannot be observed. **If this dropdown moves to Off on its
+    own, that is the device.** See `docs/gcs/api.md` §3e.
+
+    The value here is the REST field, `warmUpState.warmUp` — read at setup, on every MQTT
+    reconnect, and again after every write, because a 200 from the cloud is not evidence the
+    valve applied anything. The device's `GCS_WARM_STS` push corrects it too; measured
+    2026-08-20, that echo lands **3.42 s** after the write and the REST field catches up on
+    about the same schedule, which is why the confirmation is retried rather than read once.
+    """
+
+    _attr_icon = "mdi:thermometer-water"
+    _attr_name = "Warmup"
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(self, coordinator: KohlerAnthemPlusCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{self._device_id}_warmup"
+        self._optimistic: str | None = None
+
+    @property
+    def _mode(self) -> str | None:
+        state = self._state
+        return None if state is None else state.warmup_mode
+
+    @property
+    def options(self) -> list[str]:
+        """The three current modes, plus whatever the valve is holding if it is not one.
+
+        Home Assistant logs an error on every update when `current_option` is absent from
+        this list, so a mode we would never write still has to appear while it is in force.
+        """
+        labels = [WARMUP_LABELS[mode] for mode in WARMUP_MODES_CURRENT]
+        held = self._mode
+        if held is not None and held not in WARMUP_MODES_CURRENT:
+            labels.append(WARMUP_LABELS.get(held, held))
+        return labels
+
+    @property
+    def current_option(self) -> str | None:
+        if self._optimistic is not None:
+            return self._optimistic
+        mode = self._mode
+        if mode is None:
+            # Never announced. `Off` would be a guess, and the wrong one to show for a
+            # setting somebody may be trying to confirm is on.
+            return None
+        return WARMUP_LABELS.get(mode, mode)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """The raw mode string, and the axis this entity deliberately does not show."""
+        state = self._state
+        if state is None:
+            return {}
+        return {
+            "warmup_mode": state.warmup_mode,
+            "warmup_in_progress": state.warmup_in_progress,
+        }
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        self._optimistic = None
+        super()._handle_coordinator_update()
+
+    async def async_select_option(self, option: str) -> None:
+        """Write the mode behind the chosen label.
+
+        Optimistic like the favourite selector: the valve echoes the new mode back as a
+        `GCS_WARM_STS` message, and that echo is the only real confirmation there is — a 200
+        from the cloud means the command was accepted, never that the valve applied it.
+        """
+        mode = next(
+            (value for value, label in WARMUP_LABELS.items() if label == option), None
+        )
+        if mode is None:
+            raise HomeAssistantError(f"{option!r} is not a warmup mode")
+        if mode not in WARMUP_MODES_CURRENT and mode != self._mode:
+            raise HomeAssistantError(
+                f"{option!r} is a legacy mode this integration does not write. It is listed "
+                "only because the valve is currently holding it."
+            )
+        self._optimistic = option
+        self.async_write_ha_state()
+        try:
+            await self.coordinator.async_set_warmup(mode)
+        except Exception:
             self._optimistic = None
             self.async_write_ha_state()
             raise
