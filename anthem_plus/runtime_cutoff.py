@@ -227,6 +227,44 @@ class _NullJournal:
 # does not. Do not raise this without measurements from hardware that needs it.
 CUTOFF_TOLERANCE_SECONDS = 2.0
 
+# ---------------------------------------------------------------------------
+# DIAGNOSIS ONLY — naming the Anthem Plus controller's ceiling in the log
+# ---------------------------------------------------------------------------
+# ⚠️ These two values are used **exclusively to write a clearer WARNING**. They are never a
+# source of limits to fire on, and they cannot become one: they are read only inside the
+# branch that has already decided no announced limit matched, and that branch always declines.
+# `test_no_limit_guessing.py` asserts the property directly.
+#
+# Why this is not the removed `MissedCutoffWatcher` in disguise: that inferred a *valve* limit
+# from repeated durations and offered to promote it into the firing set. This infers nothing.
+# The Anthem Plus controller's Max Shower Duration dropdown offers exactly four values and no
+# others (`docs/hub/local_api.md`, read live from `get_valve_settings`), so a stop landing on
+# one of them is not a guess about unknown hardware — it is the only ceiling the other product
+# on the account is capable of having.
+CONTROLLER_DURATION_CHOICES = (900, 1800, 2700, 3600)
+
+# The controller fires **late, never early** — 13 measurements spanning +0.30 to +1.25 s across
+# case studies 2, 3 and 7, with not one early. The valve fires **early**, -0.08 to -0.23 s. So
+# a late-only window separates the controller's ceiling from a hand on a touchscreen far better
+# than a symmetric one, and it cannot collide with the valve's own signature.
+#
+# Measured against the clean corpus: 12 of 12 stops inside this window are genuine controller
+# cutoffs, and no manual stop has ever landed in it.
+CONTROLLER_LATE_WINDOW = (0.2, 2.0)
+
+
+def suspected_controller_limit(duration: float) -> int | None:
+    """The controller Max Shower Duration a `0x00` stop looks like, or None.
+
+    Diagnosis only — see `CONTROLLER_DURATION_CHOICES`. Nothing acts on the result.
+    """
+    early, late = CONTROLLER_LATE_WINDOW
+    for choice in CONTROLLER_DURATION_CHOICES:
+        if early <= duration - choice <= late:
+            return choice
+    return None
+
+
 # A close is ignored if the integration itself **closed that zone** within this window.
 # Without it, stopping the shower from Home Assistant at the limit would be read as the timer
 # firing and immediately undone — the integration fighting its own user.
@@ -503,10 +541,35 @@ class ZoneCutoffDetector:
                 None,
             )
             if match is None:
+                # Nothing announced matches. Before writing this off as an ordinary stop,
+                # check whether it looks like the *other* product's ceiling — the one this
+                # feature cannot act on and which, until 2026-08-19, ended showers with no
+                # explanation anywhere in the log. See `docs/case_studies/conclusions.md` B4.
+                suspected = (
+                    None if is_paused else suspected_controller_limit(duration)
+                )
+                if suspected is not None:
+                    _LOGGER.warning(
+                        "Zone %s STOPPED (0x00) after %.1f s. That matches no limit the "
+                        "Anthem valve announced, but it is %.2f s past %d minutes — one of "
+                        "the four Max Shower Duration values the Anthem Plus controller "
+                        "offers, and the controller ends a shower exactly like this, a "
+                        "fraction of a second late. Endless Shower cannot restart it: only "
+                        "the valve's cutoff carries the pause flag. Set the controller's Max "
+                        "Shower Duration to the same value as the valve's (%s) so the valve "
+                        "cuts first",
+                        zone,
+                        duration,
+                        duration - suspected,
+                        suspected // 60,
+                        ", ".join(f"{c} s" for c in candidates),
+                    )
                 stop(
                     "duration is not within %.0fs of any limit"
                     % CUTOFF_TOLERANCE_SECONDS,
                     off_by=min(abs(duration - limit) for limit in candidates),
+                    **({"controller_limit_suspected": suspected}
+                       if suspected is not None else {}),
                 )
                 continue
             if not is_paused:
