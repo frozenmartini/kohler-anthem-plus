@@ -15,10 +15,16 @@ three ended by themselves.**
 
 > **The headline.** The controller does not run a countdown per zone. **It arms timers on
 > events, and when one fires it sweeps every zone and cuts each one it finds at or over the
-> limit.** 15 of 16 zone-decisions across three showers follow that rule exactly. It explains
-> the whole shape of the controller's behaviour: why a zone can run 28 minutes past a 15-minute
-> limit unnoticed, why one expiry sometimes takes both zones down, and — retroactively — what
-> [case study 5](05_three_restarts_and_the_unexplained_00.md)'s unexplained `00/00` was.
+> limit.** 15 of 16 zone-decisions across three showers follow that rule exactly.
+>
+> **And there is a bug in the sweep — §5.** A **zone-2** sweep silently **disarms zone 1's
+> timer**, so zone 1 loses its maximum-duration protection until some later sweep happens to
+> catch it over the limit. It is one-directional: a zone-1 sweep leaves zone 2 alone. Simulated
+> against five sessions it reproduces **14 of 14** controller-driven stops with **zero** false
+> alarms, including [case study 5](05_three_restarts_and_the_unexplained_00.md)'s `00/00`, which
+> two case studies had recorded as unexplained.
+>
+> **Tested against Anthem Plus controller firmware — application `2.88`, OS `5.4`.**
 
 ---
 
@@ -32,6 +38,7 @@ three ended by themselves.**
 | Start route | **HUB `valveOnOff`**, all three | owner-confirmed |
 | All other control | **Anthem Plus touchscreen** | owner-confirmed |
 | Warm-up / preset | `warmUpNotInProgress`, `presetOrExperienceId: 0` | first word of each capture |
+| **Anthem Plus firmware** | **application `2.88`, OS `5.4`** | `captures/20260810_*_hub_config.json`, `/configuration/about/firmware`. ⚠️ Read **2026-08-10** and not re-read since — the PIN file did not survive the container being recreated. `firmwareUpdate: noUpdateAvailable` in every capture since is weak corroboration that it has not moved. |
 
 Temperatures below are the wire value: `0x184` (388) = 101.8 °F is the configured
 `defaultOutletTemperature`; the owner moved it to `0x17F` (383) = 100.9 °F and `0x179` (377) =
@@ -120,22 +127,93 @@ fires*. Zone 1 spent up to thirteen minutes over the limit with nothing schedule
 **That is the whole explanation for "zone 1 is unreliable": zone 1's timer usually never arms,
 so zone 1 is only ever cut as collateral, when another zone's timer wakes the sweep.**
 
-## 5. ⭐ What arms a timer — the open half
+## 5. ⭐ THE MECHANISM — a zone-2 sweep disarms zone 1
 
-Reliable: **every zone-2 flow start armed one, 6 for 6**, regardless of route — `valveOnOff`
-for the session opener, touchscreen for every later leg.
+**Owner's hypothesis, 2026-08-19. Simulated against the corpus with
+`kohler-work/sweep_sim.py` and confirmed.** This section supersedes an earlier reading of the
+same data as "zone 1 only arms when zone 2 is idle" — that was the correlation; this is the
+cause.
 
-Unreliable: **zone 1 armed once in four testable legs.** The one that armed (shower 2,
-13:32:32) is the only zone-1 leg that opened the session with zone 2 idle.
+### 5a. The rule
 
-And arming is not limited to flow starts. The 14:58:15.743 sweep traces back **900.32 s** to
-the owner's **touchscreen temperature change** at 14:43:15.423 — no zone started then. So
-control events arm timers too, which widens the search rather than narrowing it.
+* **Every zone the controller sees start flowing gets a timer**, due `LIMIT` seconds later.
+  **The start route is irrelevant.** `valveOnOff`, the Anthem Plus touchscreen and Home
+  Assistant's `solowritesystem` all arm one. All that matters is that the controller
+  acknowledges the zone as flowing.
+* When a timer fires it **sweeps**: every zone currently flowing at or over `LIMIT` is cut.
+* ⚠️ **THE BUG — a zone-2 sweep also disarms zone 1.** Zone 1 then has no maximum-duration
+  protection at all until some later sweep happens to find it over the limit and takes it down
+  as collateral.
+* **The bug is one-directional.** A zone-1 sweep does **not** disarm zone 2. Shower 2's zone-1
+  cut at 13:47:33 left zone 2's timer intact and zone 2 was cut on its own schedule 166 s later.
+* **The disarm only happens when the sweep actually cuts zone 2** — that is, when zone 2 was
+  still flowing as its timer came due. If something else had already stopped zone 2, the sweep
+  runs, cuts nothing, and **leaves zone 1 armed**. That single condition is what separates case
+  study 5 from every session here (§5d).
 
-⚠️ **No rule is offered here.** Three candidate explanations survive on n=4 — zone 1 arms only
-when it opens the session; zone 1 arms only once per session; the start route decides — and
-[case study 5](05_three_restarts_and_the_unexplained_00.md) contradicts the first, since zone 1
-armed there while zone 2 was running. A designed experiment is specified in §11.
+### 5b. Simulated against five sessions
+
+`sweep_sim.py` replays the observed zone start/stop events and scores which stops each model
+explains. A false alarm is a cut the model insists on that did not happen.
+
+| model | hits | false alarms |
+|---|---|---|
+| **A** — zone-2 sweep disarms zone 1, unconditionally | 13 | 0, but **cannot produce case study 5's `00/00`** |
+| **C** — no disarm, plain per-zone timers + sweep | 14 | **3** — insists zone 1 dies at 13:09:20, 14:07:13 and 14:47:08 |
+| **E** — disarm only when the sweep actually cuts zone 2 | **14** | **0** |
+
+Model C's three false alarms are precisely the three zone-1 overruns. **The disarm is required
+to explain them.** Model E is the rule in §5a.
+
+The eight stops model E does not predict are all outside its scope: four valve `0x40` pauses in
+case study 5, the 16:29:49 pair ending that session, the owner's manual off at 12:48:05, and
+14:58:15 — the one anchored to a **setpoint change** rather than a flow start, which the
+simulator does not model. See §12.
+
+### 5c. Shower 2, reproduced from the rule alone
+
+```text
+13:32:32  zone 1 opens             → arm z1, due 13:47:32
+13:41:18  zone 2 opens             → arm z2, due 13:56:18
+13:47:32  z1 fires → sweep         → z1 over → CUT            observed 13:47:33.614 ✓
+                                   → z2 at 374 s, spared, TIMER UNTOUCHED
+13:52:13  zone 1 reopens           → arm z1, due 14:07:13
+13:56:18  z2 fires, z2 flowing     → z2 over → CUT            observed 13:56:19.691 ✓
+                                   → z1 at 245 s, spared
+                                   → ⚠️ z1's ARM CANCELLED     14:07:13 never happens ✓
+14:02:44  zone 2 reopens           → arm z2, due 14:17:44
+14:17:44  z2 fires → sweep         → z2 over → CUT
+                                   → z1 now 1531 s → CUT      observed both 14:17:45.629 ✓
+```
+
+Every cut, **and the non-cut at 14:07:13**, from the rule.
+
+### 5d. Case study 5's `00/00`, derived
+
+```text
+15:51:00.260  zone 2 opens                → arm z2, due 16:06:00
+15:59:12.974  zone 1 opens                → arm z1, due 16:14:12
+16:06:00.114  VALVE pauses zone 2                  ← the valve wins by 0.146 s
+16:06:00.260  z2 timer due — ZONE 2 ALREADY STOPPED
+                                          → sweep runs, cuts nothing
+                                          → z1's arm SURVIVES   ← the whole difference
+16:14:12.891  VALVE pauses zone 1
+16:14:12.974  z1 fires → sweep            → zone 2 flowing at 1392.5 s → CUT
+                                                     observed 16:14:13.766 ✓
+```
+
+The `00/00` two case studies could not explain falls straight out of the rule. Both maximums
+were 900 s there, so the valve beat the controller to zone 2 — and that is exactly the case
+where the disarm does not happen.
+
+### 5e. The one-line statement
+
+> **A zone-2 timeout sweep silently disarms zone 1's timer, so zone 1 loses its
+> maximum-duration protection until a later sweep catches it over the limit.**
+
+Consequence for anyone running this hardware: **with the controller as the authority, zone 1's
+15-minute limit is not enforced** whenever zone 2 has timed out during the session. It overran
+by **28:05, 10:32 and 11:07** here, and was only ever stopped as collateral.
 
 ## 6. ⭐ The shower does not end when the water stops
 
@@ -165,7 +243,22 @@ intervened:
 `0x184` (388) is the configured `defaultOutletTemperature`. Reverting to it is what session-end
 means.
 
-### 6a. ⚠️ This corrects case study 4
+### 6a. ⚠️ The ~120 s value is not fixed
+
+A seventh measurement, from the setup leg of the 2026-08-19 experiment, does not fit:
+
+```text
+16:06:32.945  water off by hand, temp 0x190 (400) = 104.0 °F
+16:07:12.957  +40.01s   zone 1 reverts to 0x184 (388)
+16:07:13.065  +40.12s   zone 2 reverts
+```
+
+**40.1 s, well outside the 118.68–121.09 s cluster.** The only visible difference is that this
+leg was **stopped by hand**, where all six clustered cases were stopped by a timer. The
+ordering claim — the session ends *after* the water stops, not at it — is unaffected; the
+**value** is not a constant, and should not be quoted as one.
+
+### 6b. ⚠️ This corrects case study 4
 
 [Case study 4 §5](04_two_touchscreens_and_what_off_means.md) records the ~120 s event as
 **"a `0x40` pause self-terminates into `0x00` after ~2 minutes."**
@@ -256,36 +349,57 @@ inert at 60 min — and the **GCS message arrived first every single time**, by 
 | CS4 §5: "a `0x40` pause self-terminates after ~2 min" | **the session ends ~120 s after all water stops**, pause or no pause. Three counterexamples here with zero `0x40`. |
 | `intro.md` §3a: "40 of 61 teardowns at 119.6–120.7 s" | same measurements, different mechanism — session end, not pause teardown |
 | Session 11: HUB-message-first implies controller-initiated | **falsified**, §9 |
-| "The controller times each zone" | it arms timers on events and **sweeps all zones** when one fires |
+| "The controller times each zone" | it arms timers on events and **sweeps all zones** when one fires |\n| "Zone 1 arms only when zone 2 is idle" (this study, first draft) | a correlation, not the cause. **Zone 1 always arms; a zone-2 sweep disarms it** — §5 |\n| "Zone 1's arming is unreliable" | **it is not.** With zone 2 never opened, zone 1 armed 4 of 4 (§11) |\n| The ~120 s session-end delay as a constant | one measurement at **40.1 s** — §6a |
 
-## 11. The experiment this specifies
+## 11. ✅ The experiment, run 2026-08-19 16:11–17:19
 
-Run with **GCS 60 min, HUB 15 min, Endless Shower OFF**, zone 2 never opened, temperature and
-flow untouched after the start.
+Run to the protocol in §5's predecessor: **GCS 60 min, HUB 15 min, Endless Shower off, zone 2
+never opened, single outlet, temperature constant at `0x184` (388) 101.8 °F.** The owner added a
+fourth leg beyond the specified three.
 
-* **Run 1** — start zone 1 alone by `valveOnOff`; expect a cut at ~15 min; reopen zone 1 from
-  the touchscreen **within 60 s**, while the Anthem Plus screen is still lit (same controller
-  session, per §6); wait 16 min.
-* **Run 2** — a separate shower, started by opening zone 1 alone **from the touchscreen**; wait
-  16 min.
+| leg | opened | route | gap from previous cut | cut at |
+|---|---|---|---|---|
+| 1 | 16:11:43.975 | `valveOnOff` | — | **900.45 s** |
+| 2 | 16:27:02.441 | touchscreen | **18.0 s** — same session, screen still lit | **901.25 s** |
+| 3 | 16:48:43.192 | touchscreen | 398.7 s — new session | **900.51 s** |
+| 4 | 17:03:58.979 | touchscreen | **15.3 s** — same session | **900.55 s** |
 
-| Run 1 | Run 2 | conclusion |
-|---|---|---|
-| not cut | cut | **same-session restart is the blocker** — the controller will not re-arm a zone inside a session it has already timed |
-| not cut | not cut | the **start route** decides arming |
-| cut | cut | arming is flaky, not rule-governed |
+**4 of 4 cut.** What it settled:
 
-⚠️ **Restore matched durations before re-enabling Endless Shower**, or §8's silent failure is
-live.
+* **"Arms once per session" is dead.** Legs 2 and 4 reopened 18.0 s and 15.3 s after a cut,
+  inside the grace, and both re-armed and were cut.
+* **"The start route decides" is dead.** Three of four legs were touchscreen-opened; all armed.
+* **Zone 1's timer is not unreliable.** With zone 2 never opened there was nothing to disarm it,
+  and it fired every time — which is what pointed at §5's mechanism.
+
+⚠️ **The protocol had a design flaw, recorded so it is not repeated.** It required zone 2 to
+stay closed, to stop its sweep confounding the read. Zone 2's sweep **is** the mechanism, so the
+experiment was structurally incapable of observing it and could only eliminate the two wrong
+hypotheses. It did that decisively; the mechanism came from simulation afterwards.
+
+### 11a. The test still outstanding
+
+The disarm has been observed only with zone 2 timing out **while flowing**. To confirm §5a's
+condition directly rather than by simulation:
+
+> Open zone 2 and let it run. Open zone 1 a few minutes later. Before zone 2's 15 minutes are
+> up, **stop zone 2 by hand.** Then watch whether zone 1 is still cut at its own 15 minutes.
+>
+> Cut → the disarm needs zone 2 to actually be swept, as §5a says and case study 5 implies.
+> Not cut → the disarm happens on expiry regardless, and case study 5 needs another explanation.
 
 ## 12. Open
 
-1. **What arms a timer** (§5). The experiment in §11 is running.
-2. **Which zones a sweep clears is fully explained; which events arm one is not.** Control
-   events (a setpoint change) can arm one — §5.
+1. **What else arms a timer.** Flow starts do; a **setpoint change** apparently does too — the
+   14:58:15.743 sweep traces back 900.32 s to the owner's touchscreen temperature change at
+   14:43:15.423, with no zone starting then. `sweep_sim.py` does not model this, and it is the
+   one controller-driven stop the model cannot produce.
+2. **§5a's condition, confirmed only by simulation.** The direct test is §11a.
 3. **§8's warning bug.** Cheap fix, not done.
-4. Whether the ~120 s session-end value is configurable, and whether it is the same 2 minutes
-   on both products.
+4. **The session-end delay is not a constant** — six cases at ~120 s, one at 40.1 s (§6a).
+   Timer-stopped versus hand-stopped is the visible candidate.
+5. **Whether the disarm survives a firmware update.** Everything here is
+   **application `2.88` / OS `5.4`**, and that reading is from 2026-08-10 (§1).
 
 ## 13. Sources
 
@@ -295,4 +409,4 @@ live.
 | Valve words, `cfgW`, message ordering | `mqtt_raw_20260819T{194552,202559,212223}Z_*.jsonl` |
 | Session-end revert table | all captures on or after 2026-08-15 |
 | Two independent session ends, screen behaviour | **owner, 2026-08-19** — physical screens, not the wire |
-| CS5 arithmetic | `05_three_restarts_and_the_unexplained_00.md` §2, §4 |
+| CS5 arithmetic | `05_three_restarts_and_the_unexplained_00.md` §2, §4 |\n| The experiment, four legs | `cutoff_20260819T212223Z_72_701402e1.jsonl`, `mqtt_raw_20260819T212223Z_72_52ea9d5b.jsonl` (same connection, appended) |\n| Model scoring, 14 hits / 0 false alarms | `kohler-work/sweep_sim.py`, five sessions |\n| Controller firmware 2.88 / OS 5.4 | `captures/20260810_133428_hub_config.json` `/configuration/about/firmware` |\n| The mechanism itself | **owner's hypothesis, 2026-08-19**; simulated and confirmed here |
