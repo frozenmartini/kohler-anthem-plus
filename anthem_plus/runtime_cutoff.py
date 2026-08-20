@@ -198,14 +198,34 @@ class _NullJournal:
 # * **Too loose** — a deliberate stop is mistaken for a cutoff and the water comes back on by
 #   itself, which is the outcome this whole feature exists to avoid causing accidentally.
 #
-# 10 s is ~7.5x the worst observed jitter and still 33x clear of the nearest real pause.
+# **Tightened from 10 s to 2 s on 2026-08-19.** The 10 s figure was set against a worst
+# observed deviation of 1.32 s — a number from the 2026-08-13/14 flow-experiment and
+# valve-reboot era, which is now excluded from the corpus (see `pause_resolution.py`).
+#
+# Every valve cutoff measured since the corpus floor lands within **0.232 s** of its limit:
+#
+#     3599.768 s vs 3600   -0.232      case study 1
+#      899.918 s vs  900   -0.082      case study 3
+#      899.85 / 899.92 / 899.84        case study 5
+#      899.79 / 899.78                 case study 6
+#
+# 2 s is still **8.6x the worst of those**, and these are the detector's own measurements, so
+# MQTT delivery jitter is already inside them.
+#
+# It buys a fivefold reduction in the one accepted risk: pressing off on the first-generation
+# touchscreen writes `0x40` on both zones, byte-identical to a preset-driven cutoff, so ending
+# a shower within this window of the limit restarts the water. That exposure is now 2 s in
+# whatever the duration is, not 10.
 #
 # The case that keeps it from being looser: **a GCS-only install has no Anthem Plus**, so the
 # touchscreen is the primary control surface — and a touchscreen pause writes `0x40`, exactly
 # like a cutoff, with no `note_local_write()` guard because Home Assistant did not send it.
 # Somebody who knows their shower cuts out at 15 minutes and pauses it at 14:55 is a
 # plausible user, not a contrived one, and they must not have the water restarted on them.
-CUTOFF_TOLERANCE_SECONDS = 10.0
+#
+# ⚠️ Tightening fails in the SAFE direction — a missed cutoff leaves the water off. Loosening
+# does not. Do not raise this without measurements from hardware that needs it.
+CUTOFF_TOLERANCE_SECONDS = 2.0
 
 # A close is ignored if the integration itself **closed that zone** within this window.
 # Without it, stopping the shower from Home Assistant at the limit would be read as the timer
