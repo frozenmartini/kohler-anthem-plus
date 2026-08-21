@@ -337,13 +337,8 @@ RELOAD_IGNORED_DATA_KEYS = frozenset(
     {CONF_REFRESH_TOKEN, CONF_OUTLET_RUN_TIMES, CONF_MOBILE_DEVICE_ID}
 )
 
-# Options the coordinator reads live from `entry.options` on every access instead of caching,
-# so they already take effect the moment they are saved and a reload would be pure cost.
-#
-# Anything NOT listed here reloads. An option added later therefore works by default, and
-# only an option proven to be read live gets added to this set — a decision someone has to
-# write down rather than inherit by accident.
-RELOAD_IGNORED_OPTION_KEYS = frozenset({CONF_RESTART_ON_RUNTIME_CUTOFF})
+# `RELOAD_IGNORED_OPTION_KEYS` is defined further down, after the warmup constants it
+# names — see the Warmup auto-restore section.
 
 # ---------------------------------------------------------------------------
 # REMOVED 2026-08-15 — valve reboot counter, controller ping, outage counter
@@ -452,6 +447,37 @@ CONF_WARMUP_AUTO_RESTORE = "warmup_auto_restore"
 # actually in force rather than a default. Without it there is nothing to restore to, and
 # guessing "all outlets" would silently change a fixture set to "selected outlets".
 CONF_LAST_WARMUP_MODE = "last_warmup_mode"
+
+
+# Options the coordinator reads live from `entry.options` on every access instead of caching,
+# so they already take effect the moment they are saved and a reload would be pure cost.
+#
+# Anything NOT listed here reloads. An option added later therefore works by default, and
+# only an option proven to be read live gets added to this set — a decision someone has to
+# write down rather than inherit by accident.
+#
+# ⚠️ **That default is safe but not free, and the warmup pair paid for it.** Both were read
+# live from the first line they existed — `warmup_auto_restore`'s own docstring says "read
+# live from the entry options, *like `restart_on_runtime_cutoff`*, so the switch takes effect
+# immediately" — but neither was ever added here. So until 2026-08-21:
+#
+# * **Toggling the auto-restore switch reloaded the whole entry.** It writes
+#   `CONF_WARMUP_AUTO_RESTORE`, which fell through to a reload.
+# * **Choosing a warmup mode did too**, one beat later: a confirmed write calls
+#   `_remember_warmup_mode`, which persists `CONF_LAST_WARMUP_MODE`.
+#
+# Either way every entity flapped to `unavailable` for several seconds and the MQTT stream
+# was dropped and re-warmed — the exact cost `_async_update_listener` exists to avoid, paid
+# on two of the integration's own controls. Reported by the owner, who saw the integration go
+# unavailable every time they touched either one.
+#
+# `CONF_LAST_WARMUP_MODE` is written by the integration itself rather than by a user, and
+# `_async_seed_state` now writes it during setup, so leaving it out also meant a reload
+# chasing its own tail on the first start after the mode changed while Home Assistant was
+# down.
+RELOAD_IGNORED_OPTION_KEYS = frozenset(
+    {CONF_RESTART_ON_RUNTIME_CUTOFF, CONF_WARMUP_AUTO_RESTORE, CONF_LAST_WARMUP_MODE}
+)
 
 # One minute, as asked for. Long enough that a re-sync burst has finished writing before we
 # write back — restoring into the middle of one would just be overwritten again.
