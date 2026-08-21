@@ -1822,19 +1822,22 @@ as `/platform/api/{version}/commands/gcs/warmup`; the app substitutes `v1`.
 | `warmUpDisabled` | Off | **yes** | decompile |
 | `warmUpAllOutletsWithNoStartDelay` | Enable — all outlets, start immediately | **yes** | ✅ **live 2026-08-20** |
 | `warmUpSelectedOutletsWithNoStartDelay` | Enable — selected outlets only, start immediately | **yes** | ✅ **held by this valve right now** — live GET, 2026-08-20 |
-| `warmUpAllOutlets` | Enable — all outlets. ✅ **Written and exercised live 2026-08-21**: accepted by current firmware (200 + echo), and the warm-up runs **`0x8` (8) tenths = 0.8 °C ≈ 1.4 °F below setpoint** — `0x17C` (380) = 100.4 °F against a `0x184` (388) = 101.8 °F default — then restores setpoint when the pause ends. Pause behaviour is **identical** to `…WithNoStartDelay` (2 min at `0x40`/`0x40`, then `00`/`00`). The reduced target is the only measured difference; `delayStart` read `"Disabled"` on both panels throughout | no — legacy | ✅ **live 2026-08-21** |
+| `warmUpAllOutlets` | Enable — all outlets. ✅ **Written and exercised live 2026-08-21**: accepted by current firmware (200 + echo), and the warm-up ran at **`0x17C` (380) = exactly 38.0 °C** against a `0x184` (388) setpoint (displayed 102 °F), restoring setpoint when the pause ends. ⚠️ Whether that is *setpoint − `0x8` (8) tenths*, *setpoint floored to whole °C*, or a *fixed 38.0 °C target* is *undiscriminated* — one sample fits all three; see §3i for the decompile's ladder argument and the one-shower test that separates them. Pause behaviour is **identical** to `…WithNoStartDelay` (2 min at `0x40`/`0x40`, then `00`/`00`); `delayStart` read `"Disabled"` on both panels throughout | no — legacy | ✅ **live 2026-08-21** |
 | `warmUpSelectedOutlets` | Enable — selected outlets only, presumed to mirror the above | no — legacy | ⚠️ unverified |
 
-> ⚠️ **The 2026-08-20 decompile undercounts this — and it was NOT an older build.** Corrected
-> 2026-08-21: the decompiled APK was 3.0.1, the same build currently shipping (no newer arm64
-> exists — owner-verified), so the undercount was an **analysis gap in that dig, not a build
-> difference** — treat that dig's negative findings ("never branched on", "not a warmup
-> field") as unproven, not as facts about the app. It reported only
-> two modes as app-writable and filed `warmUpSelectedOutletsWithNoStartDelay` as unverified.
-> **The current Konnect app offers three** — off, all outlets, selected outlets, all with no
-> start delay — established by the owner against the app in their hands, 2026-08-20. Our own
-> captures agree: this valve *held* `warmUpSelectedOutletsWithNoStartDelay` three separate
-> times on 2026-08-13 with no other client in play, which no two-value app could have produced.
+> ⚠️ **How many modes the app can WRITE is disputed between two decompile passes and one live
+> record — currently unresolved.** Both passes were of the same 3.0.1 build (no newer arm64
+> exists — owner-verified 2026-08-21). The **second pass** (2026-08-21, "Start-Delay
+> Verdicts", §3i) claims exhaustively: three write sites carrying **two** distinct values
+> (`warmUpDisabled`, `warmUpAllOutletsWithNoStartDelay`), with
+> `warmUpSelectedOutletsWithNoStartDelay` written by none — proposing that Selected is set
+> from the **touchscreen**, where warm-up outlet membership lives. Against that stands this
+> file's own live record below ("Settled deliberately, 2026-08-20"): the owner set each mode
+> *from the app* and `gcs-state` read Selected back. Both cannot be right. **Tiebreaker
+> needed from the owner:** was the 08-20 Selected step really made on the phone-app screen?
+> If yes, the second pass has a missing write site (likely dynamically assembled enum
+> strings, which a literal grep misses) and its "exhaustive" label is wrong; if it was the
+> panel, the paragraph below gets corrected instead.
 >
 > **Write three, decode five.** The two delayed-start variants stay decodable because a valve
 > could be holding one, but nothing establishes what their delay is — the app has no control
@@ -2099,8 +2102,8 @@ Fix: `start_warmup` → `warmUp:"warmUpAllOutletsWithNoStartDelay"`; disable →
 
 | question | what is known | how to settle it |
 |---|---|---|
-| What *is* the "start delay"? | ⚠️ **Partially measured 2026-08-21 — and the obvious readings are wrong.** The proposed experiment was run (owner shower under `warmUpAllOutlets`): the 2-min `0x40`/`0x40` pause happens under **both** suffixes, so the suffix does not control the pause — which also kills the earlier hub-mapping lead ("Water Stays ON"/"Water Pauses" is the hub's own option, unrelated). The one measured difference: the delayed variant warms to **setpoint − `0x8` (8) tenths (0.8 °C)** — `0x17C` (380) vs `0x184` (388) — restoring setpoint at pause end. What "start delay" *names* is still unknown; `delayStart` read `"Disabled"` throughout, so a delay feature may simply have been off. Leading idea for the next dig: a remote-/scheduled-start flow (warm up before the user arrives), which would explain holding slightly under temperature. | APK dig (same 3.0.1 build — see §4 note) for the enum branches, the `0x8` offset, and `delayStart` semantics; or flip `delayStart` via `writeuiconfig` (**whole-record replace**). |
-| Is `delayStart` the referent? | A real per-panel UI-config field, observed `"Disabled"`. In the APK it is only ever copied through — never branched on, never bound to a control. It is the only start-delay concept in the system. | Flip it via `writeuiconfig`, re-read `gcsadvancestate`, see whether the mode suffix changes. ⚠️ That write is a **whole-record replace**. |
+| What *is* the "start delay"? | ⚠️ **The name is not recoverable from the APK — established by the second decompile pass, 2026-08-21 (§3i).** Behaviourally (owner shower, same day): the 2-min `0x40`/`0x40` pause happens under **both** suffixes (killing both the hub "Water Stays ON/Pauses" mapping and the pause reading of the name), and the delayed variant warmed at `0x17C` (380) = exactly 38.0 °C instead of the `0x184` (388) setpoint. The dig closed the remote-/scheduled-start lead (T4: no such flow; the one "Auto Warmup" string is dead and speaks of a bath) and found **no code branching on the suffix at all** (T2) — so whatever "delay" means, it lives in valve firmware, the panel UI, or Kohler's documentation, not the app. | **One legacy warm-up at a `0x179` (377) = 100 °F setpoint** discriminates the three temperature readings (§3i): fixed-38.0 °C → `0x17C` (380); floor-to-°C → `0x172` (370); −`0x8` tenths → `0x171` (369). |
+| Is `delayStart` the referent? | ⚠️ **Probably a dead end — second decompile pass, 2026-08-21 (§3i T3), now with provable scope.** Ten occurrences in 30,765 files: model declarations plus seven identical pass-through copy sites; never compared, never assigned a literal, no UI binding, and `delay` has zero hits in all ~3,240 string resources. **Its value domain is unknowable from the APK** — `"Disabled"` is just what this device reports. Firmware *could* still read it, but the app cannot set it meaningfully. | Deprioritized: flipping it via `writeuiconfig` means guessing blind values into a **whole-record replace** with no known domain — poor risk for a field the app provably ignores. |
 | Which outlets are "selected"? | Not exposed by the cloud API. The per-outlet `warmup` flag exists only on the MQTT **read** model; the writable outlet-config model has no such field. The local hub has per-zone `warmupOutlets` arrays. | The local hub API — [`../hub/local_api.md`](../hub/local_api.md), not the cloud one. |
 | ~~What keeps disabling it?~~ | ✅ **SOLVED 2026-08-21 — the hub's web UI. See §3h.** The experiment this row proposed was run by the owner: PIN sign-in alone disabled the mode within seconds, twice more for other UI actions, with the journal recording empty 120 s before-windows. | — |
 
@@ -2213,6 +2216,52 @@ starts (19 clean trials).
 warmup off and the integration puts it back — six for six on 2026-08-21 (four owner-driven,
 two probe logins), 63–69 s each, end to end. Without it, one PIN entry silently costs the setting until someone notices: that is
 exactly what the 08-20 seven-hour disable was.
+
+### 3i. The second decompile pass — "Start-Delay Verdicts", 2026-08-21
+
+A second, targeted pass over the same Konnect 3.0.1 APK (30,765 `.java` files), briefed by
+the "Start-Delay Dig" artifact after the legacy-mode shower test, returned via the
+"Start-Delay Verdicts" artifact. ⚠️ **The pass ran in a different environment** (Windows,
+`D:\kohler-work\`, its own notes file `GCS_NOTES.md`) — its claim that "`docs/gcs/api.md`
+does not exist" is true only of that machine; the two note sets must now be reconciled by
+hand.
+
+**Verdicts, all five targets closed:**
+
+1. **T1 — the warm-up temperature is not app-side.** No numeric warm-up field or temperature
+   arithmetic anywhere near warm-up code (`380`/`0x17C`: 0 hits in the anthem tree;
+   all 247 `warmUp` hits classified). The strongest finding is the number itself:
+   `0x17C` (380) is **exactly 38.0 °C and is not producible by any Kohler client** — it is
+   not a rung on the app's 64-entry Fahrenheit ladder (`h.z()`: 100 °F → `0x179` (377),
+   101 °F → `0x17F` (383)), and the Celsius path emits only whole degrees. The valve chose a
+   round Celsius target on its own. Three readings fit the single observed sample equally:
+   **fixed 38.0 °C**, **setpoint floored to whole °C**, **setpoint − `0x8` (8) tenths**. One
+   legacy warm-up at a `0x179` (377) = 100 °F setpoint discriminates them
+   (→ `0x17C` (380) / `0x172` (370) / `0x171` (369) respectively).
+2. **T2 — no code branches on the enum suffix.** Both readers (`q.java:892–904`,
+   `y.java:843`) collapse all four "on" enums into one Boolean. Single write funnel
+   `q.java:965 setWarmUp()` → … → `PlatformApiCall.writeWarmUpAPI`; write guard
+   `h.java:1028 V0()` is "any outlet open", not enum-related. ⚠️ Its companion claim —
+   the app writes only **two** values, never Selected — **collides with this file's own
+   08-20 live record** and is held as *disputed*, not accepted: see the mode-table
+   blockquote above for the tiebreaker.
+3. **T3 — `delayStart` is pure pass-through**, now with provable scope (§3e row updated).
+4. **T4 — no remote/scheduled start exists in this build.** `text_auto_warmup` ("automatically
+   warmup the bath at a set time interval") is declared and never referenced — a vestige, and
+   of a bath. `delay`, `preheat`, `remote start`: 0 hits; `schedule` hits are other products.
+   The origin of the word "delay" is **not recoverable from this APK**.
+5. **T5 — the 2-min pause is firmware-only** (no 120/120000 constant in the anthem tree), and
+   the write-side byte-3 builder `h.s1()` (`p315jj/h.java:450`) **confirms the bit map this
+   project already carries** in `anthem_plus/valve_hex.py`: bits 0–2 outlets, bit 6 (`0x40`)
+   zone run/pause — which is *why* the suffix never controlled the pause — and bit 7 (`0x80`)
+   = `skipWarmUp` on write. All five call sites pass `"0"`; the app never sets it. Matches
+   our decoder's read/write duality note (read = `errorFlag`); its write meaning remains
+   **untested on hardware**, and testing it means starting water with warm-up bypassed —
+   safety-relevant, owner-present only.
+
+**Display-scale note adopted from the pass:** `0x184` (388) is what the app's ladder writes
+for a *displayed* **102 °F** (the arithmetic 101.8 °F is not a value any UI shows). When
+naming setpoints against app/panel behaviour, prefer the display value.
 
 ## 4. Where to look in the decompile
 
