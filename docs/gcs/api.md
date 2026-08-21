@@ -2095,7 +2095,7 @@ Fix: `start_warmup` → `warmUp:"warmUpAllOutletsWithNoStartDelay"`; disable →
 
 | question | what is known | how to settle it |
 |---|---|---|
-| What *is* the "start delay"? | Nothing defines it. Zero occurrences of "delay" in the app's 3,278 string resources, and no timing field on any warmup model — the phrase exists only inside the enum string. | Send `warmUpAllOutlets` and time when outlets open against the `…WithNoStartDelay` baseline. |
+| What *is* the "start delay"? | Nothing defines it in the app. **Strong lead 2026-08-21 (§3h):** the hub UI's warmup modes are "Water Stays ON" / "Water Pauses" / off, and the owner describes "pauses" as: after warm-up the water pauses ~2 min and must be resumed or the session ends `00`/`00` — exactly GCS warmup behaviour. Likely `…WithNoStartDelay` = stays-on and the delayed variants = the 2-min pause. | Send `warmUpAllOutlets` and time when outlets open against the `…WithNoStartDelay` baseline. |
 | Is `delayStart` the referent? | A real per-panel UI-config field, observed `"Disabled"`. In the APK it is only ever copied through — never branched on, never bound to a control. It is the only start-delay concept in the system. | Flip it via `writeuiconfig`, re-read `gcsadvancestate`, see whether the mode suffix changes. ⚠️ That write is a **whole-record replace**. |
 | Which outlets are "selected"? | Not exposed by the cloud API. The per-outlet `warmup` flag exists only on the MQTT **read** model; the writable outlet-config model has no such field. The local hub has per-zone `warmupOutlets` arrays. | The local hub API — [`../hub/local_api.md`](../hub/local_api.md), not the cloud one. |
 | ~~What keeps disabling it?~~ | ✅ **SOLVED 2026-08-21 — the hub's web UI. See §3h.** The experiment this row proposed was run by the owner: PIN sign-in alone disabled the mode within seconds, twice more for other UI actions, with the journal recording empty 120 s before-windows. | — |
@@ -2119,10 +2119,11 @@ disables in one day, three of them inside a single web UI session with deliberat
 The SD-card scan is the telling one: it has nothing to do with water, so the write is not
 tied to valve-related actions. The hub runs one fixed routine on (seemingly) every UI action:
 
-1. **write the valve's warmup mode.** The written value is the hub's own record of the valve
-   settings, not the valve's live mode — it sent `warmUpDisabled` through all four events even
-   though the live mode was re-enabled before each one. (The two same-value announcements at
-   logout show that record can catch up; when and from where is not established.)
+1. **write `warmUpDisabled` to the valve.** ⚠️ *Corrected later the same day:* an earlier
+   version of this section said the value was "the hub's stale record of the valve settings".
+   **It is not — no readable hub config holds it** (see the probe below). It behaves as a
+   constant in the routine itself, hardcoded or defaulted — the §3d bug shape, in the hub's
+   own firmware.
 2. **+2.6–3.2 s:** publish its snapshots — `SHOWER_EXP_SNAPSHOT`, `STEAM_EXP_SNAPSHOT`,
    `ICE_SHOWER_EXP_SNAPSHOT`, `LUMIWAVE_EXP_SNAPSHOT`, `FAVORITES_SNAPSHOT`.
 3. **+4.7–5.0 s:** read back the valve's experience slots (`READ_GCS_EXPERIENCE_STS`).
@@ -2145,6 +2146,38 @@ restatement from the 08-14/08-15 Moes-outlet storm (`DEVICE_REBOOT_STS` ~4 s bef
 not actually changing). The 08-19 06:34:31Z disable — 62 s after the mode had been enabled —
 sits between two such bursts: "it always gets reverted" is this routine firing while a UI
 session was open.
+
+#### Probed with the PIN, same day: the value is in no readable hub config
+
+Two local-API logins (19:20:30Z, 19:23:05Z — `request_user_login` alone triggers the routine,
+so each probe was also the experiment) read **all 13 useful GET endpoints** while the push
+landed. Results:
+
+* `get_valve_settings.warmupmode` read **`"on"`** ("Water Stays ON") in the same seconds that
+  both logins pushed `warmUpDisabled`. A field reading `on` cannot be the source of a
+  `disabled` write. It has never tracked the valve either — on 08-18 it read `on` while the
+  valve's mode had been disabled for four days.
+* **No other endpoint carries any warmup field at all.** The literal string `warmUpDisabled`
+  exists on *no* hub surface, local or cloud — hub MQTT carries only the live flags
+  `showerwarmup`/`steamwarmup`, cloud `hub-state` only `showerWarmUp`. The enum lives solely
+  on valve surfaces (`GCS_WARM_STS`, `gcs-state`, `gcsadvancestate`) — the *result* of the
+  push, never its source.
+* So `warmupmode` is the hub's **own** warmup setting (it and `warmupOutlets` predict the
+  hub-run session warmup in case study 2 field by field), not a copy of the valve's mode —
+  and the disable is not read from anywhere observable.
+
+**Logout is client-side only.** The hub UI bundle's sign-out is
+`logout(){localStorage.removeItem("currentUser")}` — no HTTP call exists (there is no logout
+`req_command`). "Warmup survives logout" means *no trigger fires*, not that a correcting value
+is pushed. The two same-value `warmUpAllOutletsWithNoStartDelay` announcements observed once
+at 18:49Z on 08-21, ~1–2 min after a restore, did **not** recur after the probe cycles;
+their trigger is unidentified and they changed nothing.
+
+**Owner-supplied semantics for `warmupmode`** (2026-08-21), recorded because it maps cleanly
+onto the valve enum: "Water Stays ON" = after warm-up the selected shower starts immediately;
+"Water Pauses" = after warm-up the water pauses ~2 min and must be resumed or the session ends
+`00`/`00` — which is exactly how GCS warmup behaves. Leading (unmeasured) mapping:
+`on` ↔ `…WithNoStartDelay`, `pause` ↔ the delayed variants — see §3e's start-delay rows.
 
 #### Why the hub can afford this bug: the two warmups are independent settings
 
@@ -2170,8 +2203,8 @@ journal's `ours` flags), any MQTT-visible command (empty before-windows), and hu
 starts (19 clean trials).
 
 **Consequence:** with auto-restore (§3f) ON, every hub web UI session knocks the valve's
-warmup off and the integration puts it back — four for four on 2026-08-21, 63–69 s each, end
-to end. Without it, one PIN entry silently costs the setting until someone notices: that is
+warmup off and the integration puts it back — six for six on 2026-08-21 (four owner-driven,
+two probe logins), 63–69 s each, end to end. Without it, one PIN entry silently costs the setting until someone notices: that is
 exactly what the 08-20 seven-hour disable was.
 
 ## 4. Where to look in the decompile

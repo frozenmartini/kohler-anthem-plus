@@ -263,13 +263,21 @@ Two more pre-auth reads confirmed live: `get_hub_version_info` → `{"version":"
 hour ahead of local time**. Harmless for MQTT analysis, whose timestamps come from Home
 Assistant, but it will corrupt any correlation against a hub-side log or `get_error_log`.
 
-### Side effect: authenticating here makes the hub publish to the CLOUD
+### ⚠️ Side effect: authenticating here makes the hub publish to the CLOUD — and it DISABLES the valve's warmup
 
 Each `request_user_login` was followed within seconds by a burst of five HUB snapshot messages
 (`SHOWER_EXP`, `STEAM_EXP`, `ICE_SHOWER_EXP`, `LUMIWAVE_EXP`, `FAVORITES`) plus a
 `READ_GCS_EXPERIENCE_STS` on the cloud MQTT stream. Reproducible over two logins. Worth knowing
 before reading a capture that contains a local-API session — those records are not water
 activity.
+
+**2026-08-21: this burst is half of a bigger routine.** The login also writes
+`warmUpDisabled` to the GCS valve — a constant, not a value from any readable config
+(`get_valve_settings.warmupmode` read `"on"` while two probe logins pushed the disable). When
+this section was first written, the 08-19 06:34:31Z "unexplained" disable sat between these
+very two documented logins. Full story: [`../gcs/api.md`](../gcs/api.md) §3h. **Any PIN login
+here — including `hub_local_read.py` — will disable the valve's warmup**; the integration's
+auto-restore puts it back ~60 s later if enabled.
 
 ---
 
