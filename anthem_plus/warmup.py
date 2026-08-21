@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from .const import WARMUP_DISABLED
 
-__all__ = ["should_restore_warmup"]
+__all__ = ["restore_target", "should_restore_warmup"]
 
 
 def should_restore_warmup(
@@ -60,3 +60,31 @@ def should_restore_warmup(
     ):
         return False
     return True
+
+
+def restore_target(taken_away: str | None, remembered: str | None) -> str | None:
+    """Which mode a restore should reinstate, given the two things we might know.
+
+    ``taken_away`` is ``before`` from the announcement that disabled warmup — the mode the
+    valve was demonstrably in one message ago. ``remembered`` is the persisted
+    ``last_warmup_mode``.
+
+    **``taken_away`` wins**, because it is the more current of the two and cannot be stale:
+    it comes from the same announcement being acted on, while ``remembered`` survives across
+    restarts and may describe a mode that has since been changed.
+
+    This exists as its own function because the bug it prevents was precisely the two
+    disagreeing. On 2026-08-20 the coordinator asked ``should_restore_warmup`` — which
+    refuses unless ``before`` is a known enabled mode, so it had *proved* one existed — and
+    then looked the target up in ``remembered``, which was ``None`` because that session had
+    only ever read the mode over REST, never seen it announced. The journal recorded
+    ``"before": "warmUpAllOutletsWithNoStartDelay"`` beside ``"restores_to": null`` and the
+    valve stayed disabled for seven hours.
+
+    So the invariant worth testing, and the one ``test_warmup_restore_target.py`` asserts, is
+    that **whenever ``should_restore_warmup`` returns True, this returns a mode.**
+    """
+    for mode in (taken_away, remembered):
+        if mode and mode != WARMUP_DISABLED:
+            return mode
+    return None

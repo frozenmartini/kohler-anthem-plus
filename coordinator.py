@@ -61,6 +61,7 @@ from .anthem_plus import (
     MSG_GCS_SOLO_STATUS,
     WARMUP_DISABLED,
     WARMUP_MODES_CURRENT,
+    restore_target,
     should_restore_warmup,
     get_valve_model,
     model_for_topology,
@@ -1063,6 +1064,19 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "GET", GCS_STATE_PATH.format(device_id=self.gcs_device.device_id)
                 )
                 self.gcs_state.apply_rest_state(payload)
+                # The third way to learn a mode, and the one `_remember_warmup_mode`'s
+                # docstring used to miss. MQTT alone forgets a mode set while the stream was
+                # down; our own writes alone forget a mode set from the app or touchscreen;
+                # and *both* forget a mode that was simply already in force when we started.
+                #
+                # That third gap disabled auto-restore for seven hours on 2026-08-20: the
+                # valve was in `warmUpAllOutletsWithNoStartDelay`, read correctly over REST
+                # at 19:35:32Z, then disabled at 20:36:28Z — and the restore was skipped with
+                # "no enabled mode has ever been seen", because no *announcement* had
+                # happened in that session. See `_async_restore_warmup`.
+                mode = self.gcs_state.warmup_mode
+                if mode is not None and mode != WARMUP_DISABLED:
+                    self._remember_warmup_mode(mode)
             except KohlerError as err:
                 _LOGGER.debug("Could not seed GCS state: %s", err)
 
@@ -1624,10 +1638,16 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def _remember_warmup_mode(self, mode: str) -> None:
         """Record an enabled mode as what auto-restore should reinstate.
 
-        Called from both directions — the valve announcing a mode over MQTT, and a write of
-        ours confirming — because either alone leaves a gap. MQTT alone means a mode chosen
-        while the stream is down is never remembered; the write alone means a mode set from
-        the Konnect app or the touchscreen is never remembered, and those are most of them.
+        Called from three directions, because any one of them alone leaves a gap:
+
+        * **The valve announcing a mode over MQTT.** Alone, it forgets a mode chosen while
+          the stream was down.
+        * **A write of ours confirming.** Alone, it forgets a mode set from the Konnect app
+          or the touchscreen — and those are most of them.
+        * **The REST seed at setup** (``_async_seed_state``). Alone, neither of the other two
+          knows about a mode that was simply already in force when the integration started.
+          Added 2026-08-21: its absence cost a seven-hour unrestored disable on 08-20, since
+          a mode read but never announced left auto-restore with no target.
 
         Seeing an enabled mode also ends any fight in progress: the counter that stops an
         endless restore loop is reset here, because the mode staying enabled is exactly the
@@ -1687,7 +1707,7 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ours=ours,
             restoring=restoring,
             auto_restore=self.warmup_auto_restore,
-            restores_to=self.last_warmup_mode,
+            restores_to=restore_target(before, self.last_warmup_mode),
             water_running=None if state is None else state.is_running,
             before_window=self._message_window(now - WARMUP_CONTEXT_BEFORE_SECONDS, now),
             window_seconds=WARMUP_CONTEXT_BEFORE_SECONDS,
@@ -1702,19 +1722,36 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._warmup_journal("restore_skipped", reason="a restore is already pending")
             return
         self._warmup_restore_task = self.hass.async_create_task(
-            self._async_restore_warmup()
+            self._async_restore_warmup(before)
         )
 
-    async def _async_restore_warmup(self) -> None:
+    async def _async_restore_warmup(self, taken_away: str | None = None) -> None:
         """Wait out the delay, re-check, and put the mode back.
 
         Re-checks rather than cancels: during the wait the mode may have been re-enabled by
         hand, the switch turned off, or the shower started. Every one of those means do
         nothing, and asking at the end is simpler than keeping a cancellation path correct
         for each.
+
+        ``taken_away`` is the mode the disable moved *away* from, and it is the restore
+        target. ``should_restore_warmup`` refuses unless ``before`` is a known enabled mode,
+        so whenever a restore is scheduled that value is present and is the most current
+        answer available — more current than ``last_warmup_mode``, which is a persisted
+        memory that can be older or, before 2026-08-21, absent entirely.
+
+        ⚠️ **It used to restore to ``last_warmup_mode`` alone, and that had a seven-hour
+        failure on 2026-08-20.** The valve was disabled out of
+        ``warmUpAllOutletsWithNoStartDelay``; the decision function said restore; the journal
+        recorded ``"before": "warmUpAllOutletsWithNoStartDelay"`` and ``"restores_to": null``
+        in the same entry — because no enabled mode had been *announced* during that
+        integration session, only read over REST at setup. The mode being taken away was in
+        hand the whole time and was thrown away. Seeding from REST (see
+        ``_async_seed_state``) closes the same gap from the other side.
         """
-        target = self.last_warmup_mode
+        target = restore_target(taken_away, self.last_warmup_mode)
         if target is None:
+            # Now unreachable for a genuine disable — kept because it is cheap, and because
+            # a future caller that passes nothing should say so rather than write a default.
             _LOGGER.warning(WARMUP_AUTO_RESTORE_NO_TARGET)
             self._warmup_journal(
                 "restore_skipped", reason="no enabled mode has ever been seen"
