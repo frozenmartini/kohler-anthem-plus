@@ -735,6 +735,10 @@ class HubState:
     steam_on: bool | None = None
     light_on: bool | None = None
     active_favorite_id: str | None = None
+    # The running favourite's name, as `FAVORITE_STS` reports it. Kept beside the id because
+    # the message carries both, and the name is usable before the favourites list has been
+    # seeded — see `_apply_favorite`.
+    active_favorite_name: str | None = None
     favorites: list[dict[str, Any]] = field(default_factory=list)
     last_update: float | None = None
     # Whether the controller is running a warm-up cycle. Carried on `SHOWER_VALVE_STS` at the
@@ -842,14 +846,57 @@ class HubState:
         return changed
 
     def _apply_favorite(self, envelope: Envelope) -> bool:
-        raw = envelope.raw.get("data") or {}
-        favorite_id = raw.get("favoriteid") or raw.get("favoriteId")
+        """Track which favourite is running, from `FAVORITE_STS`.
+
+        ⚠️ **This message carries `id` / `name` / `status` inside its attributes, and never
+        `favoriteid`.** That key is real, but it belongs to the *accessory* messages —
+        `MUSIC_STS`, `LIGHT_STS` and `STEAM_STS` each carry top-level `favoriteid` and
+        `experienceid` naming whatever drives them. An earlier version of this method read
+        `favoriteid` here, so it resolved to `None` on every message, `active_favorite_id`
+        was permanently unset, and the controller's Favourite dropdown snapped back to `Off`
+        the moment any other message arrived. Corrected 2026-08-21 against a live activation.
+
+        **`status` matters as much as `id`.** Start and stop carry the *same* id and differ
+        only in `status`, so keying on the id alone would latch the dropdown on forever::
+
+            {"id": "1", "name": "Hair Wash", "status": "ON"}    <- activated
+            {"id": "1", "name": "Hair Wash", "status": "OFF"}   <- stopped, 96 s later
+
+        A missing `status` is treated as ON, the same direction of error as `_name_of` and
+        the `isExperience` filter in `select.py`: prefer showing a favourite over hiding one.
+
+        The name travels with the message, which is why it is kept — it lets the dropdown
+        show a running favourite before the favourites list has been seeded.
+        """
+        favorite_id: str | None = None
+        name: str | None = None
         for attribute in envelope.attributes:
-            favorite_id = attribute.get("favoriteid") or favorite_id
+            if not isinstance(attribute, dict):
+                continue
+            # `favoriteid` accepted only as a fallback, for a firmware that might use the
+            # accessory messages' spelling here. Live traffic uses `id`.
+            identifier = attribute.get("id") or attribute.get("favoriteid")
+            if identifier is None:
+                continue
+            if str(attribute.get("status") or "").strip().upper() == "OFF":
+                # An explicit stop. Break rather than continue, so a trailing attribute
+                # cannot resurrect the favourite the controller just turned off.
+                favorite_id = name = None
+                break
+            favorite_id = str(identifier)
+            name = str(attribute.get("name") or "").strip() or None
+            break
+
         # "0" means nothing is driving the system.
-        active = None if str(favorite_id) in {"0", "None", ""} else str(favorite_id)
-        changed = active != self.active_favorite_id
-        self.active_favorite_id = active
+        if str(favorite_id) in {"0", "None", ""}:
+            favorite_id = name = None
+
+        changed = (favorite_id, name) != (
+            self.active_favorite_id,
+            self.active_favorite_name,
+        )
+        self.active_favorite_id = favorite_id
+        self.active_favorite_name = name
         return changed
 
     def _apply_favorites_snapshot(self, envelope: Envelope) -> bool:

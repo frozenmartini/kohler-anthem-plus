@@ -340,15 +340,29 @@ class HubFavouriteSelect(KohlerControllerEntity, SelectEntity):
 
     @property
     def options(self) -> list[str]:
-        return [OPTION_OFF] + [self._name_of(f) for f in self._favourites]
+        names = [self._name_of(f) for f in self._favourites]
+        # `FAVORITE_STS` can name a favourite the list has not caught up with — one created
+        # moments ago, or a cold start before the first snapshot lands. Home Assistant logs
+        # an error on every update when `current_option` is missing from `options`, so carry
+        # it while it is in force, the same way `ValveWarmupSelect` carries a legacy mode.
+        state = self._state
+        running = None if state is None else state.active_favorite_name
+        if running and running not in names:
+            names.append(running)
+        return [OPTION_OFF] + names
 
     @property
     def current_option(self) -> str | None:
         """The running favourite, or ``Off``.
 
-        ``FAVORITE_STS`` reports the active id, with ``"0"`` meaning nothing is driving the
-        system. An id we cannot name falls back to ``Off`` rather than inventing an option,
-        since Home Assistant logs an error whenever the current option is not in the list.
+        ``FAVORITE_STS`` reports the active favourite's **name** alongside its id, and the
+        name is preferred: it is right even before the favourites list has been seeded, and
+        it cannot be thrown off by ids being reassigned when a favourite is deleted. The id
+        lookup stays as a fallback for a message that somehow carried no name.
+
+        ``active_favorite_id`` of ``None`` means nothing is driving the system — either a
+        ``status: "OFF"`` message or an id of ``"0"``. An id that resolves to no name falls
+        back to ``Off`` rather than inventing an option.
         """
         if self._optimistic is not None:
             return self._optimistic
@@ -358,6 +372,10 @@ class HubFavouriteSelect(KohlerControllerEntity, SelectEntity):
         active = state.active_favorite_id
         if active is None:
             return OPTION_OFF
+        # Safe to return directly: `options` carries this name whether or not the favourites
+        # list knows it yet.
+        if state.active_favorite_name:
+            return state.active_favorite_name
         for favorite in self._favourites:
             if str(favorite.get("id")) == str(active):
                 return self._name_of(favorite)
@@ -368,6 +386,9 @@ class HubFavouriteSelect(KohlerControllerEntity, SelectEntity):
         state = self._state
         return {
             "active_favorite_id": None if state is None else state.active_favorite_id,
+            "active_favorite_name": (
+                None if state is None else state.active_favorite_name
+            ),
             "favourite_count": len(self._favourites),
         }
 
