@@ -460,12 +460,65 @@ Music telemetry is **thin** across every read. Verified live while SD-card music
 { "type": "", "code": "MUSIC_STS", "favoriteid": "0", "experienceid": "0",
   "attributes": [ { "status": "ON", "code": "…", "errorcode": "…", "errorstate": "…", "component": "…" } ] }
 ```
-- `favoriteid` / `experienceid` = which favourite/experience is driving the music (`"0"` = none / direct device control).
+- `favoriteid` / `experienceid` = which favourite/experience is driving **this accessory**
+  (`"0"` = none / direct device control). ⚠️ **Not the same as "favourite N is active"** — see
+  §5.5.
 - `attributes[].status` = `ON`/`OFF`; **no source/volume/track** here either.
+
+### 5.5 ⚠️ The accessory messages cannot tell you whether a favourite is running
+
+`MUSIC_STS`, `STEAM_STS` and `LIGHT_STS` each carry a top-level `favoriteid`, and it is tempting
+to read favourite state off them. **Do not.** They answer *"is this accessory running, and if so
+what put it there"* — attribution for one component. Whether a favourite is active is a different
+question, and only `FAVORITE_STS` answers it.
+
+**Because a favourite is a composite, and its components are optional.** A favourite bundles
+`water`, `steam`, `music` and `light` (§3.3), and which of them it carries depends on what the
+owner put in it and what the hub is actually wired to — this controller can drive a steam
+generator and an amplifier, and an install may have neither. From a live read of this account's
+six favourites:
+
+| id | title | water | steam | music | light |
+|---|---|---|---|---|---|
+| 1 | Soap Pause | set | inert | — | — |
+| 2 | Flush Cold | set | inert | `aux`, vol 70 | — |
+| 3 | Music Only | set | inert | `aux`, vol 70 | — |
+| 4 | SD music | set | inert | `sdcard`, vol 50 | — |
+| 5 | V1Z1O1 | set | inert | — | — |
+| 6 | AllOff-omit | set | inert | — | — |
+
+Two consequences:
+
+* **A favourite with no music emits no music-side evidence at all.** Activate "Soap Pause" and
+  `MUSIC_STS` never mentions it — a client watching `favoriteid` concludes nothing is running.
+* **Attribution can drop while the favourite is still running.** Turn the amplifier off by hand
+  during a music favourite and that message's `favoriteid` goes to `"0"`, but the favourite is
+  still driving water. Measured 2026-08-21: `MUSIC_STS` reported `favoriteid: "0"` at
+  07:23:59.150Z, **0.6 s before** `FAVORITE_STS` reported the favourite itself OFF at
+  07:23:59.766Z. The accessory leads the favourite, so the two disagree during the gap.
+
+⚠️ **"Absent" is spelled three different ways**, so do not test for it with one rule:
+
+| component | absent looks like | present looks like |
+|---|---|---|
+| `music` | object with every field `null` | `{"volume": 70, "source": "aux", …}` |
+| `light` | empty list `[]` | `[LightGroupModel, …]` |
+| `steam` | `{"temperature": 0, "time": 0}` — **the key is always there** | non-zero temperature/time |
+| `water.zone2` | literal `null` | `{"temperature": …, "flowrate": …, "outlets": […]}` |
+
+`steam` is the trap: the key is present on all six favourites above and none of them drive steam.
+Testing `if "steam" in favourite` finds steam everywhere.
+
+**So: `FAVORITE_STS` is the source of truth for favourite state**, and it carries the `status`
+`ON`/`OFF` needed to tell activation from deactivation. That is what
+`HubState._apply_favorite` reads, and reading `favoriteid` there instead was the bug fixed on
+2026-08-21.
 
 > **Recommended (per user's setup):** treat **MQTT as the primary event-driven state source** and use
 > REST reads for config/capabilities and on-demand snapshots. Music, over both channels, is
-> effectively **on/off** (+ which favourite/experience, via MQTT `favoriteid`).
+> effectively **on/off**, plus *which favourite drove this accessory* via MQTT `favoriteid` —
+> which is per-accessory attribution and **not** a reading of whether that favourite is still
+> running. §5.5.
 
 ---
 

@@ -851,10 +851,28 @@ class HubState:
         ⚠️ **This message carries `id` / `name` / `status` inside its attributes, and never
         `favoriteid`.** That key is real, but it belongs to the *accessory* messages —
         `MUSIC_STS`, `LIGHT_STS` and `STEAM_STS` each carry top-level `favoriteid` and
-        `experienceid` naming whatever drives them. An earlier version of this method read
-        `favoriteid` here, so it resolved to `None` on every message, `active_favorite_id`
-        was permanently unset, and the controller's Favourite dropdown snapped back to `Off`
-        the moment any other message arrived. Corrected 2026-08-21 against a live activation.
+        `experienceid`. An earlier version of this method read `favoriteid` here, so it
+        resolved to `None` on every message, `active_favorite_id` was permanently unset, and
+        the controller's Favourite dropdown snapped back to `Off` the moment any other
+        message arrived. Corrected 2026-08-21 against a live activation.
+
+        ⚠️ **Nor are those a substitute — they answer a different question.** An accessory's
+        `favoriteid` is attribution for *that component*: "the music playing right now was
+        started by favourite 2". Whether favourite 2 is still running is not the same thing,
+        because **a favourite is a composite and its components are optional** — it bundles
+        `water`, `steam`, `music` and `light`, and carries only what the owner put in it and
+        what the hub is wired to. So:
+
+        * A favourite with no music never appears in `MUSIC_STS` at all. Four of this
+          account's six favourites carry no music; watching `favoriteid` would report nothing
+          running while the shower is on.
+        * Attribution drops before the favourite does. Measured 2026-08-21, `MUSIC_STS` went
+          to `favoriteid: "0"` at 07:23:59.150Z, **0.6 s before** `FAVORITE_STS` reported the
+          favourite itself `OFF` at 07:23:59.766Z.
+
+        `FAVORITE_STS` is the one message that speaks for the favourite. See
+        `docs/hub/cloud_api.md` §5.5 for the component table and the three different ways an
+        absent component is spelled.
 
         **`status` matters as much as `id`.** Start and stop carry the *same* id and differ
         only in `status`, so keying on the id alone would latch the dropdown on forever::
