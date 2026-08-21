@@ -2015,6 +2015,30 @@ that distinguish a configuration write from an ordinary status — `configChange
 `configWriteAllowedFlag`, `currentSystemState`, `warmUpStatus`. The raw capture beside it holds
 every payload in full; duplicating that here would bury the one thing this file is for.
 
+#### What a *known-cause* warmup change looks like on the wire — 2026-08-21
+
+The method below asks what an unexplained change has that a quiet hour does not. That comparison
+needs the third case too: a change whose cause is known. Two clean samples, both the owner
+setting the mode from the Home Assistant dropdown:
+
+| | change 1 | change 2 |
+|---|---|---|
+| `GCS_WARM_STS` carrying the new mode | 07:52:44.970Z | 07:53:12.710Z |
+| `READ_GCS_EXPERIENCE_STS` | 07:52:49.679Z (**+4.71 s**) | 07:53:17.468Z (**+4.76 s**) |
+
+So a deliberate write produces **a small, consistent two-message burst**: the echo, then an
+experience catalogue about 4.7 s behind it. Nothing else on either channel.
+
+Worth having for three reasons. It is a re-sync burst with a known cause, so "sat inside a burst
+of config traffic" is **not on its own evidence of an external writer**. It is *small* — two
+messages — where the unexplained disables sit in something larger, so burst size may discriminate.
+And `READ_GCS_EXPERIENCE_STS` following a warmup write at a fixed offset is a signature to
+subtract before reading any window.
+
+⚠️ Both were journalled as **`announced`, not `mode`** — the REST readback moves our state before
+the echo lands (§3g). Both carry `ours: true`, which is the only thing separating them from the
+valve volunteering; check that field before treating an `announced` as unexplained.
+
 **The method:** collect several `disabled` records, then look for what their windows share and
 a quiet hour does not. ⚠️ Absence of a message means "nothing was pushed", never "nothing
 happened" — MQTT here is the Konnect app's UI channel, not device-to-device traffic.
