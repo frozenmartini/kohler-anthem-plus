@@ -120,8 +120,14 @@ def journal_event(before: str | None, after: str | None, *, announced: bool) -> 
     link that cannot be sniffed.
 
     Kept as a pure function for the same reason as ``restore_target``: the defect was the
-    journal's behaviour disagreeing with the journal's own description of it, and a
-    docstring is not enforceable. ``test_warmup_journal_events.py`` is.
+    journal's behaviour disagreeing with the journal's own description of it, so the
+    judgement is somewhere a test can reach without Home Assistant. **The invariant is
+    stated here rather than only in a test**, because the test scripts in
+    ``kohler-work/tests/`` are scratch and expected to be discarded — so this docstring is
+    the durable record of it:
+
+        an announcement is never silently dropped; only a message that carries no warmup
+        mode, or one that moved nothing, produces no record.
     """
     if after is None:
         return None
