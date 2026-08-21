@@ -333,6 +333,16 @@ Every one of the 9 `showerwarmup: 1` messages also had **both zones `ON`** — w
 water, exactly as on the valve. Anything deriving a status must therefore test warm-up
 *before* running, or it will never report warm-up at all.
 
+⚠️ **`SHOWER_VALVE_STS` zone status lags and coalesces — measured 2026-08-21.** It usually
+mirrors the valve's outlet bits within ~1 s (a valve-*native* warm-up at 03:52:55Z was
+reported `z1=ON z2=ON` one second in, and a 20-minute valve-native session was tracked zone
+by zone), but it can publish a snapshot **~5 s stale** (19:47:44.9Z: both zones `OFF`,
+matching the valve's state from 19:47:39, half a second *after* outlets had opened) and can
+**skip a short window entirely** (a ~35 s warm-up flow at 20:32Z produced no zone message at
+all — the `OFF` reports sit before the water and during the pause). **Never use hub zone
+status as the authority for "is water running"** — that is the valve's own `GCS_SOLO_STS`
+outlet bits; the integration's safety guards already read the GCS side.
+
 ### 5.2 `…/favorites`
 ```json
 { "deviceId":"gcs-sious0103D", "sku":"HUB", "tenantId":"<oid>",
