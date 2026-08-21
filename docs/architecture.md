@@ -506,6 +506,14 @@ None of this affects **activating** a favourite — that is always just an id an
 whatever the favourite contains. So accessory support is a question of what you can
 *build*, not what you can *run*.
 
+⚠️ **It does affect what you can *read*, and this is a trap.** Because the components are
+optional, `MUSIC_STS` / `STEAM_STS` / `LIGHT_STS` and their `favoriteid` are attribution for
+one component — "the music playing now was started by favourite 2" — and **not** an answer to
+"is favourite 2 running". Four of this account's six favourites carry no music at all, so
+activating one of those produces no music-side evidence whatever. `FAVORITE_STS` is the only
+message that speaks for the favourite. Full reasoning, the component table and the three
+different ways an absent component is spelled: [`hub/cloud_api.md`](hub/cloud_api.md) §5.5.
+
 Note `parts.valve1` / `valve2` count valve **bodies** wired to the controller, not the two
 valve halves inside one multi-outlet GCS valve: a 6-outlet K-28212 still shows a single
 connected valve here.
@@ -521,6 +529,37 @@ status over Azure IoT Hub as direct-method messages on
 
 One subscription is account-level, so a session opened for either device receives messages
 for **both**. Filter on `payload.deviceid` and `payload.sku`.
+
+### What this integration reads over REST, and when
+
+`SCAN_INTERVAL = None` — there is no polling loop. REST is read on two events only: **setup**,
+and **every MQTT (re)connect**. A manual `homeassistant.update_entity` is the only other way in.
+
+| Call | Taken from it |
+|---|---|
+| `GET /customer-device/{tenant}` | Device list (nested under `customerHome[].devices[]` — singular key), `temperatureUnit`, `waterUnits`. The unit is load-bearing: **HUB favourite temperatures are written in it** |
+| `GET /gcs-state/{id}` | Both valve words — temperature, flow, outlet mask, pause flag; `warmUpState.warmUp` → mode and `warmUpState.state` → in-progress; `totalVolume`; `presetOrExperienceId` |
+| `GET /gcs-state/gcsadvancestate/{id}` | Per-outlet `minimumFlowrate` / `maximumFlowrate` / `maximumRuntime` → `OutletLimits`. This is what arms Endless Shower |
+| `GET /gcs-preset/{id}` | Preset id, title, `isExperience`. The raw payload is also handed to the preset-1 timer sync, which needs fields `apply_preset_list` discards |
+| `GET /hub-state/{id}` | Per-zone status/outlets/temperature/flowRate, `musicStateModel.status`, `hubSteamState.status`, `light[].status`, top-level `showerWarmUp` |
+| `GET /hub-configuration/{id}` | `parts` → which accessories are connected. **First seed only** — `hub_capabilities.known` latches it |
+| `GET /hub-experience/{id}/favorites` | The controller's favourite list — ids and titles |
+| `POST /platform/api/v1/mobile/settings` | IoT Hub host, device id and SAS credentials. Not state: this is what brings the stream up, and it runs on **every connect attempt** because the password is short-lived |
+
+**A cold start is 14 calls; a reconnect is 6** — the mobile-settings POST plus the five reseed
+GETs, with `hub-configuration` skipped once known.
+
+⚠️ **Setup used to read the whole account three times.** `async_setup` seeds, then
+`async_config_entry_first_refresh()` made the base class seed again milliseconds later, and the
+preset timer sync re-read `gcs-preset` on top. Both were folded on 2026-08-21 (20 calls → 14).
+The remaining duplication is deliberate: the post-connect reseed repeats the setup read because
+the broker replays nothing, so it is the only thing that closes the gap between the setup read
+and the stream existing.
+
+⚠️ **Nothing logs a successful seed.** Every debug line in `_async_seed_state` sits inside an
+`except` block, so this inventory is derived from the call sites, not measured on the wire. What
+*was* measured is the fold: the first refresh logs
+`Finished fetching kohler_anthem_plus data in 0.000 seconds`.
 
 | Device | Message codes |
 |---|---|
