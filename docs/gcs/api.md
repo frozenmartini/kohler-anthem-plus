@@ -230,6 +230,12 @@ Zero of the 19 events had a counterpart on the other device. Anything reporting 
 must therefore read **both** — either one alone misses roughly half of them. That is why
 `ValveStatusSensor` merges the two.
 
+> ✅ **2026-08-21: the independence runs deeper than the flags.** The two warm-ups are
+> separate *settings* on separate devices — the hub's `warmupmode`/`warmupOutlets` in its
+> local config versus the valve's `GCS_WARM_STS` mode — and the hub's web UI overwrites the
+> valve's setting, which the hub itself never uses. That is what §3e's "unexplained" disables
+> were. Full story and fingerprint: §3h.
+
 The valve's warm-up is gated by a mode, and the observations track it exactly:
 
 ```text
@@ -1954,7 +1960,8 @@ cannot express three modes, and the binary sensor duplicated what the dropdown n
 
 ### 3f. `switch.anthem_valve_warmup_auto_restore` — putting the mode back
 
-A **diagnostic switch, off by default**, that answers §3e's unexplained reverts by undoing
+A **diagnostic switch, off by default**, that answers the hub's warmup-disable writes (once
+§3e's open question, solved in §3h) by undoing
 them. When the valve announces `warmUpDisabled` over MQTT and this integration did not cause
 it, the mode is set back **60 s later** to the last enabled mode seen on the valve.
 
@@ -1974,7 +1981,11 @@ rather than a copy of it.
 ⚠️ **It treats a symptom.** It does not identify what rewrites the field, and left to itself
 it would make the fault *less* visible by papering over it. §3g is the answer to that.
 
-### 3g. The warmup journal — evidence for §3e
+### 3g. The warmup journal — the evidence that settled §3e
+
+*(Built to hunt §3e's unexplained disables; on 2026-08-21 it caught four of them live and the
+question closed — §3h. It stays on as the watchdog that proves each restore and would catch
+the hub's behaviour changing.)*
 
 `/config/kohler_anthem_plus_raw/warmup_*.jsonl`, beside the raw MQTT capture and the cutoff
 journal, on the same UTC clock so all three interleave. **On by default** and independent of
@@ -2061,13 +2072,12 @@ and a restore may itself provoke whatever is doing this.
 window collects noise, not signal. The trade is simply: **off** for the cleanest series,
 **on** for a shower that warms up reliably while the question stays open.
 
-⚠️ **Something disables this setting on its own.** Four times between 2026-08-13 and 08-18 the
-mode reverted to `warmUpDisabled` with no command on the MQTT channel and nothing from Home
-Assistant, each time inside a burst of configuration re-sync traffic. **It is not reboots** — the
-mode survives those, and the ~4 s post-boot `GCS_WARM_STS` is the valve restating what it already
-had, not changing it. The writer is unidentified; the leading candidate is the Anthem Plus
-controller over the RJ wired link, which cannot be observed. Not established — see
-`docs/handoff/` for the session that measured it.
+✅ **What disables this setting is SOLVED — 2026-08-21: the Anthem Plus hub's web UI.** Any
+signed-in UI action writes the valve's warmup mode from the hub's own (stale) copy. The full
+evidence — a controlled live reproduction plus the fingerprint that matches every historical
+disable — is in §3h. The old framing ("the writer is unidentified; leading candidate the
+controller over the RJ wired link") was close: it is the controller, but firing on UI events,
+not spontaneously.
 
 ### 3d. ⚠️ Library bug — `start_warmup` sends no mode
 
@@ -2088,7 +2098,81 @@ Fix: `start_warmup` → `warmUp:"warmUpAllOutletsWithNoStartDelay"`; disable →
 | What *is* the "start delay"? | Nothing defines it. Zero occurrences of "delay" in the app's 3,278 string resources, and no timing field on any warmup model — the phrase exists only inside the enum string. | Send `warmUpAllOutlets` and time when outlets open against the `…WithNoStartDelay` baseline. |
 | Is `delayStart` the referent? | A real per-panel UI-config field, observed `"Disabled"`. In the APK it is only ever copied through — never branched on, never bound to a control. It is the only start-delay concept in the system. | Flip it via `writeuiconfig`, re-read `gcsadvancestate`, see whether the mode suffix changes. ⚠️ That write is a **whole-record replace**. |
 | Which outlets are "selected"? | Not exposed by the cloud API. The per-outlet `warmup` flag exists only on the MQTT **read** model; the writable outlet-config model has no such field. The local hub has per-zone `warmupOutlets` arrays. | The local hub API — [`../hub/local_api.md`](../hub/local_api.md), not the cloud one. |
-| What keeps disabling it? | Four unexplained reverts to `warmUpDisabled`, 2026-08-13 to 08-18. Not reboots, not Home Assistant, no `GCS_RECIEVED_STS` within 447 s of any of them. ⚠️ The two mode changes on 2026-08-20 are **not** instances — both were deliberate, one from the app and one from this integration, and both pushed a `GCS_WARM_STS` as they should. Still four. | Enable it, then open the Konnect app / wake the Anthem Plus screen and watch for a `GCS_WARM_STS` within ~60 s. |
+| ~~What keeps disabling it?~~ | ✅ **SOLVED 2026-08-21 — the hub's web UI. See §3h.** The experiment this row proposed was run by the owner: PIN sign-in alone disabled the mode within seconds, twice more for other UI actions, with the journal recording empty 120 s before-windows. | — |
+
+### 3h. ✅ SOLVED 2026-08-21 — what disables warmup: the hub's web UI
+
+**The writer behind the "unexplained" disables is the Anthem Plus controller, and the trigger
+is ordinary, signed-in use of its web UI.** Established live on 2026-08-21 by the owner
+driving the UI step by step while the journal (§3g) and the raw capture recorded — four
+disables in one day, three of them inside a single web UI session with deliberately empty
+120 s before-windows, so nothing else was in flight:
+
+| local time (UTC−7) | UI action | mode disabled? |
+|---|---|---|
+| 07:39:40 | config edit, experiences removed (the hub first stopped the running shower — its stated UI behaviour, not part of the bug) | ✅ |
+| 11:37:01 | **signing in with the PIN — nothing else** | ✅ |
+| 11:43:58 | scanning the SD card for music | ✅ |
+| 11:47:20 | changing a valve setting | ✅ |
+| ~11:49:30 | logging out | ❌ — two *same-value* `warmUpAllOutletsWithNoStartDelay` announcements, no change |
+
+The SD-card scan is the telling one: it has nothing to do with water, so the write is not
+tied to valve-related actions. The hub runs one fixed routine on (seemingly) every UI action:
+
+1. **write the valve's warmup mode.** The written value is the hub's own record of the valve
+   settings, not the valve's live mode — it sent `warmUpDisabled` through all four events even
+   though the live mode was re-enabled before each one. (The two same-value announcements at
+   logout show that record can catch up; when and from where is not established.)
+2. **+2.6–3.2 s:** publish its snapshots — `SHOWER_EXP_SNAPSHOT`, `STEAM_EXP_SNAPSHOT`,
+   `ICE_SHOWER_EXP_SNAPSHOT`, `LUMIWAVE_EXP_SNAPSHOT`, `FAVORITES_SNAPSHOT`.
+3. **+4.7–5.0 s:** read back the valve's experience slots (`READ_GCS_EXPERIENCE_STS`).
+
+The write itself is invisible on our MQTT channel (wired RJ link or cloud-direct to the
+valve); the first observable is the valve's `GCS_WARM_STS` echo, then the burst. The offsets
+are constant to the tenth of a second across eight days — one program, not coincidence:
+
+| disable (UTC) | snapshot burst after | experience read after |
+|---|---|---|
+| 08-13 21:13:39 | +2.7 s | +4.8 s |
+| 08-20 20:36:28 (the 7 h disable) | +2.7 s | +4.8 s |
+| 08-21 14:39:40 | +2.6 s | +4.7 s |
+| 08-21 18:37:01 | +2.8 s | +5.0 s |
+| 08-21 18:43:58 | +2.7 s | +4.9 s |
+| 08-21 18:47:20 | +3.2 s | +4.9 s |
+
+Every `warmUpDisabled` in the corpus either matches this signature or is a post-reboot
+restatement from the 08-14/08-15 Moes-outlet storm (`DEVICE_REBOOT_STS` ~4 s before, the mode
+not actually changing). The 08-19 06:34:31Z disable — 62 s after the mode had been enabled —
+sits between two such bursts: "it always gets reverted" is this routine firing while a UI
+session was open.
+
+#### Why the hub can afford this bug: the two warmups are independent settings
+
+The hub never *uses* the valve's warmup mode. It has its own, entirely separate warmup:
+
+| | setting lives in | "active" flag on MQTT |
+|---|---|---|
+| **Hub warmup** | hub local config — `warmupmode: "on"`, per-zone `warmupOutlets` ([`../hub/local_api.md`](../hub/local_api.md)) | `SHOWER_VALVE_STS.showerwarmup = "1"` (a sibling `steamwarmup` exists and has never been seen set) |
+| **Valve warmup** | the valve's own mode — `GCS_WARM_STS` / REST `warmUpState.warmUp` | `GCS_SOLO_STS.warmUpStatus = warmUpInProgress` |
+
+A hub-started session warms up under the *hub's* setting, driving the valves itself — during
+which the valve reports `warmUpStatus: warmUpNotInProgress` even with the valve mode enabled
+(measured 2026-08-21 14:36Z). The valve's mode only governs valve-started water. Across the
+corpus, 19 hub warm-up runs produced zero mode changes within ±10 minutes — starting hub
+warmup does **not** write the valve's mode; only UI sessions do. So the field this routine
+tramples is one no Kohler flow ever reads back: on the owner's own hardware the hub's warmup
+stays permanently on while the valve's kept "mysteriously" turning off. Flag-level
+independence was already measured in §1's "Warm-up: two independent systems"; this is the
+settings-level counterpart, and the disable bug is where the two worlds touch.
+
+**Also ruled out by the same data:** reboots (the mode survives them), Home Assistant (the
+journal's `ours` flags), any MQTT-visible command (empty before-windows), and hub-warmup
+starts (19 clean trials).
+
+**Consequence:** with auto-restore (§3f) ON, every hub web UI session knocks the valve's
+warmup off and the integration puts it back — four for four on 2026-08-21, 63–69 s each, end
+to end. Without it, one PIN entry silently costs the setting until someone notices: that is
+exactly what the 08-20 seven-hour disable was.
 
 ## 4. Where to look in the decompile
 
