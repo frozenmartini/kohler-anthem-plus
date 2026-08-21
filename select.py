@@ -22,6 +22,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.event import async_call_later
 
 from .anthem_plus import WARMUP_MODES_CURRENT
 from .const import DOMAIN, PRESET_HIDDEN_IDS, WARMUP_LABELS
@@ -32,6 +33,100 @@ from .entity import KohlerControllerEntity, KohlerValveEntity
 # option present in the option list or Home Assistant logs an error on every update, and
 # "nothing is running" is a real state that needs a name.
 OPTION_OFF = "Off"
+
+# How long a just-chosen option is shown before the device's own answer takes over, if the
+# device never agrees. Sized off the two confirmations measured live on 2026-08-21: a warmup
+# write confirmed 2.2 s later with its MQTT echo 0.8 s after that, and a controller
+# favourite's `FAVORITE_STS` arrived 1.5 s after activation. `async_set_warmup` already
+# awaits its own readback chain (`WARMUP_READBACK_DELAYS`, up to ~6 s) before this even
+# starts, so this is the margin on top, not the whole budget.
+#
+# It is a backstop, not the normal path: agreement clears it sooner, every time.
+OPTIMISTIC_GRACE_SECONDS = 12.0
+
+
+class OptimisticOptionMixin:
+    """Hold a just-chosen option until the device confirms it, or the grace runs out.
+
+    ⚠️ **Clearing on any coordinator update is not good enough**, and that is what all three
+    selects here did until 2026-08-21. This coordinator pushes an update for *every* message
+    the system sends, so the optimistic value was routinely dropped within milliseconds —
+    while the device still reported the old value — and the dropdown visibly snapped back to
+    the old option before jumping forward again when the real confirmation landed. The owner
+    reported it as "flip flop", and the logs show exactly why:
+
+    * **Warmup.** Selected at 00:21:53, confirmed by the REST readback at 00:21:55.586, MQTT
+      echo at 00:21:56.399. Three coordinator updates inside that window, each one a
+      snap-back.
+    * **Controller favourite.** `FAVORITE_STS` for "Play Music" landed at 07:23:51.575, with
+      `STEAM_STS` at 07:23:50.804 and `MUSIC_STS` at 07:23:51.054 arriving first — two clears
+      before the one message that actually carried the answer.
+
+    So the value is cleared on exactly two things: **the device agreeing**, or **the grace
+    expiring**. A subclass supplies `_device_option`; this supplies `current_option`.
+
+    The grace timer matters more than it looks. Without it a write the device silently
+    ignored would leave the dropdown asserting something untrue until the next coordinator
+    update happened to arrive — and this system has gone quiet for hours at a stretch. One of
+    these dropdowns can start water, so it must not hold a claim it cannot support.
+    """
+
+    _optimistic: str | None = None
+    _optimistic_cancel = None
+
+    @property
+    def _device_option(self) -> str | None:
+        """What the device itself says, ignoring anything chosen but not yet confirmed."""
+        raise NotImplementedError
+
+    @property
+    def current_option(self) -> str | None:
+        if self._optimistic is not None:
+            return self._optimistic
+        return self._device_option
+
+    def _set_optimistic(self, option: str) -> None:
+        self._cancel_optimistic_timer()
+        self._optimistic = option
+        self.async_write_ha_state()
+
+    def _clear_optimistic(self) -> None:
+        self._cancel_optimistic_timer()
+        if self._optimistic is None:
+            return
+        self._optimistic = None
+        self.async_write_ha_state()
+
+    def _cancel_optimistic_timer(self) -> None:
+        if self._optimistic_cancel is not None:
+            self._optimistic_cancel()
+            self._optimistic_cancel = None
+
+    def _arm_optimistic_expiry(self) -> None:
+        """Give up on the guess after the grace, whatever the device has or has not said."""
+        self._cancel_optimistic_timer()
+
+        @callback
+        def _expire(_now) -> None:
+            self._optimistic_cancel = None
+            self._clear_optimistic()
+
+        self._optimistic_cancel = async_call_later(
+            self.hass, OPTIMISTIC_GRACE_SECONDS, _expire
+        )
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        # The one clear that is always right: the device now reports what was asked for, so
+        # the guess has been overtaken by fact and there is nothing left to hold.
+        if self._optimistic is not None and self._device_option == self._optimistic:
+            self._cancel_optimistic_timer()
+            self._optimistic = None
+        super()._handle_coordinator_update()
+
+    async def async_will_remove_from_hass(self) -> None:
+        self._cancel_optimistic_timer()
+        await super().async_will_remove_from_hass()
 
 
 async def async_setup_entry(
@@ -53,7 +148,7 @@ async def async_setup_entry(
     async_add_entities(entities)
 
 
-class FavouriteSelect(KohlerValveEntity, SelectEntity):
+class FavouriteSelect(OptimisticOptionMixin, KohlerValveEntity, SelectEntity):
     """Start a stored favourite, and show which one is running."""
 
     _attr_icon = "mdi:playlist-play"
@@ -64,7 +159,6 @@ class FavouriteSelect(KohlerValveEntity, SelectEntity):
         self._attr_unique_id = f"{self._device_id}_favourite"
         # Holds the requested option until the valve reports back, matching the outlet
         # switches. Activation takes 1-2 s on real hardware.
-        self._optimistic: str | None = None
 
     @property
     def _presets(self):
@@ -84,7 +178,7 @@ class FavouriteSelect(KohlerValveEntity, SelectEntity):
         return [OPTION_OFF] + [preset.name for preset in self._presets]
 
     @property
-    def current_option(self) -> str | None:
+    def _device_option(self) -> str | None:
         """The running favourite, or ``Off``.
 
         ``presetOrExperienceId`` is cleared by **both** pause and stop, so a paused session
@@ -93,8 +187,6 @@ class FavouriteSelect(KohlerValveEntity, SelectEntity):
         at ``Off`` with water running — this reports *what started the session*, not whether
         water is on.
         """
-        if self._optimistic is not None:
-            return self._optimistic
         state = self._state
         if state is None:
             return None
@@ -124,12 +216,6 @@ class FavouriteSelect(KohlerValveEntity, SelectEntity):
             "favourite_count": len(self._presets),
         }
 
-    @callback
-    def _handle_coordinator_update(self) -> None:
-        """Real state has arrived, so the optimistic guess is no longer needed."""
-        self._optimistic = None
-        super()._handle_coordinator_update()
-
     async def async_select_option(self, option: str) -> None:
         """Start the named favourite, or stop the shower.
 
@@ -154,18 +240,20 @@ class FavouriteSelect(KohlerValveEntity, SelectEntity):
         )
 
     async def _async_command(self, option: str, action) -> None:
-        self._optimistic = option
-        self.async_write_ha_state()
+        self._set_optimistic(option)
         try:
             await action
         except Exception:
             # The command failed, so stop showing a state the valve never reached.
-            self._optimistic = None
-            self.async_write_ha_state()
+            self._clear_optimistic()
             raise
+        # The command was accepted. The device's own confirmation is still in flight — 1.5 s
+        # for a controller favourite, measured — so hold the guess until it lands rather than
+        # dropping it on the next unrelated message.
+        self._arm_optimistic_expiry()
 
 
-class ValveWarmupSelect(KohlerValveEntity, SelectEntity):
+class ValveWarmupSelect(OptimisticOptionMixin, KohlerValveEntity, SelectEntity):
     """The valve's warmup mode — the dropdown, and the state, are the mode itself.
 
     Warmup runs water up to temperature before the session proper. This entity is the
@@ -208,7 +296,6 @@ class ValveWarmupSelect(KohlerValveEntity, SelectEntity):
     def __init__(self, coordinator: KohlerAnthemPlusCoordinator) -> None:
         super().__init__(coordinator)
         self._attr_unique_id = f"{self._device_id}_warmup"
-        self._optimistic: str | None = None
 
     @property
     def _mode(self) -> str | None:
@@ -229,9 +316,7 @@ class ValveWarmupSelect(KohlerValveEntity, SelectEntity):
         return labels
 
     @property
-    def current_option(self) -> str | None:
-        if self._optimistic is not None:
-            return self._optimistic
+    def _device_option(self) -> str | None:
         mode = self._mode
         if mode is None:
             # Never announced. `Off` would be a guess, and the wrong one to show for a
@@ -250,11 +335,6 @@ class ValveWarmupSelect(KohlerValveEntity, SelectEntity):
             "warmup_in_progress": state.warmup_in_progress,
         }
 
-    @callback
-    def _handle_coordinator_update(self) -> None:
-        self._optimistic = None
-        super()._handle_coordinator_update()
-
     async def async_select_option(self, option: str) -> None:
         """Write the mode behind the chosen label.
 
@@ -272,17 +352,20 @@ class ValveWarmupSelect(KohlerValveEntity, SelectEntity):
                 f"{option!r} is a legacy mode this integration does not write. It is listed "
                 "only because the valve is currently holding it."
             )
-        self._optimistic = option
-        self.async_write_ha_state()
+        self._set_optimistic(option)
         try:
             await self.coordinator.async_set_warmup(mode)
         except Exception:
-            self._optimistic = None
-            self.async_write_ha_state()
+            self._clear_optimistic()
             raise
+        # `async_set_warmup` has already read the mode back and applied it, so in the normal
+        # case the device agrees by now and the next coordinator update clears this. The
+        # timer only matters for the case that call warns about: the cloud accepting a
+        # command the valve then ignores.
+        self._arm_optimistic_expiry()
 
 
-class HubFavouriteSelect(KohlerControllerEntity, SelectEntity):
+class HubFavouriteSelect(OptimisticOptionMixin, KohlerControllerEntity, SelectEntity):
     """Start a stored controller favourite, and show which one is running.
 
     The controller's equivalent of the valve's preset picker, and its **only** unit of
@@ -310,7 +393,6 @@ class HubFavouriteSelect(KohlerControllerEntity, SelectEntity):
     def __init__(self, coordinator: KohlerAnthemPlusCoordinator) -> None:
         super().__init__(coordinator)
         self._attr_unique_id = f"{self._device_id}_favourite"
-        self._optimistic: str | None = None
 
     @staticmethod
     def _name_of(favorite: dict) -> str:
@@ -354,7 +436,7 @@ class HubFavouriteSelect(KohlerControllerEntity, SelectEntity):
         return [OPTION_OFF] + names
 
     @property
-    def current_option(self) -> str | None:
+    def _device_option(self) -> str | None:
         """The running favourite, or ``Off``.
 
         ``FAVORITE_STS`` reports the active favourite's **name** alongside its id, and the
@@ -366,8 +448,6 @@ class HubFavouriteSelect(KohlerControllerEntity, SelectEntity):
         ``status: "OFF"`` message or an id of ``"0"``. An id that resolves to no name falls
         back to ``Off`` rather than inventing an option.
         """
-        if self._optimistic is not None:
-            return self._optimistic
         state = self._state
         if state is None:
             return None
@@ -393,11 +473,6 @@ class HubFavouriteSelect(KohlerControllerEntity, SelectEntity):
             ),
             "favourite_count": len(self._favourites),
         }
-
-    @callback
-    def _handle_coordinator_update(self) -> None:
-        self._optimistic = None
-        super()._handle_coordinator_update()
 
     async def async_select_option(self, option: str) -> None:
         """Activate the named favourite, or stop everything.
@@ -430,11 +505,13 @@ class HubFavouriteSelect(KohlerControllerEntity, SelectEntity):
         )
 
     async def _async_command(self, option: str, action) -> None:
-        self._optimistic = option
-        self.async_write_ha_state()
+        self._set_optimistic(option)
         try:
             await action
         except Exception:
-            self._optimistic = None
-            self.async_write_ha_state()
+            self._clear_optimistic()
             raise
+        # The command was accepted. The device's own confirmation is still in flight — 1.5 s
+        # for a controller favourite, measured — so hold the guess until it lands rather than
+        # dropping it on the next unrelated message.
+        self._arm_optimistic_expiry()
