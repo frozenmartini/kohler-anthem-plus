@@ -175,10 +175,12 @@ class ValveWarmupSelect(KohlerValveEntity, SelectEntity):
     to the second reads "off" almost always, because a warm-up is over in seconds. "Warming
     Up" is reported by the valve Status sensor; both axes appear in the attributes here.
 
-    **Three options, matching the current Konnect app** — Off, All outlets, Selected
-    outlets, all with no start delay. Which outlets count as "selected" is not exposed by
-    any cloud API: it is per-zone `warmupOutlets` on the controller's local API, so this
-    dropdown chooses the *mode* and the selection itself is configured on the device.
+    **Three options** — ``Off``, ``All Outlets``, ``Started Outlets``, all with no start
+    delay. These are the three modes the current Konnect app can write, but the labels are
+    this integration's own since 2026-08-21 and no longer echo the app's wording; see
+    ``WARMUP_LABELS`` in ``const.py``. Which outlets ``Started Outlets`` refers to is not
+    exposed by any cloud API: it is per-zone `warmupOutlets` on the controller's local API,
+    so this dropdown chooses the *mode* and the selection itself is configured on the device.
 
     ⚠️ **A valve can hold a mode this list does not offer.** Two legacy delayed-start values
     still parse in firmware. If the valve reports one, it is appended to the options for as

@@ -401,19 +401,26 @@ DEFAULT_FLOW_PERCENT = 100.0
 # ---------------------------------------------------------------------------
 # Warmup dropdown labels
 # ---------------------------------------------------------------------------
-# The device's mode strings are camel-case protocol values and make a poor dropdown. These
-# are the names the Konnect app uses for the same three choices, so what someone picks here
-# matches what they see on the phone and the touchscreen.
+# The device's mode strings are camel-case protocol values and make a poor dropdown, so each
+# gets a display label here.
+#
+# ⚠️ **These are Home Assistant's labels, not the Konnect app's.** They tracked the app's
+# wording until 2026-08-21, when the owner renamed them: `All Outlets` took a capital O, and
+# `Selected outlets` became **`Started Outlets`**, which describes what the mode does here
+# rather than echoing the phone. So the dropdown and the app now read differently for that
+# mode — deliberately. Only the labels moved; the protocol values, the write path and which
+# modes are offered are all unchanged.
 #
 # The two legacy delayed-start modes get labels too, but they are never *offered* — they are
 # only added to the dropdown when the valve is already holding one, so the entity can report
-# the truth instead of blanking. See `select.py`.
+# the truth instead of blanking. Their labels follow the same wording, so the dropdown stays
+# internally consistent if one ever appears. See `select.py`.
 WARMUP_LABELS = {
     "warmUpDisabled": "Off",
-    "warmUpAllOutletsWithNoStartDelay": "All outlets",
-    "warmUpSelectedOutletsWithNoStartDelay": "Selected outlets",
-    "warmUpAllOutlets": "All outlets (delayed start)",
-    "warmUpSelectedOutlets": "Selected outlets (delayed start)",
+    "warmUpAllOutletsWithNoStartDelay": "All Outlets",
+    "warmUpSelectedOutletsWithNoStartDelay": "Started Outlets",
+    "warmUpAllOutlets": "All Outlets (delayed start)",
+    "warmUpSelectedOutlets": "Started Outlets (delayed start)",
 }
 
 # ---------------------------------------------------------------------------
