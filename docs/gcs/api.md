@@ -1822,10 +1822,14 @@ as `/platform/api/{version}/commands/gcs/warmup`; the app substitutes `v1`.
 | `warmUpDisabled` | Off | **yes** | decompile |
 | `warmUpAllOutletsWithNoStartDelay` | Enable — all outlets, start immediately | **yes** | ✅ **live 2026-08-20** |
 | `warmUpSelectedOutletsWithNoStartDelay` | Enable — selected outlets only, start immediately | **yes** | ✅ **held by this valve right now** — live GET, 2026-08-20 |
-| `warmUpAllOutlets` | Enable — all outlets, with configured start delay | no — legacy | ⚠️ unverified |
-| `warmUpSelectedOutlets` | Enable — selected outlets only, with start delay | no — legacy | ⚠️ unverified |
+| `warmUpAllOutlets` | Enable — all outlets. ✅ **Written and exercised live 2026-08-21**: accepted by current firmware (200 + echo), and the warm-up runs **`0x8` (8) tenths = 0.8 °C ≈ 1.4 °F below setpoint** — `0x17C` (380) = 100.4 °F against a `0x184` (388) = 101.8 °F default — then restores setpoint when the pause ends. Pause behaviour is **identical** to `…WithNoStartDelay` (2 min at `0x40`/`0x40`, then `00`/`00`). The reduced target is the only measured difference; `delayStart` read `"Disabled"` on both panels throughout | no — legacy | ✅ **live 2026-08-21** |
+| `warmUpSelectedOutlets` | Enable — selected outlets only, presumed to mirror the above | no — legacy | ⚠️ unverified |
 
-> ⚠️ **The 2026-08-20 decompile was of an older build and undercounts this.** It reported only
+> ⚠️ **The 2026-08-20 decompile undercounts this — and it was NOT an older build.** Corrected
+> 2026-08-21: the decompiled APK was 3.0.1, the same build currently shipping (no newer arm64
+> exists — owner-verified), so the undercount was an **analysis gap in that dig, not a build
+> difference** — treat that dig's negative findings ("never branched on", "not a warmup
+> field") as unproven, not as facts about the app. It reported only
 > two modes as app-writable and filed `warmUpSelectedOutletsWithNoStartDelay` as unverified.
 > **The current Konnect app offers three** — off, all outlets, selected outlets, all with no
 > start delay — established by the owner against the app in their hands, 2026-08-20. Our own
@@ -2095,7 +2099,7 @@ Fix: `start_warmup` → `warmUp:"warmUpAllOutletsWithNoStartDelay"`; disable →
 
 | question | what is known | how to settle it |
 |---|---|---|
-| What *is* the "start delay"? | Nothing defines it in the app. **Strong lead 2026-08-21 (§3h):** the hub UI's warmup modes are "Water Stays ON" / "Water Pauses" / off, and the owner describes "pauses" as: after warm-up the water pauses ~2 min and must be resumed or the session ends `00`/`00` — exactly GCS warmup behaviour. Likely `…WithNoStartDelay` = stays-on and the delayed variants = the 2-min pause. | Send `warmUpAllOutlets` and time when outlets open against the `…WithNoStartDelay` baseline. |
+| What *is* the "start delay"? | ⚠️ **Partially measured 2026-08-21 — and the obvious readings are wrong.** The proposed experiment was run (owner shower under `warmUpAllOutlets`): the 2-min `0x40`/`0x40` pause happens under **both** suffixes, so the suffix does not control the pause — which also kills the earlier hub-mapping lead ("Water Stays ON"/"Water Pauses" is the hub's own option, unrelated). The one measured difference: the delayed variant warms to **setpoint − `0x8` (8) tenths (0.8 °C)** — `0x17C` (380) vs `0x184` (388) — restoring setpoint at pause end. What "start delay" *names* is still unknown; `delayStart` read `"Disabled"` throughout, so a delay feature may simply have been off. Leading idea for the next dig: a remote-/scheduled-start flow (warm up before the user arrives), which would explain holding slightly under temperature. | APK dig (same 3.0.1 build — see §4 note) for the enum branches, the `0x8` offset, and `delayStart` semantics; or flip `delayStart` via `writeuiconfig` (**whole-record replace**). |
 | Is `delayStart` the referent? | A real per-panel UI-config field, observed `"Disabled"`. In the APK it is only ever copied through — never branched on, never bound to a control. It is the only start-delay concept in the system. | Flip it via `writeuiconfig`, re-read `gcsadvancestate`, see whether the mode suffix changes. ⚠️ That write is a **whole-record replace**. |
 | Which outlets are "selected"? | Not exposed by the cloud API. The per-outlet `warmup` flag exists only on the MQTT **read** model; the writable outlet-config model has no such field. The local hub has per-zone `warmupOutlets` arrays. | The local hub API — [`../hub/local_api.md`](../hub/local_api.md), not the cloud one. |
 | ~~What keeps disabling it?~~ | ✅ **SOLVED 2026-08-21 — the hub's web UI. See §3h.** The experiment this row proposed was run by the owner: PIN sign-in alone disabled the mode within seconds, twice more for other UI actions, with the journal recording empty 120 s before-windows. | — |
@@ -2173,11 +2177,14 @@ is pushed. The two same-value `warmUpAllOutletsWithNoStartDelay` announcements o
 at 18:49Z on 08-21, ~1–2 min after a restore, did **not** recur after the probe cycles;
 their trigger is unidentified and they changed nothing.
 
-**Owner-supplied semantics for `warmupmode`** (2026-08-21), recorded because it maps cleanly
-onto the valve enum: "Water Stays ON" = after warm-up the selected shower starts immediately;
-"Water Pauses" = after warm-up the water pauses ~2 min and must be resumed or the session ends
-`00`/`00` — which is exactly how GCS warmup behaves. Leading (unmeasured) mapping:
-`on` ↔ `…WithNoStartDelay`, `pause` ↔ the delayed variants — see §3e's start-delay rows.
+**Owner-supplied semantics for `warmupmode`** (2026-08-21): "Water Stays ON" / "Water
+Pauses" / off describe what the hub does after *its* warm-up. ⚠️ An earlier version of this
+paragraph proposed mapping these onto the valve enum's `…WithNoStartDelay` suffix — **that
+mapping was tested the same day and is dead**: the valve's 2-min post-warm-up pause happens
+under both suffixes (owner shower under `warmUpAllOutlets`, wire-verified), so the hub option
+and the valve suffix are unrelated — one more instance of the two warmups being independent.
+What the suffix *does* change is the warm-up target temperature — see §3's mode table and
+§3e's start-delay row.
 
 #### Why the hub can afford this bug: the two warmups are independent settings
 
