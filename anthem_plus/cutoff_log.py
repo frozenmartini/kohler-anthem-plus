@@ -160,7 +160,23 @@ either side on the channels that can be seen. That is what these records hold.
 
 Records
 -------
-  mode              a warmup mode announcement. `before` -> `after`, and `source`.
+  baseline          the first line of every file: the mode in force when the journal opened,
+                    read over REST at setup, plus whether auto-restore is armed and what it
+                    would restore to. The valve never volunteers its mode on connect — over
+                    all 74 raw captures the first `GCS_WARM_STS` in a file lands between
+                    137 s and 7 h in — so without this line a file has no idea what it
+                    started from, and cannot say how long the mode had been in force.
+  mode              the mode moved. `before` -> `after`, `ours` (did we write it), and
+                    `source`: `mqtt` if the valve announced it, `rest` if a reseed found it
+                    already changed. A `rest` one means the move happened while the stream
+                    was down; it carries `restored: false`, because auto-restore does not
+                    act on these.
+  announced         the valve restated a mode it was already in. Carries `mode` and `ours`.
+                    No decision attached — 28 of the 43 announcements in the raw corpus are
+                    these. ⚠️ **Check `ours` before reading one as the valve volunteering.**
+                    Setting the mode from the dropdown lands here rather than on a `mode`
+                    record: the write reads itself back over REST immediately, so our state
+                    has already moved by the time the valve's echo arrives ~3.4 s later.
   disabled          the mode went to `warmUpDisabled`. Carries `ours` (did we write it),
                     `restoring` (is auto-restore acting), and `before_window`: every MQTT
                     message seen in the {before}s leading up to it.
@@ -176,7 +192,7 @@ Reading them
 Every record has an ISO-8601 UTC `ts`, the same clock as the raw capture beside it, so the two
 interleave:
 
-    jq -c '{{ts, src:"warmup", event, before, after, ours}}' warmup_*.jsonl > /tmp/a.jsonl
+    jq -c '{{ts, src:"warmup", event, mode, before, after, ours}}' warmup_*.jsonl > /tmp/a.jsonl
     jq -c '{{ts, src:"raw", topic}}' mqtt_raw_*.jsonl > /tmp/b.jsonl
     sort -m /tmp/a.jsonl /tmp/b.jsonl
 

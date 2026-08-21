@@ -316,7 +316,7 @@ class GcsDevice:
         )
 
     async def async_sync_preset_timer(
-        self, preset_id: int, target_seconds: int
+        self, preset_id: int, target_seconds: int, *, presets: Any = None
     ) -> PresetTimerPlan:
         """Read one preset and, if its stored timer differs, write the target in.
 
@@ -326,8 +326,22 @@ class GcsDevice:
 
         Returns the plan, whose ``reason`` says what happened. Raises whatever the client
         raises; the caller decides whether a failure is worth failing setup over.
+
+        ``presets`` is an already-fetched ``gcs-preset`` payload, to save re-reading an
+        endpoint the caller just read. Added 2026-08-21: the coordinator seeds state at
+        setup and then calls this on the next line, which read the same endpoint twice.
+
+        ⚠️ **Whatever is passed here is written back to the owner's shower.**
+        ``writepreset`` replaces the whole record, so the name, volume and per-valve
+        ``hexString`` in this payload are echoed verbatim — a stale payload silently reverts
+        the preset to whatever it held when the payload was taken. **Pass only a read from
+        moments ago, in the same setup pass. When in doubt, pass nothing and let it read.**
         """
-        payload = await self._client.async_get_gcs_presets(self.device_id)
+        payload = (
+            presets
+            if presets is not None
+            else await self._client.async_get_gcs_presets(self.device_id)
+        )
         plan = plan_preset_timer(payload, preset_id, target_seconds)
         if plan.needed:
             await self.async_write_preset(

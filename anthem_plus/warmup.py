@@ -5,16 +5,21 @@ The valve's warmup mode does not stay where it is put. Four times between 2026-0
 traffic, with no command on the MQTT channel and nothing from Home Assistant. Reboots are
 ruled out: the mode survives those. See ``docs/gcs/api.md`` §3e.
 
-This module holds the one question that has to be right — *is this disable one we should undo?*
-— as a pure function. The scheduling, the waiting and the writing live in the coordinator,
-where they need Home Assistant; the judgement lives here, where a test can reach it.
+This module holds the judgements that have to be right, as pure functions: *is this disable
+one we should undo?* (``should_restore_warmup``), *what do we put back?* (``restore_target``),
+and *what does this observation deserve in the journal?* (``journal_event``). The scheduling,
+the waiting and the writing live in the coordinator, where they need Home Assistant; the
+judgement lives here, where a test can reach it.
+
+All three are here for the same reason: each one was a bug where the coordinator's behaviour
+and its own description of that behaviour had drifted apart, and a comment cannot be run.
 """
 
 from __future__ import annotations
 
 from .const import WARMUP_DISABLED
 
-__all__ = ["restore_target", "should_restore_warmup"]
+__all__ = ["journal_event", "restore_target", "should_restore_warmup"]
 
 
 def should_restore_warmup(
@@ -88,3 +93,38 @@ def restore_target(taken_away: str | None, remembered: str | None) -> str | None
         if mode and mode != WARMUP_DISABLED:
             return mode
     return None
+
+
+def journal_event(before: str | None, after: str | None, *, announced: bool) -> str | None:
+    """Which journal record one warmup observation deserves, or ``None`` for silence.
+
+    ``before`` / ``after`` are the modes either side of applying one MQTT message.
+    ``announced`` says that message was a ``GCS_WARM_STS`` — the valve volunteering its mode.
+    The flag only changes the answer when the mode did **not** move, because a move can come
+    from nowhere else: ``_apply_warmup`` is the only envelope handler that writes
+    ``warmup_mode``.
+
+    * ``"mode"`` — the mode moved. Always recorded.
+    * ``"announced"`` — the valve restated a mode it was already in.
+    * ``None`` — an ordinary message that happens not to touch warmup. The overwhelming
+      majority: the coordinator calls this for **every** valve message, and 3057 of the 3143
+      in the raw corpus are not warmup announcements at all.
+
+    ⚠️ **The bug this exists to prevent, 2026-08-21.** The coordinator returned early
+    whenever ``after == before``, so a repeat announcement was discarded along with the
+    uninteresting messages — while the comment beside the ``mode`` record claimed "every
+    announcement is journalled, not only the disables". It was not true, and the repeats are
+    not a rare edge case: **28 of the 43 announcements in the raw corpus restate the value
+    before them.** They are the valve volunteering a timestamp, which is the only kind of
+    evidence this journal can gather about a device whose real control channel is an RJ wired
+    link that cannot be sniffed.
+
+    Kept as a pure function for the same reason as ``restore_target``: the defect was the
+    journal's behaviour disagreeing with the journal's own description of it, and a
+    docstring is not enforceable. ``test_warmup_journal_events.py`` is.
+    """
+    if after is None:
+        return None
+    if after == before:
+        return "announced" if announced else None
+    return "mode"

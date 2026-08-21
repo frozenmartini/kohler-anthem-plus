@@ -59,8 +59,10 @@ from .anthem_plus import (
     ZoneCutoffDetector,
     ZoneReading,
     MSG_GCS_SOLO_STATUS,
+    MSG_GCS_WARMUP_STATUS,
     WARMUP_DISABLED,
     WARMUP_MODES_CURRENT,
+    journal_event,
     restore_target,
     should_restore_warmup,
     get_valve_model,
@@ -242,6 +244,12 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # push-only: MQTT carries every change, and the REST reads happen on two *events* —
         # setup, and every MQTT (re)connect — rather than on a clock.
         #
+        # ⚠️ **That was one event short of the truth until 2026-08-21.**
+        # `async_config_entry_first_refresh()` runs immediately after `async_setup()` and the
+        # base class turns it into a third read of everything. `_async_update_data` now
+        # short-circuits that one, so the sentence above is enforced rather than merely
+        # intended — see the comment there before removing it.
+        #
         # `_async_update_data()` still exists and still works; with no interval it runs only
         # when something asks, which is what `homeassistant.update_entity` does. That is the
         # manual refresh, and there is no automatic one.
@@ -300,6 +308,14 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.favorites: list[dict[str, Any]] = []
         self.stream: AnthemMqttStream | None = None
         self.raw_log: RawMqttLog | None = None
+        # One-shot: `async_setup` seeds, then `async_config_entry_first_refresh()` runs
+        # milliseconds later and would seed the identical state all over again. See
+        # `_async_update_data`.
+        self._seeded_during_setup = False
+        # The raw `gcs-preset` payload from the most recent seed, held only long enough for
+        # `_async_sync_default_preset_timer` to consume it on the next line of `async_setup`.
+        # Cleared on use — it feeds a write path, and a stale payload is a silent edit.
+        self._seeded_presets: Any = None
         # CUTOFF DEBUG LOG: built in `async_setup`, once `hass.config.path` is usable.
         self.cutoff_log: CutoffDebugLog | None = None
         self.warmup_log: CutoffDebugLog | None = None
@@ -364,6 +380,10 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.hub_state = HubState(self.model)
 
         await self._async_seed_state()
+        # `async_config_entry_first_refresh()` follows immediately in `async_setup_entry` and
+        # would repeat every read above for nothing. Claimed here, spent in
+        # `_async_update_data`.
+        self._seeded_during_setup = True
         await self._async_sync_default_preset_timer()
         self._persist_refresh_token()
 
@@ -421,6 +441,28 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             label="Warmup journal",
         )
         await self.hass.async_add_executor_job(self.warmup_log.prepare)
+        # BASELINE: what mode was in force when this file opened, from the REST seed above.
+        #
+        # Without it a journal is unreadable on its own. **The valve never volunteers its
+        # warmup mode on connect** — measured 2026-08-21 over all 74 raw captures: 17 hold a
+        # `GCS_WARM_STS` at all, and in 16 the first one lands between 137 s and 7 h after
+        # the log opened. The 17th, at +1.7 s, only looks like a connect announcement: it is
+        # the echo of our own write on 08-21 at 03:40:10Z, which landed in a file that had
+        # opened 1.7 s earlier *because* persisting the mode reloaded the entry — the bug
+        # `cde9bf4` fixed, so that artefact cannot recur.
+        #
+        # So a file that records a `disabled` an hour in has no record of what was displaced
+        # or since when, and an empty file cannot be told apart from a broken one.
+        #
+        # Written here rather than in `_async_seed_state` because the first seed runs before
+        # this log exists, and this is the one place that happens exactly once per file.
+        self._warmup_journal(
+            "baseline",
+            mode=None if self.gcs_state is None else self.gcs_state.warmup_mode,
+            auto_restore=self.warmup_auto_restore,
+            restores_to=self.last_warmup_mode,
+            source="rest",
+        )
 
         self.stream = AnthemMqttStream(
             self.client,
@@ -632,7 +674,11 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             was_warmup = self.gcs_state.warmup_mode
             changed |= self.gcs_state.apply_envelope(envelope)
             self._remember_message(envelope)
-            self._handle_warmup_mode_change(was_warmup, self.gcs_state.warmup_mode)
+            self._handle_warmup_mode_change(
+                was_warmup,
+                self.gcs_state.warmup_mode,
+                announced=envelope.code == MSG_GCS_WARMUP_STATUS,
+            )
             self._remember_open_masks()
             self._check_runtime_cutoff()
         if (
@@ -744,9 +790,17 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         if not SYNC_DEFAULT_PRESET_TIMER or self.gcs is None:
             return
+        # Consume the seed's payload rather than re-reading `gcs-preset`, which
+        # `_async_seed_state` fetched on the line before this one — the second read of the
+        # same endpoint per start, folded 2026-08-21.
+        #
+        # ⚠️ **Taken and cleared in one step, deliberately.** This payload is echoed back to
+        # the valve verbatim for every field except `time`, so it must never be reused on a
+        # later pass; `None` here simply means this reads for itself, which is always safe.
+        presets, self._seeded_presets = self._seeded_presets, None
         try:
             plan = await self.gcs.async_sync_preset_timer(
-                DEFAULT_PRESET_ID, DEFAULT_PRESET_TIMER_SECONDS
+                DEFAULT_PRESET_ID, DEFAULT_PRESET_TIMER_SECONDS, presets=presets
             )
         except (KohlerError, AuthError, DeviceOffline) as err:
             _LOGGER.debug(
@@ -1041,6 +1095,34 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # Poll
     # ------------------------------------------------------------------ #
     async def _async_update_data(self) -> dict[str, Any]:
+        if self._seeded_during_setup:
+            # **The first refresh after setup is not a refresh.** `async_setup_entry` calls
+            # `async_setup()` and then `async_config_entry_first_refresh()` on the next line,
+            # and the base class turns that into a `_async_update_data()` — so without this,
+            # every start read the whole account twice, milliseconds apart, for state that
+            # could not have changed in between. Measured 2026-08-21: **five duplicate REST
+            # calls per start** (gcs-state, gcsadvancestate, presets, hub-state, favorites;
+            # the hub configuration read is already skipped once `hub_capabilities.known`).
+            #
+            # What the first refresh is actually *for* is populating `coordinator.data`
+            # before the platforms are forwarded — `async_setup` never calls
+            # `async_set_updated_data`, so `data` is None until this returns. That needs the
+            # snapshot, not the network.
+            #
+            # **Why this is safe, and not merely cheap.** `async_setup` ends by awaiting
+            # `stream.async_start()`, which returns with the socket up — so `_handle_connected`
+            # has already scheduled a full re-seed of its own by the time this runs. Anything
+            # that changed in the gap between the setup read and the stream coming up is
+            # caught by *that* read, which happens after the connection exists rather than
+            # before it. This one was redundant with it, a few hundred milliseconds earlier
+            # and strictly worse placed.
+            #
+            # ⚠️ **Only the first one.** A manual `homeassistant.update_entity` is the only
+            # other way in — with `SCAN_INTERVAL = None` there is no clock — and that one
+            # must read for real, so the flag is spent here and never set again.
+            self._seeded_during_setup = False
+            self._persist_refresh_token()
+            return self._snapshot()
         try:
             await self._async_seed_state()
         except AuthUnavailable as err:
@@ -1063,7 +1145,33 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 payload = await self.client.async_request(
                     "GET", GCS_STATE_PATH.format(device_id=self.gcs_device.device_id)
                 )
+                was_warmup = self.gcs_state.warmup_mode
                 self.gcs_state.apply_rest_state(payload)
+                if (
+                    was_warmup is not None
+                    and self.gcs_state.warmup_mode != was_warmup
+                ):
+                    # The mode moved while we were not listening. `apply_rest_state` writes
+                    # `warmup_mode` straight in, so this never reaches
+                    # `_handle_warmup_mode_change` and nothing else would record it — the
+                    # one way a disable can happen and leave no trace in the journal at all.
+                    #
+                    # This reseed runs on every MQTT reconnect, so the gap it covers is a
+                    # change during a stream outage, which is exactly when the valve's own
+                    # announcement is the thing that got lost.
+                    #
+                    # ⚠️ **Records only; auto-restore is deliberately not wired to this.**
+                    # Restoring from a REST read means acting on state of unknown age with
+                    # no `before_window` behind it, and that is a behaviour change, not the
+                    # evidence fix this is. Left open 2026-08-21 — see the session handoff.
+                    self._warmup_journal(
+                        "mode",
+                        before=was_warmup,
+                        after=self.gcs_state.warmup_mode,
+                        ours=False,
+                        source="rest",
+                        restored=False,
+                    )
                 # The third way to learn a mode, and the one `_remember_warmup_mode`'s
                 # docstring used to miss. MQTT alone forgets a mode set while the stream was
                 # down; our own writes alone forget a mode set from the app or touchscreen;
@@ -1108,9 +1216,14 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Presets push over MQTT on every create, edit, rename, and delete, so this is
             # only the seed — nothing re-reads them on a clock.
             try:
-                self.gcs_state.apply_preset_list(
-                    await self.client.async_get_gcs_presets(self.gcs_device.device_id)
+                presets = await self.client.async_get_gcs_presets(
+                    self.gcs_device.device_id
                 )
+                self.gcs_state.apply_preset_list(presets)
+                # Kept for `_async_sync_default_preset_timer`, which needs the *raw* record
+                # — title, volume and each valve's `hexString` — none of which survive
+                # `apply_preset_list`; `GcsPreset` keeps only id, name and is_experience.
+                self._seeded_presets = presets
             except KohlerError as err:
                 _LOGGER.debug("Could not read GCS presets: %s", err)
 
@@ -1664,15 +1777,25 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
 
     @callback
-    def _handle_warmup_mode_change(self, before: str | None, after: str | None) -> None:
+    def _handle_warmup_mode_change(
+        self, before: str | None, after: str | None, *, announced: bool = False
+    ) -> None:
         """React to the valve announcing a new warmup mode.
 
         Two jobs: remember any enabled mode as the restore target, and notice a transition
         *into* disabled that this integration did not cause.
+
+        ``announced`` says this envelope was a `GCS_WARM_STS` — the valve volunteering its
+        mode — as opposed to any of the other messages that reach this method unchanged.
+        It only matters when the mode did **not** move; a change can come from nowhere else,
+        since `_apply_warmup` is the only envelope handler that writes `warmup_mode`.
         """
-        if after is None or after == before:
+        record = journal_event(before, after, announced=announced)
+        if record is None:
             return
 
+        # Computed before the branch because **an announcement needs `ours` just as much as a
+        # transition does** — see the note on the `announced` record below.
         write_age = (
             None
             if self._warmup_self_write_at is None
@@ -1683,9 +1806,38 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             and write_age is not None
             and write_age <= WARMUP_SELF_WRITE_GRACE_SECONDS
         )
+
+        if record == "announced":
+            # The valve restating a mode it is already in.
+            #
+            # ⚠️ **Most of these are our own dropdown writes, and the journal has to say so.**
+            # Measured live 2026-08-21: `async_set_warmup` reads the mode back over REST at
+            # `WARMUP_READBACK_DELAYS = (0.0, 2.0, 4.0)`, and the first of those is immediate,
+            # so `apply_rest_state` has already moved `warmup_mode` by the time the valve's
+            # own echo lands ~3.4 s later. `before == after`, and what would have been a
+            # `mode` record with `ours: true` arrives here instead. Two dropdown changes that
+            # evening produced exactly this, at +0.81 s and +0.33 s after their readbacks.
+            #
+            # Without `ours` the whole class is indistinguishable from the valve volunteering
+            # its state — which is the one distinction §3e's open question turns on.
+            #
+            # Deliberately does not fall through to the disable path: a repeat of
+            # `warmUpDisabled` is not a fresh disable, and `should_restore_warmup` would
+            # refuse it anyway — but relying on that implicitly is how a restore loop starts.
+            self._warmup_journal("announced", mode=after, ours=ours, source="mqtt")
+            return
+
         # Every announcement is journalled, not only the disables. Establishing what a normal
         # week looks like is half of recognising the abnormal event.
-        self._warmup_journal("mode", before=before, after=after, ours=ours)
+        #
+        # ⚠️ **That sentence was false from the day it was written until 2026-08-21.** Only
+        # *changes* reached this line; a repeat returned above, and the mode a file opened on
+        # was never recorded at all. Both are covered now — the `announced` record above and
+        # the `baseline` record in `async_setup` — so it is true as stated. Check all three
+        # before trusting it again.
+        self._warmup_journal(
+            "mode", before=before, after=after, ours=ours, source="mqtt"
+        )
 
         if after != WARMUP_DISABLED:
             self._remember_warmup_mode(after)

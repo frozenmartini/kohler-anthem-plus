@@ -1984,10 +1984,25 @@ on first would miss it, and an *unrestored* disable is the cleaner observation o
 
 | record | when | what it carries |
 |---|---|---|
-| `mode` | every warmup announcement | `before`, `after`, `ours` — the baseline a rare event has to stand out from |
+| `baseline` | first line of every file | `mode` as read over REST at setup, plus `auto_restore` and `restores_to` — what the file started from |
+| `mode` | the mode moved | `before`, `after`, `ours`, and `source`: `mqtt` if the valve announced it, `rest` if a reseed found it already changed |
+| `announced` | the valve restated a mode it was already in | `mode`, `ours`. ⚠️ **A dropdown change lands here, not on `mode`** — the write reads itself back over REST at once, so our state has moved before the valve's ~3.4 s echo. `ours: true` is how you tell those from the valve volunteering |
 | `disabled` | the mode went to `warmUpDisabled` | `ours`, `restoring`, `water_running`, and **`before_window`**: every MQTT message in the preceding 120 s |
 | `context` | 60 s after a disable | **`after_window`** — what followed |
 | `restore`, `restore_done`, `restore_skipped`, `restore_failed`, `restore_gave_up` | auto-restore acting | target, attempt number, and the reason for every decline |
+
+⚠️ **`baseline` and `announced` were added 2026-08-21, and the journals before that date are
+thinner than this table implies.** Until then only *transitions* were recorded: the `mode` row
+above used to read "every warmup announcement", and that was never true. Two consequences for
+anything already captured — **a file with no records means "no transitions", not "nothing
+happened"**, and the valve's restatements are missing entirely, including the ~4 s post-boot
+`GCS_WARM_STS`. **28 of the 43 announcements in the raw corpus are restatements**, so on the
+pre-08-21 journals the raw capture is the only complete record of them.
+
+⚠️ **A `mode` record with `source: rest` is not restored.** It means the mode moved while the
+MQTT stream was down and the reseed found it already changed, so there is no `before_window`
+behind it and auto-restore is deliberately not wired to it. Before 2026-08-21 this case was
+not recorded at all — it is the one way a disable can happen and leave no trace in the journal.
 
 **Why both windows.** The four known disables sit inside a burst of configuration re-sync
 traffic, but the most distinctive marker — `SYSTEM_STS: SYSTEM_READY` — landed **7 to 9 s

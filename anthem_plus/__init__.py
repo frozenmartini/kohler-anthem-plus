@@ -38,6 +38,7 @@ from .client import (
 )
 from .const import (
     MSG_GCS_SOLO_STATUS,
+    MSG_GCS_WARMUP_STATUS,
     WARMUP_DISABLED,
     WARMUP_MODES,
     WARMUP_MODES_CURRENT,
@@ -50,7 +51,7 @@ from .cutoff_log import CutoffDebugLog, WARMUP_README
 from .raw_log import RawMqttLog
 from .runtime_cutoff import ZoneCutoff, ZoneCutoffDetector, ZoneReading
 from .state import GcsPreset, GcsState, HubState, HubZone
-from .warmup import restore_target, should_restore_warmup
+from .warmup import journal_event, restore_target, should_restore_warmup
 from .topology import (
     describe as describe_topology,
     topology_from_hub_configuration,
@@ -88,10 +89,12 @@ from .valve_hex import (
 __all__ = [
     "AuthError",
     "MSG_GCS_SOLO_STATUS",
+    "MSG_GCS_WARMUP_STATUS",
     "WARMUP_DISABLED",
     "WARMUP_MODES",
     "WARMUP_MODES_CURRENT",
     "WARMUP_MODES_LEGACY",
+    "journal_event",
     "restore_target",
     "should_restore_warmup",
     "AuthUnavailable",
