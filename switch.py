@@ -37,7 +37,6 @@ from .const import (
     CONF_WARMUP_AUTO_RESTORE,
     DOMAIN,
     ENDLESS_SHOWER_NOT_SET_UP,
-    ENDLESS_SHOWER_MATCH_DURATIONS,
     ENDLESS_SHOWER_ON,
     SHOWER_ON_PRESET_ID,
     WARMUP_AUTO_RESTORE_DELAY_SECONDS,
@@ -176,8 +175,10 @@ class EndlessShowerSwitch(KohlerValveEntity, SwitchEntity):
     studies (`docs/case_studies/`), the valve fires marginally early and the controller
     marginally late, so with equal durations the valve always cuts first and there is always a
     pause to act on. **If the controller's is shorter, it stops the shower and nothing
-    restarts it.** The warning is emitted at WARNING when this switch is turned on, but only
-    where a controller is present — a valve-only install has nothing to match.
+    restarts it.** Since 2026-08-22 that mismatch is warned about only on evidence — a
+    minute-boundary stop showing the controller preempting the valve (`runtime_cutoff.py`) —
+    not nagged unconditionally at toggle or startup: the hub's number is not readable from
+    the cloud, so the integration cannot know whether the durations differ until one fires.
 
     State lives in the config entry's **options**, the same key the options flow writes, so
     the two always agree and the setting survives a restart. Writing options does not trigger
@@ -250,13 +251,10 @@ class EndlessShowerSwitch(KohlerValveEntity, SwitchEntity):
             return
 
         _LOGGER.warning(ENDLESS_SHOWER_ON, describe_duration(known))
-
-        # Both products on one account means two independent maximum-duration timers, and
-        # Endless Shower can only act on the valve's. Say so at the moment the feature is
-        # switched on, when the owner can still go and match them. Valve-only installs have
-        # nothing to match, so they are not told to.
-        if self.coordinator.hub_device is not None:
-            _LOGGER.warning(ENDLESS_SHOWER_MATCH_DURATIONS, describe_duration(known))
+        # The "match the durations" nag that used to follow here (and on every start) was
+        # removed 2026-08-22 — see the note beside ENDLESS_SHOWER_ON in `coordinator.py`:
+        # the mismatch warning is evidence-based now, and fires only when the controller is
+        # observed preempting the valve.
 
     @property
     def extra_state_attributes(self) -> dict[str, object]:

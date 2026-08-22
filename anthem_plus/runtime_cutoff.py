@@ -607,7 +607,16 @@ class ZoneCutoffDetector:
                 suspected = (
                     None if is_paused else suspected_controller_limit(duration)
                 )
-                if suspected is not None:
+                # WARNING only when the controller PREEMPTED the valve — suspected below
+                # every valve limit means the hub's Max Shower Duration is set lower than
+                # the valve's, Endless Shower is silently defeated, and a fix exists on the
+                # side this integration can actually write (the valve's `maximumRunTime`).
+                # The other direction — a minute-boundary stop past the valve's limit, the
+                # controller sweeping a restored session — is journalled below but not
+                # warned: nothing HA-side can change the hub's number, so a warning would
+                # only advise the impossible. Owner's decision 2026-08-22; the unconditional
+                # "match the durations" nags at startup and toggle time went with it.
+                if suspected is not None and suspected < min(candidates):
                     _LOGGER.warning(
                         "Zone %s STOPPED (0x00) after %.1f s. That matches no limit the "
                         "Anthem valve announced, but it is %.2f s past %d minutes — a whole "

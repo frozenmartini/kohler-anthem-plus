@@ -106,7 +106,6 @@ from .const import (
     RAW_MQTT_LOG_KEEP_FILES,
     RAW_MQTT_LOG_MAX_BYTES,
     RELOAD_IGNORED_DATA_KEYS,
-    ENDLESS_SHOWER_MATCH_DURATIONS,
     ENDLESS_SHOWER_NOT_SET_UP,
     ENDLESS_SHOWER_NOTHING_TO_RESTORE,
     ENDLESS_SHOWER_ON,
@@ -513,22 +512,16 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _LOGGER.warning(
                     ENDLESS_SHOWER_ON, describe_duration(self.outlet_run_times)
                 )
-                # Both products on one account means two independent maximum-duration
-                # timers, and Endless Shower can only act on the valve's. Repeated here on
-                # every start for exactly the reason ENDLESS_SHOWER_ON is: the switch
-                # survives restarts, so `switch.py`'s copy of this warning may have been
-                # printed weeks ago and scrolled away. Until 2026-08-19 this was emitted
-                # only at toggle time, which left the mismatch invisible on every start
-                # after the first.
-                #
-                # What a mismatch costs, measured: `docs/case_studies/07_the_controller_
-                # sweeps.md`. Seven controller cutoffs ended showers that did not come back,
-                # and nothing in the log said why.
-                if self.hub_device is not None:
-                    _LOGGER.warning(
-                        ENDLESS_SHOWER_MATCH_DURATIONS,
-                        describe_duration(self.outlet_run_times),
-                    )
+                # No "match the durations" nag here any more — removed 2026-08-22, owner's
+                # decision. It fired on every start of every dual-product install whether or
+                # not the durations differed, which this integration cannot know: the hub's
+                # Max Shower Duration is not readable from the cloud (local API only, and
+                # storing the hub PIN was ruled out). The warning that remains is
+                # evidence-based and one-directional: `runtime_cutoff.py` warns when an
+                # observed minute-boundary stop shows the controller PREEMPTING the valve
+                # (hub limit below the valve's — Endless Shower silently defeated, and the
+                # valve side is the one this integration can write). A controller sweep past
+                # the valve's limit is journalled but not warned: no HA-side action exists.
             else:
                 _LOGGER.warning(ENDLESS_SHOWER_NOT_SET_UP)
         self.async_refresh_setup_issue()

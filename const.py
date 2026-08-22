@@ -223,26 +223,16 @@ ENDLESS_SHOWER_ON = (
     "'Max Shower Duration' is reached."
 )
 
-# ⚠️ Only shown when the account has BOTH an Anthem valve and an Anthem Plus controller.
-#
-# The two devices each enforce their own maximum shower duration and they signal differently:
-# the valve **pauses** (`0x40`), the controller **stops** (`0x00`). Endless Shower acts on the
-# pause, because only the valve's cut is one it can safely tell apart from somebody deliberately
-# ending their shower.
-#
-# Measured across five case studies (`docs/case_studies/`): the valve fires marginally early
-# (-0.08 to -0.23 s against its limit) and the controller marginally late (+0.20 to +1.00 s),
-# so **when the two durations are equal the valve always cuts first** and Endless Shower always
-# has a pause to act on. When they are NOT equal, whichever is shorter wins — and if that is the
-# controller, its `0x00` is declined and the shower stays off.
-#
-# %s is the valve's duration in whole minutes.
-ENDLESS_SHOWER_MATCH_DURATIONS = (
-    "Endless Shower: your Anthem valve's Max Shower Duration is %s minutes. Set the Anthem "
-    "Plus controller's Max Shower Duration to the SAME value, or your shower may stop without "
-    "restarting. The two devices run separate timers and Endless Shower can only act on the "
-    "valve's."
-)
+# `ENDLESS_SHOWER_MATCH_DURATIONS` stood here until 2026-08-22 — an unconditional "set the
+# controller's Max Shower Duration to the SAME value" warning, printed at every start and
+# every toggle of any dual-product install. Removed on the owner's decision: this integration
+# cannot know whether the durations actually differ (the hub's number is local-API-only, and
+# storing the hub PIN was ruled out), so the nag fired regardless. The advice itself still
+# holds — the valve fires marginally early, the controller marginally late, so equal
+# durations mean the valve's restorable `0x40` always wins — and the mismatch warning that
+# remains is evidence-based: `runtime_cutoff.py` warns when a minute-boundary stop shows the
+# controller preempting the valve (the direction with a valve-side fix), and only journals a
+# sweep past the valve's limit (no HA-side action exists).
 
 # A cutoff was caught and the shower put back. %s is the local time it was cut off.
 ENDLESS_SHOWER_RESTARTED = "Max Shower Duration reached at %s. Restarted the shower."

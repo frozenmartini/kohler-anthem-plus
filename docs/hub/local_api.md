@@ -325,6 +325,21 @@ and every other surface, with no warning to whoever is standing in the water.
 > **A three-minute shower is a setting this API will accept without comment.** Treat a low
 > value as a safety-relevant write, not a preference.
 
+### What the HA integration does with this — nothing, deliberately (2026-08-22)
+
+The integration never reads or writes `maxshowerduration`: it is cloud-only, this field is
+local-API-only, and using it would mean storing the hub's PIN — ruled out by the owner. So the
+cutoff detector is never fed the controller's number and recognises a controller cutoff by
+shape instead: a `0x00` stop landing 0.2–2.0 s past a whole minute. It **warns only when that
+stop preempted the valve's own limit** (the hub's number set lower than the valve's) — the
+direction where Endless Shower is silently defeated and where a fix exists on the side the
+integration can write. A minute-boundary stop *past* the valve's limit — the controller
+sweeping a restored session — is journalled, not warned: no HA-side action exists. The
+unconditional "set the durations to the same value" reminders at startup and toggle time were
+removed the same day. The equal-durations rule itself still stands
+([`../case_studies/conclusions.md`](../case_studies/conclusions.md) Part C) — what changed is
+only when the integration talks about it.
+
 ### Writing it safely
 
 * **WHOLE-RECORD REPLACE.** An omitted field is a silent edit. Read `get_valve_settings`
