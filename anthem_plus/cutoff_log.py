@@ -87,7 +87,12 @@ record has:
 
     ts       ISO-8601 UTC — the SAME clock and format as mqtt_raw_*.jsonl in
              this directory, so the two files interleave by sorting on it
-    event    flow_start | flow_end | restore | arm
+    event    flow_start | flow_end | restore | arm | anchor
+
+`anchor` (since 2026-08-22) is a restore starting a zone's clock itself: the valve
+does not reliably republish a restored zone (176.77 s of silence in the measured
+case), so the clock now starts at the restore write rather than waiting for a
+message. A flow_start for that zone will NOT follow — the anchor took its place.
 
 `flow_end` is the interesting one. It carries the detector's full reasoning:
 

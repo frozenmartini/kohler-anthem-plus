@@ -1088,6 +1088,24 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             outlets=restored,
             write_seconds=round(time.monotonic() - started, 3),
         )
+        # The valve does not reliably announce a restored zone — 17 of the corpus's 18
+        # restores drew a GCS_SOLO_STS within 0.06-1.08 s, one drew nothing for 176.77 s
+        # while the water ran — and the detector's clock used to start only on that
+        # announcement. An anchor that late reads as "matches no limit" at the next cutoff
+        # and leaves the water off with nothing saying why. The write that just succeeded is
+        # when the water came back, so anchor there; a prompt announcement wins the race
+        # harmlessly (`note_restore` skips zones already timed). Session 12 §3, fixed
+        # 2026-08-22.
+        self._cutoff.note_restore(
+            {
+                zone: masks[zone]
+                for zone in cut_zones | set(also_paused)
+                if masks.get(zone)
+            },
+            readings={
+                cut.zone: cut.reading for cut in fired if cut.reading is not None
+            },
+        )
 
     def _snapshot(self) -> dict[str, Any]:
         """A cheap dict so DataUpdateCoordinator has something to hand entities.

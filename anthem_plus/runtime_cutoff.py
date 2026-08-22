@@ -387,6 +387,52 @@ class ZoneCutoffDetector:
             else:
                 self._local_close[zone] = now
 
+    def note_restore(
+        self, masks: dict[int, int], readings: dict[int, ZoneReading] | None = None
+    ) -> None:
+        """Anchor zones a restore just reopened, so valve silence cannot blind the timer.
+
+        ``masks`` is what the restore wrote, per zone. Only non-zero masks anchor, and a
+        zone already being timed is left alone — when the valve's own announcement wins the
+        race, that anchor stands. ``readings`` carries the flow/temperature the restore
+        replayed, so a later cutoff's record is as complete as the first one's.
+
+        Why this exists: the valve does not reliably announce a restored zone. Across the
+        18 restores in the clean corpus, 17 drew a ``GCS_SOLO_STS`` within 0.06–1.08 s —
+        and one drew nothing for **176.77 s** while the water demonstrably ran (2026-08-19
+        23:48, owner-confirmed; `docs/architecture.md` "Silence is not state"). Anchoring
+        in :meth:`update` alone put that zone's ``flow_start`` 176.77 s late, which at the
+        next cutoff would have measured ~723 s against the 900 s limit and, at
+        ``CUTOFF_TOLERANCE_SECONDS = 2``, ignored it: no restore, water off, nothing in the
+        log saying why.
+
+        Restores only — deliberately not every opening write. A restore reopens water the
+        valve was demonstrably running a second earlier, so the write taking effect is the
+        overwhelmingly probable outcome; an ordinary open can be accepted by the cloud and
+        dropped by the valve, and anchoring one that never ran would hold a false clock —
+        against which a *manual* pause landing within tolerance of a limit would read as a
+        cutoff and restart water nobody is running. :meth:`update` still corrects both
+        directions: any snapshot showing the zone empty pops the anchor (the `0x40` pause
+        resolution guarantees such a snapshot within ~120 s of a failed restore), and one
+        showing it flowing keeps whichever anchor came first.
+        """
+        now = time.monotonic()
+        readings = readings or {}
+        for zone, mask in masks.items():
+            if not mask or zone in self._flowing_since:
+                continue
+            self._flowing_since[zone] = now
+            self._last_mask[zone] = mask
+            reading = readings.get(zone)
+            if reading is not None:
+                self._last_reading[zone] = reading
+            self.journal.note(
+                "anchor",
+                zone=zone,
+                mask=mask,
+                reason="restore write; the valve may not republish this zone",
+            )
+
     def flowing_for(self, zone: int) -> float | None:
         """Seconds this zone has been flowing, or None if it is not, or is not being timed.
 

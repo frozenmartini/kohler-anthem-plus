@@ -629,14 +629,20 @@ either side of the gap. This is the app-channel framing in
 [`case_studies/intro.md`](case_studies/intro.md) behaving exactly as described: no card change,
 no push. **Do not read valve silence as the valve being idle, stuck, or offline.**
 
-**The consequence is ours, not Kohler's.** `ZoneCutoffDetector` anchors a zone's clock in
-`update()`, on the first message that shows the zone flowing; the restore path calls only
-`note_local_write()`, which never sets that anchor. So the detector logged `flow_start` for
-zone 1 at **23:51:31**, water having run since **23:48:35** — an anchor 176.77 s late. Had the
-shower continued to the valve's next cutoff, the detector would have measured ~723 s against a
-900 s limit and, at `CUTOFF_TOLERANCE_SECONDS = 2`, ignored a real cutoff: no restore, water
-off, nothing in the log saying why. **Not observed** — that shower ended at 23:55:38 — and it
-is **1 case in 18**. Recorded as a risk, not a rule.
+**The consequence was ours, not Kohler's — closed 2026-08-22.** `ZoneCutoffDetector` anchored
+a zone's clock only in `update()`, on the first message that shows the zone flowing; the
+restore path called only `note_local_write()`, which never sets that anchor. So the detector
+logged `flow_start` for zone 1 at **23:51:31**, water having run since **23:48:35** — an
+anchor 176.77 s late. Had the shower continued to the valve's next cutoff, the detector would
+have measured ~723 s against a 900 s limit and, at `CUTOFF_TOLERANCE_SECONDS = 2`, ignored a
+real cutoff: no restore, water off, nothing in the log saying why. Not observed live — that
+shower ended at 23:55:38, 1 case in 18 — but replayed as a test and the miss confirmed.
+**Fixed:** the restore now calls `note_restore()`, which anchors the restored zones at the
+write that demonstrably reopened the water and journals an `anchor` record. A prompt
+announcement still wins the race (a zone already timed is left alone), an empty snapshot still
+pops a wrong anchor, and the method is deliberately restore-only — an ordinary open can be
+accepted by the cloud and dropped by the valve, and a false clock is how a *manual* pause at
+the wrong second would read as a cutoff and restart water nobody is running.
 
 ### The HUB does not reflect a valve driven directly
 
