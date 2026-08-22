@@ -128,8 +128,6 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
-GCS_STATE_PATH = "/devices/api/v1/device-management/gcs-state/{device_id}"
-
 
 def entry_reload_signature(entry: ConfigEntry) -> tuple[Any, ...]:
     """Fingerprint the parts of a config entry that are worth a reload.
@@ -1142,8 +1140,8 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         if self.gcs_device is not None and self.gcs_state is not None:
             try:
-                payload = await self.client.async_request(
-                    "GET", GCS_STATE_PATH.format(device_id=self.gcs_device.device_id)
+                payload = await self.client.async_get_gcs_state(
+                    self.gcs_device.device_id
                 )
                 was_warmup = self.gcs_state.warmup_mode
                 self.gcs_state.apply_rest_state(payload)
@@ -1649,9 +1647,7 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self.gcs_device is None or self.gcs_state is None:
             return None
         try:
-            payload = await self.client.async_request(
-                "GET", GCS_STATE_PATH.format(device_id=self.gcs_device.device_id)
-            )
+            payload = await self.client.async_get_gcs_state(self.gcs_device.device_id)
         except KohlerError as err:
             _LOGGER.debug("Could not read warmup mode: %s", err)
             return None

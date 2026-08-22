@@ -178,7 +178,7 @@ MOBILE_SETTINGS = "/platform/api/v1/mobile/settings"
 # Status arrives as direct-method messages. The app never publishes control here, and
 # neither does this client: the confirmed write path is HTTPS /commands/*.
 MQTT_PORT = 8883
-MQTT_METHOD_TOPIC = "$iothub/methods/POST/#"
+# Direct methods must be answered here or the service treats them as unhandled.
 MQTT_RESPONSE_TOPIC = "$iothub/methods/res/200/?$rid={rid}"
 
 # ONE topic carries everything. Across 856 messages in 20 capture logs, 100% arrived on

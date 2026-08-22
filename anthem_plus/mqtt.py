@@ -39,6 +39,7 @@ from .client import KohlerClient
 from .raw_log import RawMqttLog
 from .const import (
     MQTT_PORT,
+    MQTT_RESPONSE_TOPIC,
     MQTT_SUBSCRIBE_TOPIC,
     MQTT_WARMUP_SECONDS,
 )
@@ -286,7 +287,7 @@ class AnthemMqttStream:
         match = _RID.search(message.topic)
         if match:
             client.publish(
-                f"$iothub/methods/res/200/?$rid={match.group(1)}",
+                MQTT_RESPONSE_TOPIC.format(rid=match.group(1)),
                 b'{"status":"received"}',
                 qos=1,
             )

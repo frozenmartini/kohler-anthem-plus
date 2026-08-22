@@ -29,6 +29,7 @@ from .const import (
     CUSTOMER_DEVICE,
     GCS_ADVANCE_STATE,
     GCS_PRESETS,
+    GCS_STATE,
     HUB_CONFIGURATION,
     HUB_EXPERIENCES,
     HUB_FAVORITES,
@@ -338,6 +339,15 @@ class KohlerClient:
         if not settings.get("ioTHub"):
             raise KohlerError("Kohler returned no IoT Hub settings", data)
         return settings
+
+    async def async_get_gcs_state(self, device_id: str) -> Any:
+        """Live valve state: both zone words' fields, warmup, and the active preset.
+
+        The read that seeds every valve entity at setup and on each MQTT reconnect, and
+        the same field the Konnect app reads for warmup (``warmUpState.warmUp``). Partly
+        cached on Kohler's side — the device's own MQTT push is the final word.
+        """
+        return await self.async_request("GET", GCS_STATE.format(device_id=device_id))
 
     async def async_get_gcs_settings(self, device_id: str) -> dict[str, Any]:
         """Read the valve's own settings block, including its outlet topology.
