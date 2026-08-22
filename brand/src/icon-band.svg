@@ -1,0 +1,12 @@
+<svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <clipPath id="clipBand">
+      <rect width="256" height="256" rx="52"/>
+    </clipPath>
+  </defs>
+  <rect width="256" height="256" rx="52" fill="#D4468F"/>
+  <g clip-path="url(#clipBand)" fill="none" stroke="#FFFFFF" stroke-width="12">
+    <rect x="-20" y="66" width="296" height="124" rx="36"/>
+    <circle cx="128" cy="128" r="72" fill="#4E1538"/>
+  </g>
+</svg>
