@@ -160,7 +160,7 @@ Findings that outlived the session they came from. Each links to where it is arg
 | **`maxshowerduration` is readable — but only over the LOCAL API**, `GET /web/api/v1/device/get_valve_settings`. Minutes as a string; the dropdown offers only 15/30/45/60. The same object predicts a controller-commanded shower completely. | [2 §8](02_hub_commanded_shower_15min.md), [`../hub/local_api.md`](../hub/local_api.md) |
 | **Warm-up counts toward the ceiling**, runs the configured `warmupOutlets` (five here), ends on the controller's own judgement rather than the valve's `atTemp`, and carries **no pause** at the handoff. | [2 §6a](02_hub_commanded_shower_15min.md), [3 §8a](03_both_ceilings_at_15_minutes.md), [2 §6e](02_hub_commanded_shower_15min.md) |
 | **It refreshes its two zones independently** and will push a card showing a state the valve never held — measured at ~200 ms. | [5 §7](05_three_restarts_and_the_unexplained_00.md) |
-| **It has never reported `status: ON` at the opening of a preset-driven session — 0 of 15.** Ten times silent, three times publishing a confident `status: OFF` while water ran. `resolve_outlet_source()` is right to prefer the valve word; its stated cause (`solowritesystem`) is wrong. | [4 §8](04_two_touchscreens_and_what_off_means.md) |
+| **It has never reported `status: ON` at the opening of a preset-driven session — 0 of 15.** Ten times silent, three times publishing a confident `status: OFF` while water ran. `resolve_outlet_source()` is right to prefer the valve word; the wrong cause its docstring used to state (`solowritesystem` as such) was corrected 2026-08-21 to name presets as the categorical failure. | [4 §8](04_two_touchscreens_and_what_off_means.md) |
 
 ### Home Assistant's own effects
 

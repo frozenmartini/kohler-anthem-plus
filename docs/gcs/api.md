@@ -2008,7 +2008,7 @@ on first would miss it, and an *unrestored* disable is the cleaner observation o
 | `mode` | the mode moved | `before`, `after`, `ours`, and `source`: `mqtt` if the valve announced it, `rest` if a reseed found it already changed |
 | `announced` | the valve restated a mode it was already in | `mode`, `ours`. ⚠️ **A dropdown change lands here, not on `mode`** — the write reads itself back over REST at once, so our state has moved before the valve's ~3.4 s echo. `ours: true` is how you tell those from the valve volunteering |
 | `disabled` | the mode went to `warmUpDisabled` | `ours`, `restoring`, `water_running`, and **`before_window`**: every MQTT message in the preceding 120 s |
-| `context` | 60 s after a disable | **`after_window`** — what followed |
+| `context` | 45 s after a disable | **`after_window`** — what followed |
 | `restore`, `restore_done`, `restore_skipped`, `restore_failed`, `restore_gave_up` | auto-restore acting | target, attempt number, and the reason for every decline |
 
 ⚠️ **`baseline` and `announced` were added 2026-08-21, and the journals before that date are
