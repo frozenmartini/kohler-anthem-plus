@@ -334,9 +334,10 @@ class ControllerLastUpdateSensor(ControllerDiagnosticSensor):
     """When the controller last reported.
 
     The counterpart to ``sensor.anthem_valve_last_update``, and **not redundant with it** —
-    the two devices report on entirely separate schedules. The controller says nothing during
-    a valve-driven session, so a controller timestamp that lags the valve's by an hour is
-    normal here rather than a fault.
+    the two devices report on entirely separate schedules. The controller can go a whole
+    valve-driven session without saying anything (32 of 95 measured episodes), so a
+    controller timestamp that lags the valve's by an hour is normal here rather than a
+    fault.
 
     Carries the event's own timestamp rather than relying on ``last_changed``, which Home
     Assistant stamps when it writes the state — so a restart would otherwise reset it to the

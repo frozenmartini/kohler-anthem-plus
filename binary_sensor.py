@@ -7,10 +7,11 @@ Two unrelated groups live here:
 * **Controller outlets** — created *only* on accounts with no Anthem Valve. Where a valve
   exists it owns the outlets, as switches.
 
-The controller does not observe a session driven through the valve's own API: measured
-live, five minutes with an outlet open produced no controller message at all. Outlet
-entities sourced from it on such an account would sit frozen through every shower, which is
-worse than not existing.
+The controller's view of a session driven through the valve's own API is unreliable —
+measured across 95 such episodes: 51 reported immediately, 12 late, 32 never, and
+preset-driven openings never (0 of 15). Outlet entities sourced from it on such an account
+would freeze through an unpredictable share of showers, which is worse than not existing.
+See ``anthem_plus.models.resolve_outlet_source``.
 """
 
 from __future__ import annotations

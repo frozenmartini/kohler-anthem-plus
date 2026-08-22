@@ -164,19 +164,19 @@ def resolve_outlet_source(has_gcs: bool, has_hub: bool) -> OutletStateSource | N
 
     **Whenever a GCS device is present, use the GCS valve word — never the HUB's.**
 
-    Partly latency: the HUB trails the valve word by 0.3-2 seconds and briefly reports
-    pre-transition values. But mainly correctness — when the shower is driven through the
-    GCS ``solowritesystem`` endpoint and the Anthem Plus touchscreen is never touched, the
-    HUB's reported state does not follow the valve. Verified live: 21 seconds with outlet 4
-    open and ``hub-state`` reporting an idle system throughout, corroborated by the HUB's
-    Alexa and Google Home states also staying off.
+    Partly latency: the HUB trails the valve word — typically ~1 s, measured as much as
+    ~5 s stale, and it can skip a short session window entirely (2026-08-21, session 15
+    §8e). But mainly reliability: the HUB's coverage of valve-driven sessions is patchy.
+    Measured across the 95 GCS water-on episodes where the controller was demonstrably
+    alive (2026-08-18 corpus): **51 reported immediately, 12 caught up late, 32 never
+    reported at all**. The categorical failure is **presets** — 0 of 15 preset-driven
+    openings were ever reported as ON, three publishing ``status: OFF`` while water ran.
 
-    Measured precisely: the HUB emits ``SHOWER_VALVE_STS`` only for transitions that land in
-    an **OFF** state. With outlet 4 held open for five minutes it emitted nothing at all;
-    the stop produced one message reporting ``status=OFF``, an all-zero ``outlets`` array,
-    and null ``temperature``/``flowrate``. Confirmed by two independent MQTT clients.
-
-    So the HUB never reports a GCS-driven open outlet on any surface.
+    ⚠️ An earlier revision here claimed the HUB "never reports a GCS-driven open outlet on
+    any surface", blaming ``solowritesystem`` as such. The 2026-08-18 corpus disproved the
+    "never" (51 of 95 seen immediately) and moved the categorical blame to presets; the
+    conclusion is unchanged, because "sometimes, late, or never" is exactly what an entity
+    source must not be.
 
     A HUB-only account has no valve word available, so it uses the HUB stream. That works
     because such a system is driven through favourites and the touchscreen, and the outlet

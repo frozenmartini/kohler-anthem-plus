@@ -723,9 +723,10 @@ class HubZone:
 class HubState:
     """Live state of one Anthem Plus system controller.
 
-    Note the HUB does not observe a valve driven directly through the GCS endpoint: it
-    reports only transitions that land in an OFF state, and never an open outlet from such a
-    session. On an account that also has a GCS device, read outlets from the valve instead.
+    Note the HUB's view of a valve-driven session is unreliable: measured across 95 such
+    episodes, 51 were reported immediately, 12 late, and 32 never — with preset-driven
+    openings never reported at all (0 of 15). On an account that also has a GCS device,
+    read outlets from the valve instead; see :func:`~.models.resolve_outlet_source`.
     """
 
     model: ValveModel
@@ -768,7 +769,13 @@ class HubState:
         return any(z.status == "ON" for z in self.zones.values())
 
     def apply_envelope(self, envelope: Envelope) -> bool:
-        """Apply a HUB message. Returns True if anything changed."""
+        """Apply a HUB message. True for every HUB message, False for anything else.
+
+        Same contract as :meth:`GcsState.apply_envelope`: every message from the
+        controller advances ``last_update`` whether or not this class decodes it, because
+        that timestamp means "last heard from", not "last changed" — so there is always
+        something new to render and the handlers' own change flags are subsumed.
+        """
         if envelope.sku != SKU_HUB:
             return False
         # Before dispatch, for the same reason as the valve: the controller emits plenty this

@@ -447,12 +447,14 @@ class HubShowerSwitch(KohlerControllerEntity, SwitchEntity):
     ``is_on`` follows reported state rather than what we last sent, so a shower started from
     the touchscreen or the app shows up here too.
 
-    **It reports the controller's view only — never the valve's.** So a shower driven
-    straight at the valve through ``solowritesystem``, which is every shower Home Assistant
-    starts, leaves this switch off. That is the intended reading, not a gap: the controller
-    is not party to such a session, and this switch's own ``valvecontrol OFF`` would not
-    stop it. For whether water is physically running, read the **Anthem Valve** device's
-    Shower switch and outlet sensors, which are authoritative.
+    **It reports the controller's view only — never the valve's.** A shower driven straight
+    at the valve through ``solowritesystem`` — which is every shower Home Assistant starts —
+    reaches this switch only if the controller happens to register it, which is unreliable
+    (51 of 95 immediately, 12 late, 32 never; preset-driven ones never). That is the
+    intended reading, not a gap: the switch shows what the controller knows, and its own
+    ``valvecontrol OFF`` can only stop a session the controller is party to. For whether
+    water is physically running, read the **Anthem Valve** device's Shower switch and outlet
+    sensors, which are authoritative.
 
     See ``coordinator.hub_water_is_running`` for the 2026-08-18 measurement that made this
     the rule.
