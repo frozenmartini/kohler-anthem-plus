@@ -153,10 +153,11 @@ class ShowerSwitch(KohlerValveEntity, SwitchEntity):
 class EndlessShowerSwitch(KohlerValveEntity, SwitchEntity):
     """Whether to re-open a zone the valve closed on its own run-time limit.
 
-    A switch rather than only a config-flow checkbox, because this is a behaviour someone
-    will want to turn on for one shower and off again — and a setting buried behind
-    *Configure* is neither visible on the device page nor reachable from an automation or a
-    dashboard. As a switch it is all three.
+    **This switch is the only control for the feature.** It began life alongside a
+    config-flow checkbox writing the same option; the checkbox was removed 2026-08-22
+    (see `config_flow.py`) because a setting buried behind *Configure* is neither visible
+    on the device page nor reachable from an automation or a dashboard, and the switch is
+    all three.
 
     **What it does when on:** the valve shuts a zone off once it has been running for
     `maximumRunTime` (15 minutes here, per zone rather than per outlet — see
@@ -180,11 +181,11 @@ class EndlessShowerSwitch(KohlerValveEntity, SwitchEntity):
     not nagged unconditionally at toggle or startup: the hub's number is not readable from
     the cloud, so the integration cannot know whether the durations differ until one fires.
 
-    State lives in the config entry's **options**, the same key the options flow writes, so
-    the two always agree and the setting survives a restart. Writing options does not trigger
-    a reload — `_async_update_listener` compares `entry.data`, which is untouched — and the
-    coordinator reads the flag live, so a toggle takes effect on the next message rather than
-    needing a restart.
+    State lives in the config entry's **options**, so the setting survives a restart.
+    Writing options does not trigger a reload — the key is in `RELOAD_IGNORED_OPTION_KEYS`
+    and `_async_update_listener` sees no reloadable difference — and the coordinator reads
+    the flag live, so a toggle takes effect on the next message rather than needing a
+    restart.
     """
 
     _attr_name = "Endless Shower"

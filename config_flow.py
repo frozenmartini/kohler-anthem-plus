@@ -22,17 +22,10 @@ from typing import Any
 
 import voluptuous as vol
 
-from homeassistant.config_entries import (
-    ConfigEntry,
-    ConfigFlow,
-    ConfigFlowResult,
-    OptionsFlow,
-)
-from homeassistant.core import callback
+from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import (
-    BooleanSelector,
     SelectOptionDict,
     SelectSelector,
     SelectSelectorConfig,
@@ -60,7 +53,6 @@ from .anthem_plus.models import (
 )
 from .const import (
     CONF_REFRESH_TOKEN,
-    CONF_RESTART_ON_RUNTIME_CUTOFF,
     CONF_ZONE_OUTLETS,
     CONF_TEMPERATURE_UNIT,
     CONF_TENANT_ID,
@@ -100,11 +92,12 @@ class KohlerAnthemPlusConfigFlow(ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
 
-    @staticmethod
-    @callback
-    def async_get_options_flow(entry: ConfigEntry) -> KohlerAnthemPlusOptionsFlow:
-        """Expose the options form (the run-time cutoff restart)."""
-        return KohlerAnthemPlusOptionsFlow()
+    # No options flow, deliberately — removed 2026-08-22 on the owner's decision. Its one
+    # option duplicated the Endless Shower switch, which is the better control (visible on
+    # the device page, reachable from automations and dashboards), and the flow carried a
+    # latent bug besides: saving it replaced the entry's options wholesale with its single
+    # key, which would have wiped the stored warmup keys the moment anyone used Configure.
+    # The entities that persist to `entry.options` still do; only the dialog is gone.
 
     # Attribute names are deliberately prefixed. Home Assistant's ConfigFlow base class
     # defines read-only properties such as `_reauth_entry_id`, and assigning to one raises
@@ -290,31 +283,6 @@ class KohlerAnthemPlusConfigFlow(ConfigFlow, domain=DOMAIN):
         )
 
 
-class KohlerAnthemPlusOptionsFlow(OptionsFlow):
-    """Settings that can change after setup.
-
-    One option: whether to re-open a zone the valve closed on its own run-time limit.
-
-    Saving does **not** reload the entry. The flag is read live from ``entry.options`` on
-    every access, so it takes effect the moment it is saved, and a reload would cost a full
-    platform rebuild for nothing — see ``RELOAD_IGNORED_OPTION_KEYS`` in ``const.py``. An
-    option added here later reloads by default until it is proven to be read live.
-    """
-
-    async def async_step_init(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        if user_input is not None:
-            return self.async_create_entry(data=user_input)
-
-        current = self.config_entry.options.get(CONF_RESTART_ON_RUNTIME_CUTOFF, False)
-        return self.async_show_form(
-            step_id="init",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(
-                        CONF_RESTART_ON_RUNTIME_CUTOFF, default=current
-                    ): BooleanSelector(),
-                }
-            ),
-        )
+# `KohlerAnthemPlusOptionsFlow` stood here until 2026-08-22 — see the note in the config
+# flow class above for why it went and what replaced it (nothing needed to: the Endless
+# Shower switch was already the real control).
