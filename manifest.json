@@ -1,13 +1,19 @@
 {
   "domain": "kohler_anthem_plus",
   "name": "Kohler Anthem Plus",
-  "codeowners": [],
+  "codeowners": [
+    "@frozenmartini"
+  ],
   "config_flow": true,
   "documentation": "https://github.com/frozenmartini/kohler-anthem-plus",
   "integration_type": "hub",
   "iot_class": "cloud_push",
   "issue_tracker": "https://github.com/frozenmartini/kohler-anthem-plus/issues",
-  "loggers": ["custom_components.kohler_anthem_plus"],
-  "requirements": ["paho-mqtt>=1.6.1"],
+  "loggers": [
+    "custom_components.kohler_anthem_plus"
+  ],
+  "requirements": [
+    "paho-mqtt>=1.6.1"
+  ],
   "version": "0.1.0"
 }
