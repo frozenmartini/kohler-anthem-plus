@@ -14,7 +14,7 @@
 
 set -e
 
-VARIANT="${1:-v18}"
+VARIANT="${1:-v22}"
 
 SRC="$(cd "$(dirname "$0")" && pwd)"
 OUT="$(dirname "$SRC")"
@@ -33,7 +33,7 @@ for size in 256 512; do
         256) name="icon.png" ;;
         512) name="icon@2x.png" ;;
     esac
-    # PNG32 keeps the pink from being flattened: ImageMagick will silently
+    # PNG32 keeps the colour from being flattened: ImageMagick will silently
     # re-encode as Grayscale otherwise on some intermediate steps.
     magick "$MASTER" -filter Lanczos -resize "${size}x${size}" \
         -strip -define png:compression-level=9 -colorspace sRGB \

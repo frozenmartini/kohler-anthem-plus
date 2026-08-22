@@ -2,7 +2,9 @@
 
 `icon.png` (256×256) and `icon@2x.png` (512×512) are the integration's icons in the
 Home Assistant UI — the integrations dashboard, the config-flow dialog, and the device
-pages. Both are built from `src/icon-v18.svg`.
+pages. Both are built from `src/icon-v22.svg` — the violet variant, chosen by the
+owner 2026-08-22 from the 24-version workbench (v18, the pink original, shipped
+2026-08-21–2026-08-22 and stays in `src/` as the previous mark).
 
 ## Why they live here and not in the brands repo
 
@@ -57,25 +59,29 @@ them are the same measurement — the tile against the card:
 
 | | light card | dark card | gap |
 | --- | --- | --- | --- |
-| tile silhouette vs card | 4.14:1 | 4.12:1 | 0.02 |
-| bar cut-lines vs tile | 4.14:1 | 4.12:1 | 0.02 |
-| dial ring vs dial | 4.95:1 | 3.45:1 | 1.50 |
+| tile silhouette vs card | 4.15:1 | 4.11:1 | 0.04 |
+| bar cut-lines vs tile | 4.15:1 | 4.11:1 | 0.04 |
+| dial ring vs dial | 6.09:1 | 2.80:1 | 3.29 |
 
-Total drift **1.55**. The tile's fill governs two thirds of that and the dial's only one
-third, which is why the near-neutral colour sits on the tile. `#D4468F` lands at
-relative luminance 0.2036 against the theme-neutral point of 0.2043 — the geometric mean
-of Home Assistant's two card grounds — so it is within a thousandth of the tone that
-treats both themes identically.
+The tile — the dominant surface, and the ground for the bar's cut lines — keeps the
+neutrality discipline: `#A35CD6` lands at relative luminance 0.2030 against the
+theme-neutral point of 0.2043 (the geometric mean of Home Assistant's two card grounds),
+so both tile rows sit within 0.04 of each other, matching v18's 0.02. The drift lives in
+the dial ring: `#6A3DE8` is deeper than v18's `#D81B60`, so the ring pops harder on a
+light card (6.09:1) and softens on a dark one (2.80:1, just under the 3:1 UI-component
+guideline). Total drift 3.37 against v18's 1.55 — the trade the owner took for the
+violet, chosen with both grounds visible in the workbench.
 
 A `dark_` pair earns its keep when a design is markedly better on one ground than the
-other. This one is not, so it ships as a single file.
+other. The dominant surfaces are not, and the ring stays legible on both, so it still
+ships as a single file — revisit if the dark-card ring ever bothers in practice.
 
 ## Palette
 
 | Token | Hex | Use |
 | --- | --- | --- |
-| Tile | `#D4468F` | Rounded-square ground; theme-neutral |
-| Dial | `#D81B60` | Filled ellipse, the subject |
+| Tile | `#A35CD6` | Rounded-square ground; theme-neutral |
+| Dial | `#6A3DE8` | Filled ellipse, the subject |
 | Lines | — | Not painted: cut through to the card behind |
 
 Corner radius 16 on a 79 grid (20.3%). Outside the rounded corners the PNG is fully
@@ -85,12 +91,12 @@ brands repo's "minimum empty space on the edges" rule is satisfied.
 ## Rebuilding
 
 ```sh
-./src/build.sh              # v18, the shipped mark
-./src/build.sh vermilion    # or any other src/icon-<name>.svg
+./src/build.sh              # v22, the shipped mark
+./src/build.sh v18          # or any other src/icon-<name>.svg
 ```
 
-`src/` also holds earlier explorations kept for reference — `icon-bleed-right.svg` (what
-shipped before v18), plus `icon-band.svg`, `icon-bleed-both.svg` and `icon-letterbox.svg`
+`src/` also holds earlier explorations kept for reference — `icon-v18.svg` (the pink
+mark that shipped before v22), `icon-bleed-right.svg` (what shipped before v18), plus `icon-band.svg`, `icon-bleed-both.svg` and `icon-letterbox.svg`
 from the first pass. They are square opaque tiles with painted white strokes rather than
 knockouts, so they predate everything described above.
 
