@@ -80,7 +80,6 @@ TEMPERATURE_TENTHS_PER_DEGREE = 10
 # Bit 0x02 was never set across 363 captures (no temperature reached 51.2 C), which is why a
 # one-bit reading agreed with every sample while still being the narrower model.
 TEMPERATURE_HIGH_BITS = 0x03
-TEMPERATURE_HIGH_BIT = 0x01  # legacy alias
 # The Konnect app never sends above 48.8 °C (488 tenths), so writes clamp there rather than
 # at the 51.1 °C the encoding could carry.
 TEMPERATURE_MAX_TENTHS = 488
@@ -198,7 +197,6 @@ VALVE_SKIP_WARMUP_FLAG = 0x80   # write meaning of bit 0x80
 VALVE_ERROR_FLAG = 0x80         # read meaning of the same bit
 VALVE_STOP_MASK = 0x00
 OUTLETS_PER_VALVE = 3
-OUTLET_COUNT = OUTLETS_PER_VALVE * 2
 
 VALVE_WORD = re.compile(r"^[0-9A-Fa-f]{8}$")
 

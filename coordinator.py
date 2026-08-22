@@ -2077,11 +2077,3 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except KohlerError as err:
             raise HomeAssistantError(f"Kohler command failed: {err}") from err
 
-    def favorite_by_title(self, title: str) -> dict[str, Any] | None:
-        """Resolve a favourite by its title, which is stable where ids are not."""
-        wanted = title.strip().lower()
-        for favorite in self.favorites:
-            name = str(favorite.get("title") or favorite.get("logicalName") or "")
-            if name.strip().lower() == wanted:
-                return favorite
-        return None

@@ -85,13 +85,6 @@ def zone_outlet_flags(
     return flags
 
 
-def split_zone_outlets(
-    model: ValveModel, outlets: list[bool]
-) -> tuple[list[bool], list[bool]]:
-    """Split global outlet flags into (zone1 flags, zone2 flags) for a write."""
-    return model.split_outlets(outlets)
-
-
 # The HUB uses "zone" and "valve" interchangeably, and not consistently within one payload:
 # hub-state's shower entries carry `zone: "1"`, favourites nest under `water.zone1`,
 # hub-configuration's parts are `valve1`/`valve2`, and MQTT SHOWER_VALVE_STS attributes may

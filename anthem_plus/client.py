@@ -83,20 +83,6 @@ class Device:
         self.name: str = raw.get("logicalName") or raw.get("name") or self.device_id
         self.serial_number: str | None = raw.get("serialNumber")
 
-    @property
-    def is_gcs(self) -> bool:
-        """True for the Anthem digital valve."""
-        return self.sku == SKU_GCS
-
-    @property
-    def is_hub(self) -> bool:
-        """True for the Anthem Plus system controller.
-
-        Note this is decided by ``sku``, never by the device id — an Anthem Plus
-        controller's id can begin with "gcs".
-        """
-        return self.sku == SKU_HUB
-
     def __repr__(self) -> str:
         return f"<Device {self.sku} {self.device_id} {self.name!r}>"
 
@@ -317,10 +303,6 @@ class KohlerClient:
         if not isinstance(payload, dict):
             raise KohlerError("Unexpected customer-device response", payload)
         return Customer(payload)
-
-    async def async_get_devices(self) -> list[Device]:
-        """List every device on the account, across all homes."""
-        return (await self.async_get_customer()).devices
 
     async def async_register_mobile_device(
         self, mobile_device_id: str | None = None

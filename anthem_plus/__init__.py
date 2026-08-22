@@ -67,7 +67,6 @@ from .models import (
     resolve_outlet_source,
 )
 from .valve_hex import (
-    OUTLET_COUNT,
     OUTLETS_PER_VALVE,
     ValveHexError,
     ValveWord,
@@ -136,7 +135,6 @@ __all__ = [
     "TokenSet",
     "decode_tenant_id",
     "OUTLETS_PER_VALVE",
-    "OUTLET_COUNT",
     "ValveHexError",
     "ValveWord",
     "celsius_to_unit",

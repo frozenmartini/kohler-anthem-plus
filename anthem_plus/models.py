@@ -17,9 +17,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
-# Every valve's command word has three outlet bits, whatever the model populates.
-OUTLET_BITS_PER_VALVE = 3
-
 
 @dataclass(frozen=True)
 class ValveModel:
@@ -89,14 +86,6 @@ class ValveModel:
             outlets[: self.outlets_valve1],
             outlets[self.outlets_valve1 :],
         )
-
-    def outlet_labels(self) -> list[str]:
-        """Human labels per zone, e.g. ``["Zone 1 Outlet 1", ...]``."""
-        return [
-            f"Zone {zone} Outlet {n}"
-            for zone in self.zones
-            for n in range(1, self.outlets_in_zone(zone) + 1)
-        ]
 
 
 # The four Anthem digital valve models. Valve/outlet splits are from the product line;
