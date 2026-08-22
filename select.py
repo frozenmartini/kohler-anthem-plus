@@ -275,12 +275,12 @@ class ValveWarmupSelect(OptimisticOptionMixin, KohlerValveEntity, SelectEntity):
     long as it is in force, so the entity reports the truth rather than an error — but it is
     never on the menu otherwise, because nothing establishes what their delay does.
 
-    ⚠️ **Something outside Home Assistant keeps setting this back to Off.** Four times
-    between 2026-08-13 and 08-18 the mode reverted with no command visible on the MQTT
-    channel and nothing from this integration. It is not the reboots: the mode survives
-    those. The writer is unidentified; the leading candidate is the Anthem Plus controller
-    over the RJ wired link, which cannot be observed. **If this dropdown moves to Off on its
-    own, that is the device.** See `docs/gcs/api.md` §3e.
+    ⚠️ **The Anthem Plus hub sets this back to Off on every signed-in use of its web UI.**
+    Solved 2026-08-21: a fixed routine in the hub's firmware writes ``warmUpDisabled`` on
+    every login/UI action — a PIN sign-in alone is enough — and no setting reachable from
+    outside the hub prevents it. **If this dropdown moves to Off on its own, someone used
+    the hub's web UI**; the Warmup Auto-Restore switch is the mitigation. See
+    `docs/gcs/api.md` §3h.
 
     The value here is the REST field, `warmUpState.warmUp` — read at setup, on every MQTT
     reconnect, and again after every write, because a 200 from the cloud is not evidence the

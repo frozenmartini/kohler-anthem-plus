@@ -145,16 +145,21 @@ WARMUP_README = """\
 Kohler Anthem Plus — warmup journal
 ==================================
 
-These `warmup_*.jsonl` files exist to answer one open question: **what keeps setting the
-Anthem valve's warmup mode back to `warmUpDisabled`?**
+These `warmup_*.jsonl` files were built to answer what was once this project's oldest open
+question: **what keeps setting the Anthem valve's warmup mode back to `warmUpDisabled`?**
 
-It happened four times between 2026-08-13 and 2026-08-18. Ruled out already: valve reboots
-(the mode survives them, and the valve merely restates it ~4 s after every boot), Home
-Assistant (this integration made no such write), and a cloud command (no `GCS_RECIEVED_STS`
-landed within 447 s of any of them). What every one of them *did* sit inside was a burst of
-configuration re-sync traffic. The leading suspect is the Anthem Plus controller writing over
-the RJ wired link, which cannot be sniffed — so the only evidence available is what happens
-either side on the channels that can be seen. That is what these records hold.
+SOLVED, 2026-08-21 — it is the Anthem Plus hub's web UI. Ordinary signed-in use of it (a
+PIN sign-in alone is enough; so is an SD-card music scan) runs a fixed routine that writes
+the valve's warmup mode, and the value written is `warmUpDisabled` every time — a constant
+in the hub's login/UI routine, not a stored setting: no hub surface, local or cloud, holds
+the literal, and `get_valve_settings.warmupmode` read `on` during the very logins that
+pushed the disable. Reproduced live six times in one day (four UI actions, three with
+deliberately empty 120 s before-windows, plus two PIN-probe logins); auto-restore recovered
+every one in 63-69 s. The durable record with both evidence tables is `docs/gcs/api.md`
+§3h.
+
+The journal stays on as the watchdog: it is what proved the mechanism, it verifies every
+auto-restore end to end, and it is what would first notice a second, different writer.
 
 {keep_desc}
 
@@ -196,15 +201,13 @@ interleave:
     jq -c '{{ts, src:"raw", topic}}' mqtt_raw_*.jsonl > /tmp/b.jsonl
     sort -m /tmp/a.jsonl /tmp/b.jsonl
 
-What to look for
-----------------
-Compare the `before_window` and `after_window` of several `disabled` records and find what
-they share and a quiet hour does not. Candidates worth ranking:
-
-  * `SYSTEM_STS` / `STATUS_SNAPSHOT` — the controller announcing it has come up.
-  * `configChangeIndent` stepping on `GCS_SOLO_STS` — configuration writes landing.
-  * A burst of `READ_GCS_OUTLET_CONFIG_CFG` / `GCS_PRESET_STS` — a full config re-read.
-  * `SHOWER_EXP_SNAPSHOT` and friends — the Konnect app or a touchscreen asking for state.
+What a hub-UI disable looks like
+--------------------------------
+The machine fingerprint, constant to the tenth of a second across eight days of instances:
+the `disabled` record, then the hub's five-snapshot burst at +2.6-3.2 s, then
+`READ_GCS_EXPERIENCE_STS` at +4.7-5.0 s. The write itself never appears on this MQTT
+channel — only the valve's echo does. A `disabled` record WITHOUT that follower pattern
+would be news: a different writer than the one identified.
 
 ⚠️ Absence of a message means "nothing was pushed", never "nothing happened" — MQTT here is
 the Konnect app's UI channel, not device-to-device traffic. See docs/case_studies/intro.md.
@@ -212,16 +215,10 @@ the Konnect app's UI channel, not device-to-device traffic. See docs/case_studie
 Auto-restore and this journal
 -----------------------------
 A single disable is recorded identically whether the Warmup Auto-Restore switch is on or off:
-both windows close before a restore could fire.
-
-Where it matters is a *repeat*. A restore is itself a write — a POST, then the valve's echo
-about 3.4 s later — and if the culprit disables the mode again soon afterwards, that traffic
-lands inside the new event's `before_window`. It is identifiable (the `restore` records carry
-timestamps, and the `mode` record that follows one is flagged `ours: true`), but it is our
-noise in the middle of the evidence, and a restore might itself provoke whatever is doing
-this. **For the cleanest series of observations, leave auto-restore off.** For a shower that
-warms up reliably while the question stays open, turn it on and subtract our own records
-during analysis.
+both windows close before a restore could fire. The disable cannot be prevented from outside
+the hub's firmware, so **auto-restore on is the standing mitigation** — every hub web UI
+sign-in will disable warmup, and the restore puts it back a minute later. Our own writes stay
+identifiable in the records (`ours: true`, and the `restore*` events carry timestamps).
 
 
 Turning it off

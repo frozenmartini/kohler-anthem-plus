@@ -278,12 +278,11 @@ class EndlessShowerSwitch(KohlerValveEntity, SwitchEntity):
 class WarmupAutoRestoreSwitch(KohlerValveEntity, SwitchEntity):
     """Put the warmup mode back when something outside Home Assistant turns it off.
 
-    **The problem this exists for.** The valve's warmup mode does not stay where it is put.
-    Four times between 2026-08-13 and 08-18 it reverted to `warmUpDisabled` on its own, each
-    time inside a burst of configuration re-sync traffic, with no command on the MQTT channel
-    and nothing from this integration. Reboots are ruled out — the mode survives those. The
-    writer is unidentified; the leading candidate is the Anthem Plus controller over the RJ
-    wired link, which cannot be observed. See `docs/gcs/api.md` §3e.
+    **The problem this exists for.** The valve's warmup mode does not stay where it is put:
+    the Anthem Plus hub writes it back to `warmUpDisabled` on every signed-in use of its web
+    UI — a constant in the hub's login/UI routine, solved 2026-08-21 after six live
+    reproductions in a day. Nothing reachable from outside the hub's firmware prevents it,
+    so putting the mode back is the fix that exists. See `docs/gcs/api.md` §3h.
 
     **What this does.** When the valve announces `warmUpDisabled` over MQTT, and this
     integration did not cause it, wait 60 seconds and set the mode back to the last enabled
@@ -292,9 +291,10 @@ class WarmupAutoRestoreSwitch(KohlerValveEntity, SwitchEntity):
     outlets" and "selected outlets" are different fixtures' worth of water. With no remembered
     mode it does nothing and says so.
 
-    ⚠️ **This treats a symptom.** It does not find or fix whatever is rewriting the field, and
-    a restore is a write to Kohler's cloud like any other. It is diagnostic and off by default
-    for that reason: turn it on when the reverting is actually bothering you.
+    ⚠️ **This treats a symptom.** It cannot stop the hub's routine writing the field — that
+    is hub firmware — and a restore is a write to Kohler's cloud like any other. It is off by
+    default because only installs whose hub web UI gets used ever see the disable; turn it on
+    when the reverting is actually bothering you.
 
     Three things it deliberately will not do:
 

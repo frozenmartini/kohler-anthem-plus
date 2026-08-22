@@ -436,11 +436,11 @@ SERVICE_SEND_VALVE_HEX = "send_valve_hex"
 # ---------------------------------------------------------------------------
 # Warmup auto-restore
 # ---------------------------------------------------------------------------
-# Something outside Home Assistant sets the valve's warmup mode back to `warmUpDisabled` —
-# four times between 2026-08-13 and 08-18, each inside a burst of configuration re-sync
-# traffic, with no command on the MQTT channel and nothing from this integration. The cause is
-# unidentified (`docs/gcs/api.md` §3e). This feature does not diagnose it; it puts the mode
-# back, once, a minute later.
+# The Anthem Plus hub sets the valve's warmup mode back to `warmUpDisabled` on every
+# signed-in use of its web UI — a constant in the hub's login/UI routine, solved 2026-08-21
+# after reproducing it live six times in a day (`docs/gcs/api.md` §3h). It cannot be
+# prevented from outside the hub's firmware, so this feature is the standing mitigation:
+# it puts the mode back, once, a minute later.
 CONF_WARMUP_AUTO_RESTORE = "warmup_auto_restore"
 
 # The last *enabled* mode seen on the valve, persisted so a restore reinstates what was
@@ -517,9 +517,11 @@ WARMUP_AUTO_RESTORE_GIVING_UP = (
 # ---------------------------------------------------------------------------
 # Warmup diagnostic journal
 # ---------------------------------------------------------------------------
-# Forced on, like the cutoff journal. The event it is here to catch fired four times in six
-# days, so a log that has to be switched on first would miss it — and the volume is a handful
-# of records a day, against a raw capture that already writes every message.
+# Forced on, like the cutoff journal. Built to catch what kept disabling warmup; that
+# question is solved (`docs/gcs/api.md` §3h — the hub's web UI), and the journal stays on
+# as the watchdog: it verifies every auto-restore end to end and would be the first thing
+# to notice a different writer. Volume is a handful of records a day, against a raw capture
+# that already writes every message.
 ENABLE_WARMUP_DEBUG_LOG = True
 
 # Unlimited, matching the cutoff journal: this is evidence for an open question, and the

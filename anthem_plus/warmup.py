@@ -1,9 +1,10 @@
 """Warmup auto-restore: the decision, kept out of Home Assistant so it can be tested.
 
-The valve's warmup mode does not stay where it is put. Four times between 2026-08-13 and
-08-18 it reverted to ``warmUpDisabled`` on its own, inside bursts of configuration re-sync
-traffic, with no command on the MQTT channel and nothing from Home Assistant. Reboots are
-ruled out: the mode survives those. See ``docs/gcs/api.md`` §3e.
+The valve's warmup mode does not stay where it is put: every signed-in use of the Anthem
+Plus hub's web UI writes it back to ``warmUpDisabled`` — a constant in the hub's login/UI
+routine, identified 2026-08-21 after six live reproductions in a day. It cannot be
+prevented from outside the hub's firmware, so restoring is the mitigation. See
+``docs/gcs/api.md`` §3h.
 
 This module holds the judgements that have to be right, as pure functions: *is this disable
 one we should undo?* (``should_restore_warmup``), *what do we put back?* (``restore_target``),
