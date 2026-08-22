@@ -4,9 +4,11 @@ The GCS valve is addressed directly and has **no "run my default"** — every st
 specify the complete valve state as a hex command word. There is no bare on/off command,
 which is the fundamental difference from the Anthem Plus HUB.
 
-All writes go through ``solowritesystem``. Presets are a convenience layer on top:
-``controlpresetorexperience`` only *selects* a preset, it does not open a valve, so a
-preset start is always two commands.
+All direct writes go through ``solowritesystem``. Presets are a stored layer on top:
+``controlpresetorexperience`` with ``{preset, action}`` starts one by itself — the valve
+runs the stored scene, no valve write follows. (An earlier reading held that it only
+*selected* a preset and a start needed two commands; live testing disproved that, and the
+two-command path was removed 2026-08-21.)
 """
 
 from __future__ import annotations
@@ -32,22 +34,13 @@ from .valve_hex import (
     encode_pair,
     encode_word,
     pause_pair,
-    preset_word_to_command,
     stop_pair,
     unit_to_celsius,
 )
 
 # The payload carries eight valve slots. Only the first two are ever populated; the rest
 # must still be present and zeroed.
-UNUSED_VALVE = UNUSED_VALVE_WORD
 SECONDARY_SLOTS = tuple(f"secondaryValve{n}" for n in range(2, 8))
-
-# Maps the API's valveIndex names to the payload field and the prefix byte the firmware
-# expects. Only Valve1/Valve2 are exercised on the known hardware.
-VALVE_FIELDS = {
-    "Valve1": ("primaryValve1", VALVE1_PREFIX),
-    "Valve2": ("secondaryValve1", VALVE2_PREFIX),
-}
 
 
 @dataclass(frozen=True)
@@ -179,7 +172,7 @@ class GcsDevice:
             "gcsValveControlModel": {
                 "primaryValve1": valve1.upper(),
                 "secondaryValve1": valve2.upper(),
-                **{slot: UNUSED_VALVE for slot in SECONDARY_SLOTS},
+                **{slot: UNUSED_VALVE_WORD for slot in SECONDARY_SLOTS},
             },
         }
         return await self._client.async_request(
@@ -273,11 +266,6 @@ class GcsDevice:
         return await self._client.async_request(
             "POST", GCS_CONTROL_PRESET, json_body=payload
         )
-
-    # Retained under the old name so existing callers keep working.
-    async def async_select_preset(self, preset_id: Any) -> Any:
-        """Deprecated alias for :meth:`async_activate_preset`."""
-        return await self.async_activate_preset(preset_id, True)
 
     async def async_write_preset(
         self,
@@ -383,50 +371,6 @@ class GcsDevice:
             word = valves.get(number)
             fields[f"valve{number}"] = word.lower() if word else ""
         return fields
-
-    async def async_start_preset(self, preset: dict[str, Any]) -> Any:
-        """Start a preset: select it, then open its valves.
-
-        Two commands, matching what the app sends. The valve write reuses the preset's own
-        stored temperature, flow, **and outlet mask** — see
-        :func:`~.valve_hex.preset_word_to_command` for why keeping the mask matters.
-
-        Raises :class:`ValveHexError` for an "experience", which carries no valve data and
-        cannot be started this way.
-        """
-        words = self._preset_valve_words(preset)
-        if not words:
-            raise ValveHexError(
-                f"{preset.get('title') or preset.get('id')!r} carries no valve data — "
-                "Kohler experiences have none and must be started from the Konnect app."
-            )
-        await self.async_select_preset(preset.get("id") or preset.get("presetId"))
-        valve1, valve2 = words
-        return await self.async_write_valves(valve1, valve2)
-
-    @staticmethod
-    def _preset_valve_words(preset: dict[str, Any]) -> tuple[str, str] | None:
-        """Convert a preset's stored valve details into a command word pair."""
-        built: dict[str, str] = {}
-        for detail in preset.get("valveDetails") or preset.get("valve_details") or []:
-            if not isinstance(detail, dict):
-                continue
-            index = detail.get("valveIndex") or detail.get("valve_index")
-            mapping = VALVE_FIELDS.get(index or "")
-            if mapping is None:
-                continue
-            field, prefix = mapping
-            word = preset_word_to_command(
-                detail.get("hexString") or detail.get("hex_string"), prefix
-            )
-            if word:
-                built[field] = word
-        if not built:
-            return None
-        return (
-            built.get("primaryValve1", UNUSED_VALVE),
-            built.get("secondaryValve1", UNUSED_VALVE),
-        )
 
     # ------------------------------------------------------------------ #
     # Warmup

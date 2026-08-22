@@ -81,7 +81,6 @@ from .valve_hex import (
     preset_opens_anything,
     preset_to_pair,
     preset_valve_to_command,
-    preset_word_to_command,
     stop_pair,
     unit_to_celsius,
 )
@@ -150,7 +149,6 @@ __all__ = [
     "preset_opens_anything",
     "preset_to_pair",
     "preset_valve_to_command",
-    "preset_word_to_command",
     "stop_pair",
     "unit_to_celsius",
 ]

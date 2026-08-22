@@ -220,7 +220,6 @@ VALVE_WORD = re.compile(r"^[0-9A-Fa-f]{8}$")
 # tested the command word's bit positions (0x01/0x02/0x04) against preset bytes.
 PRESET_OUTLET_BITS = (0x04, 0x08, 0x10)
 PRESET_WORD = re.compile(r"^[0-9A-Fa-f]{6}$")
-PRESET_HEX_UNUSED = frozenset({"", "000000"})
 
 
 def decode_preset_word(value: str) -> ValveWord:
@@ -627,19 +626,12 @@ def preset_to_pair(
     return valve1, preset_valve_to_command(by_index.get("Valve2", {}), VALVE2_PREFIX)
 
 
-def preset_word_to_command(preset_hex: str | None, prefix: int) -> str | None:
-    """DEPRECATED — reads byte 0 as an outlet mask, which it is not.
-
-    Kept only so the mistake is documented rather than silently rediscovered. Live data
-    disproves the premise: see :func:`preset_valve_to_command`, which reads outlets from the
-    preset's ``outlets`` array instead. Use that.
-    """
-    stored = (preset_hex or "").strip().upper()
-    if stored in PRESET_HEX_UNUSED:
-        return None
-    if not PRESET_WORD.fullmatch(stored):
-        raise ValveHexError(f"Not a 6-character preset valve hexString: {preset_hex!r}")
-    return f"{prefix:02X}{stored[2:6]}{stored[0:2]}"
+# A `preset_word_to_command` used to live here: it built a command word by reading a
+# preset hexString's byte 0 as an outlet mask. **That reading is wrong** — byte 0 carries
+# the temperature high bit and the PRESET_OUTLET_BITS positions, and live data disproved
+# the mask premise (see `preset_valve_to_command`, whose docstring holds the evidence).
+# Removed 2026-08-21 along with its only caller, the superseded two-command preset start
+# (`controlpresetorexperience` runs the preset by itself, so no valve write follows it).
 
 
 def celsius_to_unit(value_c: float, temperature_unit: str) -> float:
