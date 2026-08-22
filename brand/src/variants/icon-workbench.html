@@ -1,0 +1,1013 @@
+<title>Anthem Icon Workbench</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+
+<style>
+:root{
+  --paper:#FAF8F9;
+  --surface:#FFFFFF;
+  --sunken:#F2EDF0;
+  --ink:#1A1418;
+  --ink-2:#4C4249;
+  --muted:#8B7D85;
+  --line:#E7E0E4;
+  --line-firm:#D6CBD2;
+  --accent:#8E2F5F;
+  --accent-wash:#F7E8F0;
+
+  /* Fixed on purpose: these two simulate Home Assistant's own card colours,
+     so they must NOT follow the viewer's theme. */
+  --ha-light:#FFFFFF;
+  --ha-dark:#1C1C1C;
+  --ha-light-ink:#3A3A3A;
+  --ha-dark-ink:#CFCFCF;
+
+  --r:14px;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --sans:"Archivo",system-ui,-apple-system,"Segoe UI",sans-serif;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --paper:#131015;
+    --surface:#1C171C;
+    --sunken:#241E24;
+    --ink:#F0EAEE;
+    --ink-2:#C6BAC1;
+    --muted:#95868E;
+    --line:#302730;
+    --line-firm:#3F343E;
+    --accent:#EE8DBE;
+    --accent-wash:#31202A;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#131015;
+  --surface:#1C171C;
+  --sunken:#241E24;
+  --ink:#F0EAEE;
+  --ink-2:#C6BAC1;
+  --muted:#95868E;
+  --line:#302730;
+  --line-firm:#3F343E;
+  --accent:#EE8DBE;
+  --accent-wash:#31202A;
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0;
+  background:var(--paper);
+  color:var(--ink);
+  font-family:var(--sans);
+  font-size:15px;
+  line-height:1.55;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1080px;margin:0 auto;padding:0 24px 80px}
+
+/* ---------- masthead ---------- */
+.masthead{
+  display:flex;flex-wrap:wrap;align-items:baseline;gap:10px 18px;
+  padding:44px 0 22px;border-bottom:1px solid var(--line-firm);margin-bottom:32px;
+}
+.masthead h1{
+  font-size:clamp(26px,3.4vw,38px);font-weight:700;letter-spacing:-.022em;
+  margin:0;text-wrap:balance;
+}
+.masthead .dom{
+  font-family:var(--mono);font-size:12px;color:var(--muted);
+  border:1px solid var(--line-firm);border-radius:999px;padding:3px 10px;
+}
+.masthead p{
+  flex-basis:100%;margin:6px 0 0;color:var(--ink-2);max-width:62ch;font-size:14.5px;
+}
+
+/* ---------- section furniture ---------- */
+.sec{margin-bottom:44px}
+.sec-head{display:flex;align-items:baseline;gap:14px;margin-bottom:14px;flex-wrap:wrap}
+.sec-head h2{
+  font-size:12px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;
+  margin:0;color:var(--muted);
+}
+.sec-head .hint{font-size:13px;color:var(--muted);margin:0}
+
+/* ---------- controls ---------- */
+.sizes{display:flex;gap:6px;margin-left:auto}
+.sizes button{
+  font-family:var(--mono);font-size:12px;padding:5px 11px;cursor:pointer;
+  background:transparent;color:var(--ink-2);
+  border:1px solid var(--line-firm);border-radius:8px;
+  transition:background .13s ease,color .13s ease,border-color .13s ease;
+}
+.sizes button:hover{border-color:var(--accent);color:var(--accent)}
+.sizes button[aria-pressed="true"]{
+  background:var(--accent);border-color:var(--accent);color:var(--surface);
+}
+:root[data-theme="dark"] .sizes button[aria-pressed="true"],
+:where(:root:not([data-theme="light"])) .sizes button[aria-pressed="true"]{color:#1B1015}
+button:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* ---------- ground strips ---------- */
+.strip{
+  display:flex;align-items:center;gap:22px;
+  padding:20px 22px;min-height:88px;overflow-x:auto;
+}
+.strip.on-light{background:var(--ha-light)}
+.strip.on-dark{background:var(--ha-dark)}
+.strip-tag{
+  font-family:var(--mono);font-size:10px;letter-spacing:.13em;text-transform:uppercase;
+  flex:none;width:52px;
+}
+.strip.on-light .strip-tag{color:#9A9A9A}
+.strip.on-dark  .strip-tag{color:#7A7A7A}
+.grounds{border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+.grounds .strip.on-light{border-bottom:1px solid rgba(0,0,0,.10)}
+
+.cell{display:grid;place-items:center;flex:none;position:relative}
+.cell svg{display:block}
+.cell-cap{
+  position:absolute;bottom:-15px;left:50%;transform:translateX(-50%);
+  font-family:var(--mono);font-size:9.5px;white-space:nowrap;
+}
+.strip.on-light .cell-cap{color:#B3B3B3}
+.strip.on-dark  .cell-cap{color:#6E6E6E}
+.strip.has-caps{padding-bottom:32px}
+
+/* ---------- compare ---------- */
+.cmp-item{display:flex;flex-direction:column;align-items:center;gap:9px;flex:none}
+.cmp-v{
+  font-family:var(--mono);font-size:10.5px;letter-spacing:.04em;
+  padding:2px 7px;border-radius:5px;
+}
+.strip.on-light .cmp-v{color:#7E7E7E;background:#F0F0F0}
+.strip.on-dark  .cmp-v{color:#9C9C9C;background:#2A2A2A}
+
+/* ---------- version cards ---------- */
+.card{
+  background:var(--surface);border:1px solid var(--line);border-radius:var(--r);
+  overflow:hidden;margin-bottom:20px;
+}
+.card-head{
+  display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+  padding:15px 20px;border-bottom:1px solid var(--line);
+}
+.vchip{
+  font-family:var(--mono);font-size:13px;font-weight:500;
+  color:var(--accent);background:var(--accent-wash);
+  border-radius:7px;padding:3px 9px;flex:none;
+}
+.card-head h3{font-size:16.5px;font-weight:600;margin:0;letter-spacing:-.01em}
+.badge{
+  font-family:var(--mono);font-size:9.5px;letter-spacing:.11em;text-transform:uppercase;
+  border:1px solid var(--accent);color:var(--accent);border-radius:999px;padding:2px 8px;
+}
+.from{
+  font-family:var(--mono);font-size:10.5px;color:var(--muted);
+  border:1px solid var(--line-firm);border-radius:999px;padding:2px 9px;
+}
+.card-meta{
+  font-family:var(--mono);font-size:11.5px;color:var(--muted);
+  margin-left:auto;text-align:right;
+}
+.card-body{display:flex;gap:26px;padding:22px 20px;flex-wrap:wrap}
+.hero{
+  flex:none;width:210px;height:210px;display:grid;place-items:center;border-radius:12px;
+  background:
+    linear-gradient(135deg,var(--ha-light) 0 50%,var(--ha-dark) 50% 100%);
+  border:1px solid var(--line);
+}
+.card-side{flex:1 1 380px;min-width:0;display:flex;flex-direction:column;gap:14px}
+.note{margin:0;color:var(--ink-2);font-size:14px;max-width:60ch}
+.note b{color:var(--ink);font-weight:600}
+
+.card-foot{
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  padding:12px 20px;border-top:1px solid var(--line);background:var(--sunken);
+}
+.copy{
+  font-family:var(--mono);font-size:11.5px;cursor:pointer;
+  background:transparent;color:var(--ink-2);
+  border:1px solid var(--line-firm);border-radius:7px;padding:5px 11px;
+  transition:border-color .13s ease,color .13s ease;
+}
+.copy:hover{border-color:var(--accent);color:var(--accent)}
+.copy[data-done="1"]{border-color:var(--accent);color:var(--accent)}
+details{font-size:13px;flex:0 1 auto;min-width:0}
+details[open]{flex-basis:100%}
+summary{
+  cursor:pointer;font-family:var(--mono);font-size:11.5px;color:var(--muted);
+  list-style:none;padding:5px 0;
+}
+summary::-webkit-details-marker{display:none}
+summary::before{content:"▸ ";color:var(--accent)}
+details[open] summary::before{content:"▾ "}
+pre{
+  font-family:var(--mono);font-size:11.5px;line-height:1.6;
+  background:var(--surface);border:1px solid var(--line);border-radius:9px;
+  padding:13px 15px;overflow-x:auto;margin:8px 0 2px;color:var(--ink-2);
+}
+
+.foot{
+  border-top:1px solid var(--line-firm);padding-top:18px;margin-top:40px;
+  font-size:13px;color:var(--muted);max-width:70ch;
+}
+.foot code{font-family:var(--mono);font-size:12px;color:var(--ink-2)}
+
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+@media (max-width:620px){
+  .card-meta{margin-left:0;text-align:left;flex-basis:100%}
+  .hero{width:100%;height:180px}
+}
+</style>
+
+<!-- ══════════════════════════════════════════════════════════════════
+     VERSION TEMPLATES — the single source of truth.
+     To add a version: append one <template> below. Everything on the
+     page (compare strip, hero, size ramps, source view) is generated
+     from these, so nothing else needs touching and no existing
+     version is disturbed.
+     ══════════════════════════════════════════════════════════════════ -->
+<div id="lib" hidden>
+
+  <template class="ver"
+    data-v="v1"
+    data-name="Original InterfaceIcon"
+    data-meta="78 × 35 · transparent · stroke 1"
+    data-note="The mark exactly as extracted from the hub's web UI asset bundle — <b>unmodified</b>. Landscape, no background, hairline strokes in Kohler's own <b>#EF85C3</b> with a <b>#551439</b> dial that overhangs the bar top and bottom. Note how the pale stroke nearly vanishes on the light ground: that is the transparent-artwork problem a dark variant exists to solve.">
+    <svg viewBox="0 0 78 35" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect x="0.5" y="3.5" width="77" height="28" rx="4.53579" stroke="#EF85C3"/>
+      <path d="M24 0.5C33.6784 0.5 41.5 8.12434 41.5 17.5C41.5 26.8757 33.6784 34.5 24 34.5C14.3216 34.5 6.5 26.8757 6.5 17.5C6.5 8.12434 14.3216 0.5 24 0.5Z" fill="#551439" stroke="#EF85C3"/>
+    </svg>
+  </template>
+
+  <template class="ver"
+    data-v="v2"
+    data-name="Bleed-right tile"
+    data-badge="installed"
+    data-meta="256 × 256 · opaque tile · stroke 12"
+    data-note="What is <b>live in Home Assistant right now</b>, included as the baseline you are tweaking away from. Square tile in <b>#D4468F</b>, bar keeps its rounded left cap and runs off the right edge, dial centred at r&nbsp;74. Say the word and I will drop it from the workbench.">
+    <svg viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+      <defs><clipPath id="clip-v2"><rect width="256" height="256" rx="52"/></clipPath></defs>
+      <rect width="256" height="256" rx="52" fill="#D4468F"/>
+      <g clip-path="url(#clip-v2)" fill="none" stroke="#FFFFFF" stroke-width="12">
+        <rect x="30" y="64" width="336" height="128" rx="34"/>
+        <circle cx="128" cy="128" r="74" fill="#4E1538"/>
+      </g>
+    </svg>
+  </template>
+
+  <template class="ver"
+    data-v="v3"
+    data-name="Original, stroke 2"
+    data-from="v1"
+    data-meta="79 × 36 · transparent · stroke 2"
+    data-note="<b>v1 with the pink line doubled from 1 to 2.</b> The drawing itself is untouched — same rect, same dial, same coordinates. One thing had to move: the original canvas is exactly 78&nbsp;×&nbsp;35 and the geometry already sits flush against it, so a stroke that straddles ±1 instead of ±0.5 spills half a unit off every edge and gets clipped. The viewBox is opened up by half a unit all round (<b>-0.5 -0.5 79 36</b>) to catch it. Without that you lose the outer edge of the bar and the top and bottom of the dial ring.">
+    <svg viewBox="-0.5 -0.5 79 36" fill="none" stroke-width="2" xmlns="http://www.w3.org/2000/svg">
+      <rect x="0.5" y="3.5" width="77" height="28" rx="4.53579" stroke="#EF85C3"/>
+      <path d="M24 0.5C33.6784 0.5 41.5 8.12434 41.5 17.5C41.5 26.8757 33.6784 34.5 24 34.5C14.3216 34.5 6.5 26.8757 6.5 17.5C6.5 8.12434 14.3216 0.5 24 0.5Z" fill="#551439" stroke="#EF85C3"/>
+    </svg>
+  </template>
+
+  <template class="ver"
+    data-v="v4"
+    data-name="Stroke 2 on a yellow tile"
+    data-from="v3"
+    data-meta="79 × 79 · yellow tile · stroke 2"
+    data-note="<b>v3 with a rounded square behind it, sized to the maximum the spec allows.</b> Home Assistant's rule is the opposite of a safe-area margin — <i>&ldquo;the image should be trimmed, so it contains the minimum amount of empty space on the edges&hellip; including&hellip; any color borders or transparent spacing around the actual subject&rdquo;</i> — so padding is forbidden, and the tile is right to run edge to edge. It is <b>79 × 79</b>, exactly the artwork's own width, centred on v3's midline: the bar now bleeds off the left and right edges with nothing to spare. The drawing has not moved or resized by a single unit — v3 and v4 render the bar at identical width at every size on this page. The yellow is diagnostic, not a proposal: it makes the four corner notches read as the only transparency left, and it shows you exactly how much dead vertical space a landscape mark leaves inside a square. That empty band is the real question this version poses.">
+    <svg viewBox="-0.5 -22 79 79" fill="none" stroke-width="2" xmlns="http://www.w3.org/2000/svg">
+      <rect x="-0.5" y="-22" width="79" height="79" rx="16" fill="#FFEFA0"/>
+      <rect x="0.5" y="3.5" width="77" height="28" rx="4.53579" stroke="#EF85C3"/>
+      <path d="M24 0.5C33.6784 0.5 41.5 8.12434 41.5 17.5C41.5 26.8757 33.6784 34.5 24 34.5C14.3216 34.5 6.5 26.8757 6.5 17.5C6.5 8.12434 14.3216 0.5 24 0.5Z" fill="#551439" stroke="#EF85C3"/>
+    </svg>
+  </template>
+
+  <template class="ver"
+    data-v="v5"
+    data-name="Pink tile, dial only"
+    data-from="v4"
+    data-meta="79 × 79 · pink tile · stroke none"
+    data-note="<b>The pink moves from the line to the ground.</b> Two changes and nothing else: every stroke is now unpainted, and the tile is <b>#EF85C3</b> — the exact pink the lines used to be. What this costs is worth seeing plainly: the bar was a <b>stroke-only</b> shape, so with no stroke it has nothing left to draw and vanishes completely. The dial survives only because it carries its own <b>#551439</b> fill. The bar's geometry is still in the markup with <code>stroke=&quot;none&quot;</code> rather than deleted, so it can be repainted at any time. Two things to judge: the dial now sits <b>30% from the left</b> and reads noticeably off-balance without the bar to explain why, and this pairing is the strongest contrast yet on the page at <b>5.7:1</b>, against 3.4:1 for the installed tile.">
+    <svg viewBox="-0.5 -22 79 79" fill="none" stroke-width="2" xmlns="http://www.w3.org/2000/svg">
+      <rect x="-0.5" y="-22" width="79" height="79" rx="16" fill="#EF85C3"/>
+      <rect x="0.5" y="3.5" width="77" height="28" rx="4.53579" stroke="none"/>
+      <path d="M24 0.5C33.6784 0.5 41.5 8.12434 41.5 17.5C41.5 26.8757 33.6784 34.5 24 34.5C14.3216 34.5 6.5 26.8757 6.5 17.5C6.5 8.12434 14.3216 0.5 24 0.5Z" fill="#551439" stroke="none"/>
+    </svg>
+  </template>
+
+  <template class="ver"
+    data-v="v6"
+    data-name="Knockout — lines cut through"
+    data-from="v5"
+    data-meta="79 × 79 · masked knockout · cut 2"
+    data-note="<b>The lines are real holes now.</b> A luminance mask paints white where the tile survives and black where it is cut, so the bar outline and the dial ring are removed from the artwork entirely and the card behind shows through — verified as true alpha 0, not white paint. The mask's paint order matters: it fills white, cuts the bar outline, <b>restores white over the dial</b>, then cuts the ring. That middle step is why the bar's lines stop at the dial instead of slicing across it — the same occlusion the original got for free by drawing the dial last. Measured cut depth as it shrinks: <b>100% clean through at 256 and 128</b>, 97% at 64, <b>87% at 48</b> — the size the integrations list uses — then 63% at 32 and 47% at 24, where it softens to a tint rather than a hole. <b>This is the first version whose appearance depends on what is behind it.</b> On the light card the holes read as crisp white and the ring separates dial from tile cleanly. On the dark card they read near-black, and since the ring and the <b>#551439</b> dial are only about 1.3:1 apart, the dial's outer edge softens and it reads as one larger dark shape.">
+    <svg viewBox="-0.5 -22 79 79" fill="none" stroke-width="2" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <mask id="knock-v6" maskUnits="userSpaceOnUse" x="-0.5" y="-22" width="79" height="79">
+          <rect x="-0.5" y="-22" width="79" height="79" fill="#FFFFFF"/>
+          <rect x="0.5" y="3.5" width="77" height="28" rx="4.53579" stroke="#000000"/>
+          <path d="M24 0.5C33.6784 0.5 41.5 8.12434 41.5 17.5C41.5 26.8757 33.6784 34.5 24 34.5C14.3216 34.5 6.5 26.8757 6.5 17.5C6.5 8.12434 14.3216 0.5 24 0.5Z" fill="#FFFFFF"/>
+          <path d="M24 0.5C33.6784 0.5 41.5 8.12434 41.5 17.5C41.5 26.8757 33.6784 34.5 24 34.5C14.3216 34.5 6.5 26.8757 6.5 17.5C6.5 8.12434 14.3216 0.5 24 0.5Z" stroke="#000000"/>
+        </mask>
+      </defs>
+      <g mask="url(#knock-v6)">
+        <rect x="-0.5" y="-22" width="79" height="79" rx="16" fill="#EF85C3"/>
+        <path d="M24 0.5C33.6784 0.5 41.5 8.12434 41.5 17.5C41.5 26.8757 33.6784 34.5 24 34.5C14.3216 34.5 6.5 26.8757 6.5 17.5C6.5 8.12434 14.3216 0.5 24 0.5Z" fill="#551439"/>
+      </g>
+    </svg>
+  </template>
+
+  <template class="ver"
+    data-v="v7"
+    data-name="Knockout, crimson dial"
+    data-from="v6"
+    data-meta="79 × 79 · masked knockout · dial #D81B60"
+    data-note="<b>One value changed: the dial goes from #551439 to #D81B60.</b> The mask is untouched — the white dial inside it is a mask value, not a colour, so it stays white. <b>This fixes v6's dark-card problem.</b> Where the old plum sat only 1.25:1 from the ring hole on dark and blurred into it, the crimson sits at <b>3.45:1</b> and stays a distinct disc. The cost is on the other side: dial against tile falls from 5.70:1 to <b>2.08:1</b>, and against the ring on light from 13.59:1 to 4.95:1. That 2.08 looks alarming and mostly is not — WCAG measures luminance alone, and these two differ far more in saturation than in lightness, which is why the dial still reads at every size down to 24px in the ramps below. It also lands on Material Pink 600, so it is already in tune with the Material palette the Home Assistant frontend is built on. One thing this version inherits rather than causes, but which is easiest to see here: the <b>#EF85C3</b> tile is only <b>2.38:1</b> against the white card, so the icon's outer silhouette goes soft on light while reading crisply at 7.15:1 on dark. True of v4 onward, and worth settling before any of this is final.">
+    <svg viewBox="-0.5 -22 79 79" fill="none" stroke-width="2" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <mask id="knock-v7" maskUnits="userSpaceOnUse" x="-0.5" y="-22" width="79" height="79">
+          <rect x="-0.5" y="-22" width="79" height="79" fill="#FFFFFF"/>
+          <rect x="0.5" y="3.5" width="77" height="28" rx="4.53579" stroke="#000000"/>
+          <path d="M24 0.5C33.6784 0.5 41.5 8.12434 41.5 17.5C41.5 26.8757 33.6784 34.5 24 34.5C14.3216 34.5 6.5 26.8757 6.5 17.5C6.5 8.12434 14.3216 0.5 24 0.5Z" fill="#FFFFFF"/>
+          <path d="M24 0.5C33.6784 0.5 41.5 8.12434 41.5 17.5C41.5 26.8757 33.6784 34.5 24 34.5C14.3216 34.5 6.5 26.8757 6.5 17.5C6.5 8.12434 14.3216 0.5 24 0.5Z" stroke="#000000"/>
+        </mask>
+      </defs>
+      <g mask="url(#knock-v7)">
+        <rect x="-0.5" y="-22" width="79" height="79" rx="16" fill="#EF85C3"/>
+        <path d="M24 0.5C33.6784 0.5 41.5 8.12434 41.5 17.5C41.5 26.8757 33.6784 34.5 24 34.5C14.3216 34.5 6.5 26.8757 6.5 17.5C6.5 8.12434 14.3216 0.5 24 0.5Z" fill="#D81B60"/>
+      </g>
+    </svg>
+  </template>
+
+  <template class="ver"
+    data-v="v8"
+    data-name="Swapped — magenta tile, pink dial"
+    data-from="v7"
+    data-meta="79 × 79 · masked knockout · tile #D81B60"
+    data-note="<b>The two fills trade places</b> — tile takes #D81B60, dial takes #EF85C3. Nothing else moves, mask included. This is the version that settles the silhouette problem flagged in v7: the tile against the white card goes from <b>2.38:1 to 4.95:1</b>, so the icon stops dissolving into a light theme. More telling is the spread between the two cards — how differently the icon reads depending on the theme. The pink tile sat at 2.38 on light and 7.15 on dark, a <b>gap of 4.77</b>; the magenta tile sits at 4.95 and 3.45, a <b>gap of 1.50</b>. It now carries close to the same weight either way, which is the whole argument for one variant instead of a <code>dark_</code> pair. The dial also gains on dark, 3.45:1 up to 7.15:1. The one number that falls is the dial against its ring hole on light, 4.95:1 down to <b>2.38:1</b> — a pale dial inside a white ring. On the page it holds anyway, because white and #EF85C3 separate on hue where luminance says they should not, and the magenta surrounding both keeps the shape legible. Dial against tile is unchanged at 2.08:1, being the same pair inverted.">
+    <svg viewBox="-0.5 -22 79 79" fill="none" stroke-width="2" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <mask id="knock-v8" maskUnits="userSpaceOnUse" x="-0.5" y="-22" width="79" height="79">
+          <rect x="-0.5" y="-22" width="79" height="79" fill="#FFFFFF"/>
+          <rect x="0.5" y="3.5" width="77" height="28" rx="4.53579" stroke="#000000"/>
+          <path d="M24 0.5C33.6784 0.5 41.5 8.12434 41.5 17.5C41.5 26.8757 33.6784 34.5 24 34.5C14.3216 34.5 6.5 26.8757 6.5 17.5C6.5 8.12434 14.3216 0.5 24 0.5Z" fill="#FFFFFF"/>
+          <path d="M24 0.5C33.6784 0.5 41.5 8.12434 41.5 17.5C41.5 26.8757 33.6784 34.5 24 34.5C14.3216 34.5 6.5 26.8757 6.5 17.5C6.5 8.12434 14.3216 0.5 24 0.5Z" stroke="#000000"/>
+        </mask>
+      </defs>
+      <g mask="url(#knock-v8)">
+        <rect x="-0.5" y="-22" width="79" height="79" rx="16" fill="#D81B60"/>
+        <path d="M24 0.5C33.6784 0.5 41.5 8.12434 41.5 17.5C41.5 26.8757 33.6784 34.5 24 34.5C14.3216 34.5 6.5 26.8757 6.5 17.5C6.5 8.12434 14.3216 0.5 24 0.5Z" fill="#EF85C3"/>
+      </g>
+    </svg>
+  </template>
+
+  <template class="ver"
+    data-v="v9"
+    data-name="Short bar, unit enlarged to bleed"
+    data-from="v8"
+    data-meta="79 × 79 · bar −25% · unit ×1.322"
+    data-note="<b>Two operations.</b> The bar body drops 25%, from 77 units to <b>57.75</b>, trimmed off the right — the long side, with only 6 units of bar sitting left of the dial against 36 to its right. Then the whole unit, bar and dial together, is scaled <b>×1.3221757</b> about its own centre until the bar's stroke edges land exactly on the borders. Confirmed off the render rather than the arithmetic: at 256 the knockout reaches column 0 and column 255. Colours are v8's, untouched. What the enlargement buys: the dial grows and shifts from 31% to <b>41% from the left</b>, close enough to centred to stop looking like a mistake, and the dead vertical space first visible under v4's yellow falls from <b>54% of the tile to 40%</b>. The mark also gets chunkier — bar aspect goes 2.75:1 to 2.06:1 — which is why it survives 24px better than anything before it. One consequence to be deliberate about: <b>scaling a unit scales its line weight too</b>, so the stroke you set at 2 in v3 now renders at 2.644 effective. Say the word if you want it pinned back to 2. Construction is a transform laid over the untouched original coordinates, applied identically inside the mask and in the content, so the geometry stays readable and the next tweak stays cheap.">
+    <svg viewBox="-0.5 -22 79 79" fill="none" stroke-width="2" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <mask id="knock-v9" maskUnits="userSpaceOnUse" x="-0.5" y="-22" width="79" height="79">
+          <rect x="-0.5" y="-22" width="79" height="79" fill="#FFFFFF"/>
+          <g transform="translate(0.1610879,-5.6380753) scale(1.3221757)">
+            <rect x="0.5" y="3.5" width="57.75" height="28" rx="4.53579" stroke="#000000"/>
+            <path d="M24 0.5C33.6784 0.5 41.5 8.12434 41.5 17.5C41.5 26.8757 33.6784 34.5 24 34.5C14.3216 34.5 6.5 26.8757 6.5 17.5C6.5 8.12434 14.3216 0.5 24 0.5Z" fill="#FFFFFF"/>
+            <path d="M24 0.5C33.6784 0.5 41.5 8.12434 41.5 17.5C41.5 26.8757 33.6784 34.5 24 34.5C14.3216 34.5 6.5 26.8757 6.5 17.5C6.5 8.12434 14.3216 0.5 24 0.5Z" stroke="#000000"/>
+          </g>
+        </mask>
+      </defs>
+      <g mask="url(#knock-v9)">
+        <rect x="-0.5" y="-22" width="79" height="79" rx="16" fill="#D81B60"/>
+        <g transform="translate(0.1610879,-5.6380753) scale(1.3221757)">
+          <path d="M24 0.5C33.6784 0.5 41.5 8.12434 41.5 17.5C41.5 26.8757 33.6784 34.5 24 34.5C14.3216 34.5 6.5 26.8757 6.5 17.5C6.5 8.12434 14.3216 0.5 24 0.5Z" fill="#EF85C3"/>
+        </g>
+      </g>
+    </svg>
+  </template>
+
+  <template class="ver"
+    data-v="v10"
+    data-name="Heavier cut — mask stroke 3.5"
+    data-from="v9"
+    data-meta="79 × 79 · mask stroke 3.5 · unit ×1.290"
+    data-note="<b>Mask stroke goes 2 to 3.5</b>, and it now lives on the mask's own group rather than being inherited from the root — the mask holds the only stroke in the drawing, since the content group is fill-only, so that is where the value belongs. <b>The number is authored, not rendered.</b> The unit is still scaled, so 3.5 arrives as <b>4.514 effective</b> — measured at 14px wide on a 256px render against 14.6 predicted. If you meant 3.5 as the weight you actually see, the authored value would be 2.71 instead; say so and it becomes v11. The fit had to be recomputed to keep v9's bleed intact. A fatter stroke straddles further out, so at the old scale it overflowed the border by <b>0.99 units each side</b> and the bar's rounded end caps would have been eaten by the tile edge. Scale drops <b>1.3221757 to 1.2897959</b> with the translate adjusted to match, and the knockout again reaches column 0 and column 255 exactly at 256px. The only casualty is the dial, <b>2.5% smaller</b> — 48.92 units across to 47.72 — holding its 41% position. Worth judging on the dark card especially: at this weight the cut lines carry real visual mass and start to segment the tile rather than just outline the bar.">
+    <svg viewBox="-0.5 -22 79 79" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <mask id="knock-v10" maskUnits="userSpaceOnUse" x="-0.5" y="-22" width="79" height="79">
+          <rect x="-0.5" y="-22" width="79" height="79" fill="#FFFFFF"/>
+          <g transform="translate(1.1122449,-5.0714286) scale(1.2897959)" stroke-width="3.5">
+            <rect x="0.5" y="3.5" width="57.75" height="28" rx="4.53579" stroke="#000000"/>
+            <path d="M24 0.5C33.6784 0.5 41.5 8.12434 41.5 17.5C41.5 26.8757 33.6784 34.5 24 34.5C14.3216 34.5 6.5 26.8757 6.5 17.5C6.5 8.12434 14.3216 0.5 24 0.5Z" fill="#FFFFFF"/>
+            <path d="M24 0.5C33.6784 0.5 41.5 8.12434 41.5 17.5C41.5 26.8757 33.6784 34.5 24 34.5C14.3216 34.5 6.5 26.8757 6.5 17.5C6.5 8.12434 14.3216 0.5 24 0.5Z" stroke="#000000"/>
+          </g>
+        </mask>
+      </defs>
+      <g mask="url(#knock-v10)">
+        <rect x="-0.5" y="-22" width="79" height="79" rx="16" fill="#D81B60"/>
+        <g transform="translate(1.1122449,-5.0714286) scale(1.2897959)">
+          <path d="M24 0.5C33.6784 0.5 41.5 8.12434 41.5 17.5C41.5 26.8757 33.6784 34.5 24 34.5C14.3216 34.5 6.5 26.8757 6.5 17.5C6.5 8.12434 14.3216 0.5 24 0.5Z" fill="#EF85C3"/>
+        </g>
+      </g>
+    </svg>
+  </template>
+
+  <template class="ver"
+    data-v="v11"
+    data-name="Shifted left — bar closes on the right"
+    data-from="v10"
+    data-meta="79 × 79 · shifted −4.514 · right margin 1×lw"
+    data-note="<b>The unit moves left by one line weight and nothing else changes</b> — no rescale, no vertical move, translate x alone goes 1.1122449 to −3.4020408. That is a shift of <b>4.5142857</b> canvas units, the line weight as it actually renders (3.5 authored × 1.2897959 scale). The right margin lands at <b>exactly 1.000 × the line weight</b>, measured rather than aimed for: shifting by a line weight from a flush edge necessarily leaves a line weight behind, so the magenta band and the cut lines are the same thickness. That is the kind of relationship that reads as deliberate even to someone who never counts it. On the left the same 4.5143 does something exact: the bar's left vertical stroke spanned −5.014 to −0.5, and the border is at −0.5, so the whole edge lands <b>precisely outside the canvas</b>. Not trimmed — gone. The bar has no left edge at all now, just top and bottom lines running out of frame, <b>terminating in a full rounded cap on the right</b>. It is the first version with a composed direction rather than symmetry. Dial centre moves 41% to <b>36%</b>. One thing to watch: the magenta sliver between the dial's ring and the left border is 3.22 units, which is a comfortable 10.4px at 256 but only about <b>1px at 32 and below</b>, where the ring effectively meets the tile edge. And if &ldquo;entire line weight&rdquo; meant the authored 3.5 rather than the rendered 4.514, the shift is one number away.">
+    <svg viewBox="-0.5 -22 79 79" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <mask id="knock-v11" maskUnits="userSpaceOnUse" x="-0.5" y="-22" width="79" height="79">
+          <rect x="-0.5" y="-22" width="79" height="79" fill="#FFFFFF"/>
+          <g transform="translate(-3.4020408,-5.0714286) scale(1.2897959)" stroke-width="3.5">
+            <rect x="0.5" y="3.5" width="57.75" height="28" rx="4.53579" stroke="#000000"/>
+            <path d="M24 0.5C33.6784 0.5 41.5 8.12434 41.5 17.5C41.5 26.8757 33.6784 34.5 24 34.5C14.3216 34.5 6.5 26.8757 6.5 17.5C6.5 8.12434 14.3216 0.5 24 0.5Z" fill="#FFFFFF"/>
+            <path d="M24 0.5C33.6784 0.5 41.5 8.12434 41.5 17.5C41.5 26.8757 33.6784 34.5 24 34.5C14.3216 34.5 6.5 26.8757 6.5 17.5C6.5 8.12434 14.3216 0.5 24 0.5Z" stroke="#000000"/>
+          </g>
+        </mask>
+      </defs>
+      <g mask="url(#knock-v11)">
+        <rect x="-0.5" y="-22" width="79" height="79" rx="16" fill="#D81B60"/>
+        <g transform="translate(-3.4020408,-5.0714286) scale(1.2897959)">
+          <path d="M24 0.5C33.6784 0.5 41.5 8.12434 41.5 17.5C41.5 26.8757 33.6784 34.5 24 34.5C14.3216 34.5 6.5 26.8757 6.5 17.5C6.5 8.12434 14.3216 0.5 24 0.5Z" fill="#EF85C3"/>
+        </g>
+      </g>
+    </svg>
+  </template>
+
+  <template class="ver"
+    data-v="v12"
+    data-name="Mask stroke 3 — everything on one module"
+    data-from="v11"
+    data-meta="79 × 79 · mask stroke 3 · all gaps 1×lw"
+    data-note="<b>Authored stroke 3.5 to 3</b>, with both derived fits recomputed off it: scale <b>1.2897959 to 1.3004115</b> — slightly larger, because a thinner stroke lets the bar path grow and still reach the borders — and the translate follows. Rendered line weight goes 4.514 to <b>3.901</b> canvas units. <b>3 turns out to be a special number for this drawing.</b> Three separate gaps now land on exactly one line weight: the bar's left overflow, the magenta margin on the right, and the dial's clearance from the left border. The first two were already locked together by the shift in v11, but the third was 0.714× at stroke 3.5 and is <b>1.000×</b> here. It is not a coincidence to be re-tuned later — the dial's clearance works out to k(6−sw) against a line weight of k·sw, and those are equal only at sw&nbsp;=&nbsp;3, because the original drawing happens to inset the bar exactly 6 units to the left of the dial. Measured on a 256px render: both visible gaps 13px against 12.6 predicted. It also settles v11's watch item — dial to left border goes 3.22 up to 3.90 units, about 1.6px at 32 instead of 1.3px. Dial centre 35.5% to 36.2%. The practical upshot is that the whole composition is now modular on a single value, so any future change to the line weight rescales the spacing with it instead of breaking the relationships.">
+    <svg viewBox="-0.5 -22 79 79" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <mask id="knock-v12" maskUnits="userSpaceOnUse" x="-0.5" y="-22" width="79" height="79">
+          <rect x="-0.5" y="-22" width="79" height="79" fill="#FFFFFF"/>
+          <g transform="translate(-3.1008230,-5.2572016) scale(1.3004115)" stroke-width="3">
+            <rect x="0.5" y="3.5" width="57.75" height="28" rx="4.53579" stroke="#000000"/>
+            <path d="M24 0.5C33.6784 0.5 41.5 8.12434 41.5 17.5C41.5 26.8757 33.6784 34.5 24 34.5C14.3216 34.5 6.5 26.8757 6.5 17.5C6.5 8.12434 14.3216 0.5 24 0.5Z" fill="#FFFFFF"/>
+            <path d="M24 0.5C33.6784 0.5 41.5 8.12434 41.5 17.5C41.5 26.8757 33.6784 34.5 24 34.5C14.3216 34.5 6.5 26.8757 6.5 17.5C6.5 8.12434 14.3216 0.5 24 0.5Z" stroke="#000000"/>
+          </g>
+        </mask>
+      </defs>
+      <g mask="url(#knock-v12)">
+        <rect x="-0.5" y="-22" width="79" height="79" rx="16" fill="#D81B60"/>
+        <g transform="translate(-3.1008230,-5.2572016) scale(1.3004115)">
+          <path d="M24 0.5C33.6784 0.5 41.5 8.12434 41.5 17.5C41.5 26.8757 33.6784 34.5 24 34.5C14.3216 34.5 6.5 26.8757 6.5 17.5C6.5 8.12434 14.3216 0.5 24 0.5Z" fill="#EF85C3"/>
+        </g>
+      </g>
+    </svg>
+  </template>
+
+  <template class="ver"
+    data-v="v13"
+    data-name="Original plum dial on magenta"
+    data-from="v12"
+    data-meta="79 × 79 · dial #551439 · geometry as v12"
+    data-note="<b>One fill changed</b> — the dial returns to <b>#551439</b>, the dark purple it carried in v1 straight from the source art. Geometry, scale, translate, mask and stroke are v12's exactly, so the modular spacing still holds. <b>On the light card this is the strongest version on the page.</b> Dial against its ring hole leaps from 2.38:1 to <b>13.59:1</b> — a near-black disc, a crisp white ring, magenta around it — and dial against tile improves to 2.75:1 as well. <b>On the dark card it brings back v6's problem.</b> Dial against ring falls from 7.15:1 to <b>1.25:1</b>, so the plum and the near-black hole merge and the ring stops articulating; the dial reads as one larger, softer disc. It does not collapse — the merged shape still holds 3.45:1 against the magenta — but the detail is gone. Which points somewhere useful: <b>v13 and v12 are complements, not rivals.</b> v13 is the best light rendering here and v12 the best dark one, and they differ by a single fill. Shipping v13 as <code>icon.png</code> with v12 as <code>dark_icon.png</code> would hand each theme its own best case. That is the first time in this whole exploration a <code>dark_</code> pair would actually earn its keep.">
+    <svg viewBox="-0.5 -22 79 79" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <mask id="knock-v13" maskUnits="userSpaceOnUse" x="-0.5" y="-22" width="79" height="79">
+          <rect x="-0.5" y="-22" width="79" height="79" fill="#FFFFFF"/>
+          <g transform="translate(-3.1008230,-5.2572016) scale(1.3004115)" stroke-width="3">
+            <rect x="0.5" y="3.5" width="57.75" height="28" rx="4.53579" stroke="#000000"/>
+            <path d="M24 0.5C33.6784 0.5 41.5 8.12434 41.5 17.5C41.5 26.8757 33.6784 34.5 24 34.5C14.3216 34.5 6.5 26.8757 6.5 17.5C6.5 8.12434 14.3216 0.5 24 0.5Z" fill="#FFFFFF"/>
+            <path d="M24 0.5C33.6784 0.5 41.5 8.12434 41.5 17.5C41.5 26.8757 33.6784 34.5 24 34.5C14.3216 34.5 6.5 26.8757 6.5 17.5C6.5 8.12434 14.3216 0.5 24 0.5Z" stroke="#000000"/>
+          </g>
+        </mask>
+      </defs>
+      <g mask="url(#knock-v13)">
+        <rect x="-0.5" y="-22" width="79" height="79" rx="16" fill="#D81B60"/>
+        <g transform="translate(-3.1008230,-5.2572016) scale(1.3004115)">
+          <path d="M24 0.5C33.6784 0.5 41.5 8.12434 41.5 17.5C41.5 26.8757 33.6784 34.5 24 34.5C14.3216 34.5 6.5 26.8757 6.5 17.5C6.5 8.12434 14.3216 0.5 24 0.5Z" fill="#551439"/>
+        </g>
+      </g>
+    </svg>
+  </template>
+
+  <template class="ver"
+    data-v="v14"
+    data-name="Theme-neutral dial"
+    data-from="v13"
+    data-meta="79 × 79 · dial #D4468F · theme-neutral"
+    data-note="<b>The dial takes #D4468F — the tile colour from v2, the icon currently installed.</b> Geometry is v12's, untouched. This one has a property none of the others do: <b>it treats both themes identically.</b> Dial against its ring hole reads <b>4.14:1 on light and 4.12:1 on dark</b>, a gap of 0.02, against v12's 4.77 and v13's 12.33. That is not a lucky pick. Contrast is symmetric about the geometric mean of the two grounds, which for Home Assistant's white and #1C1C1C cards falls at L+0.05 = <b>0.25435</b> — and #D4468F sits at <b>0.25361</b>, off by seven ten-thousandths. <b>Your own tile colour is, by accident, almost exactly the theme-neutral tone for HA's cards.</b> The cost is real and it is the lowest number on the page: dial against tile is just <b>1.19:1</b>, so the knockout ring is doing nearly all the work of saying where the dial ends. In the ramps it holds up, because the two pinks separate on saturation where luminance says they should not — but this is the most tonal, least punchy version here, and 24px, where the cut only reaches 47%, is where it is thinnest. So the last two versions frame the original question exactly. v13 with v12 is the case <i>for</i> a <code>dark_</code> pair: two files, each theme at its best. v14 is the case for <i>never needing one</i>: a single file that looks the same everywhere. Punch, or evenness.">
+    <svg viewBox="-0.5 -22 79 79" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <mask id="knock-v14" maskUnits="userSpaceOnUse" x="-0.5" y="-22" width="79" height="79">
+          <rect x="-0.5" y="-22" width="79" height="79" fill="#FFFFFF"/>
+          <g transform="translate(-3.1008230,-5.2572016) scale(1.3004115)" stroke-width="3">
+            <rect x="0.5" y="3.5" width="57.75" height="28" rx="4.53579" stroke="#000000"/>
+            <path d="M24 0.5C33.6784 0.5 41.5 8.12434 41.5 17.5C41.5 26.8757 33.6784 34.5 24 34.5C14.3216 34.5 6.5 26.8757 6.5 17.5C6.5 8.12434 14.3216 0.5 24 0.5Z" fill="#FFFFFF"/>
+            <path d="M24 0.5C33.6784 0.5 41.5 8.12434 41.5 17.5C41.5 26.8757 33.6784 34.5 24 34.5C14.3216 34.5 6.5 26.8757 6.5 17.5C6.5 8.12434 14.3216 0.5 24 0.5Z" stroke="#000000"/>
+          </g>
+        </mask>
+      </defs>
+      <g mask="url(#knock-v14)">
+        <rect x="-0.5" y="-22" width="79" height="79" rx="16" fill="#D81B60"/>
+        <g transform="translate(-3.1008230,-5.2572016) scale(1.3004115)">
+          <path d="M24 0.5C33.6784 0.5 41.5 8.12434 41.5 17.5C41.5 26.8757 33.6784 34.5 24 34.5C14.3216 34.5 6.5 26.8757 6.5 17.5C6.5 8.12434 14.3216 0.5 24 0.5Z" fill="#D4468F"/>
+        </g>
+      </g>
+    </svg>
+  </template>
+
+  <template class="ver"
+    data-v="v15"
+    data-name="Swapped again — most theme-neutral"
+    data-from="v14"
+    data-meta="79 × 79 · tile #D4468F · theme drift 1.55"
+    data-note="<b>v14's two colours trade places</b> — tile #D4468F, dial #D81B60, geometry untouched. <b>Yes, this reads balanced, and about twice as balanced as v14.</b> Only three things in this whole design change with the theme: the tile's silhouette against the card, the bar's cut-lines against the tile, and the dial's ring against the dial. The first two are <b>the same number</b> — both are just the tile measured against the card colour — so the tile's fill governs two of the three and the dial's governs one. Putting the theme-neutral #D4468F on the tile therefore neutralises twice as much of the icon as putting it on the dial did. Totalled across all three, the drift between light and dark is <b>1.55 for v15 against 3.03 for v14</b>: silhouette and cut-lines settle to a 0.02 gap, and only the dial's ring still swings, 4.95:1 to 3.45:1. There is a second gain that no ratio captures. In v14 the dial was <i>lighter</i> than its tile, so it receded; here it is the more saturated of the two and <b>advances</b>, which is what you want from the one shape that is meant to be the subject. Dial against tile is unchanged at 1.19:1, being the same pair inverted. Of everything on this page, this is the version that best answers the question you started with — one file, no <code>dark_</code> companion, near-identical on either theme.">
+    <svg viewBox="-0.5 -22 79 79" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <mask id="knock-v15" maskUnits="userSpaceOnUse" x="-0.5" y="-22" width="79" height="79">
+          <rect x="-0.5" y="-22" width="79" height="79" fill="#FFFFFF"/>
+          <g transform="translate(-3.1008230,-5.2572016) scale(1.3004115)" stroke-width="3">
+            <rect x="0.5" y="3.5" width="57.75" height="28" rx="4.53579" stroke="#000000"/>
+            <path d="M24 0.5C33.6784 0.5 41.5 8.12434 41.5 17.5C41.5 26.8757 33.6784 34.5 24 34.5C14.3216 34.5 6.5 26.8757 6.5 17.5C6.5 8.12434 14.3216 0.5 24 0.5Z" fill="#FFFFFF"/>
+            <path d="M24 0.5C33.6784 0.5 41.5 8.12434 41.5 17.5C41.5 26.8757 33.6784 34.5 24 34.5C14.3216 34.5 6.5 26.8757 6.5 17.5C6.5 8.12434 14.3216 0.5 24 0.5Z" stroke="#000000"/>
+          </g>
+        </mask>
+      </defs>
+      <g mask="url(#knock-v15)">
+        <rect x="-0.5" y="-22" width="79" height="79" rx="16" fill="#D4468F"/>
+        <g transform="translate(-3.1008230,-5.2572016) scale(1.3004115)">
+          <path d="M24 0.5C33.6784 0.5 41.5 8.12434 41.5 17.5C41.5 26.8757 33.6784 34.5 24 34.5C14.3216 34.5 6.5 26.8757 6.5 17.5C6.5 8.12434 14.3216 0.5 24 0.5Z" fill="#D81B60"/>
+        </g>
+      </g>
+    </svg>
+  </template>
+
+  <template class="ver"
+    data-v="v16"
+    data-name="Slim bar — controller, not camera"
+    data-from="v15"
+    data-meta="79 × 79 · bar 57.75×22.4 · stroke 3.5"
+    data-note="<b>Line weight back to 3.5, and 20% off the bar's height</b> — 28 down to <b>22.4</b>, taken symmetrically about the midline so it stays centred on the dial, so y moves 3.5 to 6.3. Colours are v15's, so the theme-neutrality carries over untouched: total drift across the two cards is still 1.55. <b>The camera reading is a proportion problem and this is what fixes it.</b> Shortening the length back in v9 left the bar at 2.06:1 — close enough to square that it read as a body with a lens set into it. It is now <b>2.58:1</b>, against the original mark's 2.75:1. The number that actually does the work, though, is the overhang: the dial now stands <b>7.48 units proud of the bar</b> above and below, nearly double the 3.87 it had at height 28. That is the whole difference in reading. A camera body <i>encloses</i> its lens; a control strip has the dial <i>riding on</i> it, breaking the line top and bottom. One pleasing accident: <b>the transform did not have to change at all.</b> It is v11's exactly — the width and stroke are the same as there, and it is the dial rather than the bar that sets the vertical centre, so neither the bleed fit nor the shift moved. Only y and height did. The trade for going back to 3.5 is v12's modular spacing: left overflow and right margin still land on exactly 1.000 line weight, since that follows from the shift itself, but the dial's clearance drops to 0.714 — the triple coincidence belonged to stroke 3 alone.">
+    <svg viewBox="-0.5 -22 79 79" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <mask id="knock-v16" maskUnits="userSpaceOnUse" x="-0.5" y="-22" width="79" height="79">
+          <rect x="-0.5" y="-22" width="79" height="79" fill="#FFFFFF"/>
+          <g transform="translate(-3.4020408,-5.0714286) scale(1.2897959)" stroke-width="3.5">
+            <rect x="0.5" y="6.3" width="57.75" height="22.4" rx="4.53579" stroke="#000000"/>
+            <path d="M24 0.5C33.6784 0.5 41.5 8.12434 41.5 17.5C41.5 26.8757 33.6784 34.5 24 34.5C14.3216 34.5 6.5 26.8757 6.5 17.5C6.5 8.12434 14.3216 0.5 24 0.5Z" fill="#FFFFFF"/>
+            <path d="M24 0.5C33.6784 0.5 41.5 8.12434 41.5 17.5C41.5 26.8757 33.6784 34.5 24 34.5C14.3216 34.5 6.5 26.8757 6.5 17.5C6.5 8.12434 14.3216 0.5 24 0.5Z" stroke="#000000"/>
+          </g>
+        </mask>
+      </defs>
+      <g mask="url(#knock-v16)">
+        <rect x="-0.5" y="-22" width="79" height="79" rx="16" fill="#D4468F"/>
+        <g transform="translate(-3.4020408,-5.0714286) scale(1.2897959)">
+          <path d="M24 0.5C33.6784 0.5 41.5 8.12434 41.5 17.5C41.5 26.8757 33.6784 34.5 24 34.5C14.3216 34.5 6.5 26.8757 6.5 17.5C6.5 8.12434 14.3216 0.5 24 0.5Z" fill="#D81B60"/>
+        </g>
+      </g>
+    </svg>
+  </template>
+
+  <template class="ver"
+    data-v="v17"
+    data-name="Smaller dial, left edge pinned"
+    data-from="v16"
+    data-meta="79 × 79 · dial ×0.9 left-anchored"
+    data-note="<b>The dial goes to 90%, shrinking only rightward.</b> rx 17.5 to 15.75, ry 17 to 15.3, centre sliding 24 to 22.25 so the left edge stays exactly where it was at 6.5 — its clearance from the border is untouched at 3.2245. The right edge pulls in 3.5 units, and that is where the controller reading comes from: <b>bar visible to the right of the dial grows 21.60 to 26.12 units, up 21%</b>, giving the knob a proper run of strip to sit on rather than crowding the end. The overhang drops 7.48 to <b>5.29</b>, still comfortably proud of the bar, so v16's fix holds — the dial rides on the strip instead of being enclosed by it. Original proportions are kept: the source dial was very slightly wider than tall, 17.5 by 17, and at 0.9 it still is. <b>One construction change worth knowing about.</b> The dial is now a real <code>&lt;ellipse&gt;</code> rather than the source Bezier path. Scaling that path through a nested transform would have scaled its stroke along with it, thinning the ring to 3.15 against the bar's 3.5 — and the ring and the bar lines have to match. As an ellipse the stroke inherits cleanly at 3.5. The cost was measured rather than assumed: the source path strays from a true ellipse by at most <b>0.0296%</b>, which is 0.02px at the 256 icon. Nothing visible was traded, and the dial is now four legible numbers instead of eight Bezier control points.">
+    <svg viewBox="-0.5 -22 79 79" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <mask id="knock-v17" maskUnits="userSpaceOnUse" x="-0.5" y="-22" width="79" height="79">
+          <rect x="-0.5" y="-22" width="79" height="79" fill="#FFFFFF"/>
+          <g transform="translate(-3.4020408,-5.0714286) scale(1.2897959)" stroke-width="3.5">
+            <rect x="0.5" y="6.3" width="57.75" height="22.4" rx="4.53579" stroke="#000000"/>
+            <ellipse cx="22.25" cy="17.5" rx="15.75" ry="15.3" fill="#FFFFFF"/>
+            <ellipse cx="22.25" cy="17.5" rx="15.75" ry="15.3" stroke="#000000"/>
+          </g>
+        </mask>
+      </defs>
+      <g mask="url(#knock-v17)">
+        <rect x="-0.5" y="-22" width="79" height="79" rx="16" fill="#D4468F"/>
+        <g transform="translate(-3.4020408,-5.0714286) scale(1.2897959)">
+          <ellipse cx="22.25" cy="17.5" rx="15.75" ry="15.3" fill="#D81B60"/>
+        </g>
+      </g>
+    </svg>
+  </template>
+
+  <template class="ver"
+    data-v="v18"
+    data-name="Bleeds right — margin on the left"
+    data-from="v17"
+    data-meta="79 × 79 · bleeds right · dial 44%"
+    data-note="<b>The shift mirrors: same magnitude, opposite direction.</b> translate x goes −3.4020408 to <b>+5.6265306</b>, a travel of exactly two line weights. Scale, ty, and the bar body at 57.75 × 22.4 are all untouched — the touchscreen is precisely the size it was, only moved. The mirror is exact: <b>left margin 4.5143, right overflow 4.5143</b>, both 1.000 line weight, and the bar's right vertical stroke now lands entirely outside the canvas with its inner edge sitting on the border, so the bar has no right edge — the exact image of what v11 did on the left. <b>The composition changes more than a flip implies, because the dial is not centred in the bar.</b> It sits near the bar's left end, so which end you bleed decides which end you get to see. v17 hid the short end and showed the long run: <b>3.22 units of bar left of the dial against 26.12 right, a ratio of 8.10:1</b>, dial at 32.7%. v18 shows the short end complete with its rounded cap and sends the long run off-frame: <b>7.74 against 21.60, a ratio of 2.79:1</b>, dial at 44.1%. So this is not really left-versus-right, it is dramatic versus balanced. v17 reads as a knob at the start of a track heading somewhere; v18 reads as a knob sitting on a strip, more centred and more settled, with the cap on the left giving the eye a defined starting edge. Both are honest to the mark — worth looking at them side by side in the compare strip at 48px before choosing.">
+    <svg viewBox="-0.5 -22 79 79" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <mask id="knock-v18" maskUnits="userSpaceOnUse" x="-0.5" y="-22" width="79" height="79">
+          <rect x="-0.5" y="-22" width="79" height="79" fill="#FFFFFF"/>
+          <g transform="translate(5.6265306,-5.0714286) scale(1.2897959)" stroke-width="3.5">
+            <rect x="0.5" y="6.3" width="57.75" height="22.4" rx="4.53579" stroke="#000000"/>
+            <ellipse cx="22.25" cy="17.5" rx="15.75" ry="15.3" fill="#FFFFFF"/>
+            <ellipse cx="22.25" cy="17.5" rx="15.75" ry="15.3" stroke="#000000"/>
+          </g>
+        </mask>
+      </defs>
+      <g mask="url(#knock-v18)">
+        <rect x="-0.5" y="-22" width="79" height="79" rx="16" fill="#D4468F"/>
+        <g transform="translate(5.6265306,-5.0714286) scale(1.2897959)">
+          <ellipse cx="22.25" cy="17.5" rx="15.75" ry="15.3" fill="#D81B60"/>
+        </g>
+      </g>
+    </svg>
+  </template>
+
+  <template class="ver"
+    data-v="v19"
+    data-name="Taller bar on the right bleed"
+    data-from="v18"
+    data-meta="79 × 79 · bar h 24.64 · overhang 3.84"
+    data-note="<b>Bar height 22.4 to 24.64</b>, up 10%, y moving 6.3 to 5.18 so it stays centred on the midline. Everything else is v18's — transform, stroke, dial, colours — and once again no re-fit was needed, since width and stroke did not change and the dial still sets the vertical centre, spanning 0.45..34.55 against the bar's 3.43..31.57. Aspect goes 2.58:1 to <b>2.34:1</b>. <b>One number is worth your attention before you settle on this.</b> The thing that actually broke the camera reading back in v16 was not the aspect ratio but the <i>overhang</i> — how far the dial stands proud of the bar top and bottom. That was 5.29 in v18. Here it is <b>3.84</b>. The version you originally called a camera had <b>3.87</b>. By that specific measure this lands almost exactly back where the camera reading came from. Two things differ this time and they do pull the other way: the bar is 2.34:1 rather than the 2.06:1 it was then, and the right-hand bleed gives it an implied continuation off-frame that the enclosed version never had. Side by side at 200px the dial does sit noticeably less proud — but the edge running out of frame stops the bar closing into a body around it. Your call, and it is genuinely close. <b>If it does read too enclosed, the cheaper correction is not to shorten the bar again</b> — it is to give the dial back some size. Returning ry from 15.3 toward 17 buys about 2.2 units of overhang without touching the bar at all, which would keep the longer, calmer strip you just gained.">
+    <svg viewBox="-0.5 -22 79 79" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <mask id="knock-v19" maskUnits="userSpaceOnUse" x="-0.5" y="-22" width="79" height="79">
+          <rect x="-0.5" y="-22" width="79" height="79" fill="#FFFFFF"/>
+          <g transform="translate(5.6265306,-5.0714286) scale(1.2897959)" stroke-width="3.5">
+            <rect x="0.5" y="5.18" width="57.75" height="24.64" rx="4.53579" stroke="#000000"/>
+            <ellipse cx="22.25" cy="17.5" rx="15.75" ry="15.3" fill="#FFFFFF"/>
+            <ellipse cx="22.25" cy="17.5" rx="15.75" ry="15.3" stroke="#000000"/>
+          </g>
+        </mask>
+      </defs>
+      <g mask="url(#knock-v19)">
+        <rect x="-0.5" y="-22" width="79" height="79" rx="16" fill="#D4468F"/>
+        <g transform="translate(5.6265306,-5.0714286) scale(1.2897959)">
+          <ellipse cx="22.25" cy="17.5" rx="15.75" ry="15.3" fill="#D81B60"/>
+        </g>
+      </g>
+    </svg>
+  </template>
+
+  <template class="ver"
+    data-v="v20"
+    data-name="Vermilion"
+    data-from="v18"
+    data-meta="79 × 79 · tile #E64A19 · drift 2.34"
+    data-note="<b>v18's shape, vermilion palette.</b> Geometry is identical to v18 in every respect — only the two fills differ. <b>The method, which applies to all four colourways:</b> v15 established that the tile governs two of the three theme-dependent relationships and the dial only one, so the near-neutral colour goes on the tile. #E64A19 sits at luminance 0.2179 against the neutral point of 0.2043 — close — so it takes the tile, and the dial is derived from it. The dial is then held at <b>exactly v18's dial luminance (0.163)</b> rather than pushed darker. That matters: deepening a dial to buy contrast against a neutral tile drags it away from the neutral point and more than doubles the theme drift, which undoes what the last ten versions were for. With luminance fixed, <b>hue is the only lever left</b>, so the pair is separated by <b>19°</b> instead of v18's 9° — #E1091A is a true red against an orange-red ground. Tile against dial 1.26:1, theme drift <b>2.34</b> versus v18's 1.55.">
+    <svg viewBox="-0.5 -22 79 79" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <mask id="knock-v20" maskUnits="userSpaceOnUse" x="-0.5" y="-22" width="79" height="79">
+          <rect x="-0.5" y="-22" width="79" height="79" fill="#FFFFFF"/>
+          <g transform="translate(5.6265306,-5.0714286) scale(1.2897959)" stroke-width="3.5">
+            <rect x="0.5" y="6.3" width="57.75" height="22.4" rx="4.53579" stroke="#000000"/>
+            <ellipse cx="22.25" cy="17.5" rx="15.75" ry="15.3" fill="#FFFFFF"/>
+            <ellipse cx="22.25" cy="17.5" rx="15.75" ry="15.3" stroke="#000000"/>
+          </g>
+        </mask>
+      </defs>
+      <g mask="url(#knock-v20)">
+        <rect x="-0.5" y="-22" width="79" height="79" rx="16" fill="#E64A19"/>
+        <g transform="translate(5.6265306,-5.0714286) scale(1.2897959)">
+          <ellipse cx="22.25" cy="17.5" rx="15.75" ry="15.3" fill="#E1091A"/>
+        </g>
+      </g>
+    </svg>
+  </template>
+
+  <template class="ver"
+    data-v="v21"
+    data-name="Teal"
+    data-from="v18"
+    data-badge="set aside"
+    data-meta="79 × 79 · tile #00897B · drift 2.31"
+    data-note="<b>Set aside 2026-08-21 — too close to Kohler's own source colour to be comfortable on an unofficial integration.</b> Kept here rather than deleted, since the objection is about association rather than the design. <b>v18's shape, teal palette.</b> #00897B lands at luminance 0.1932 against the 0.2043 neutral point — the closest of the three colours you gave — so it takes the tile. The derived dial, <b>#00799B</b>, is the one place I let the hue travel furthest in character: teal's family is narrow, and at the fixed dial luminance a mere few degrees produced two greens that were genuinely indistinguishable. Nineteen degrees pushes it past cyan into <b>blue</b>, which is what makes the dial read as a separate object rather than a smudge. Tile against dial is the lowest of the set at <b>1.16:1</b>, so this variant leans hardest on the knockout ring and on hue to do its work — check it at 32px before committing. Theme drift <b>2.31</b>.">
+    <svg viewBox="-0.5 -22 79 79" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <mask id="knock-v21" maskUnits="userSpaceOnUse" x="-0.5" y="-22" width="79" height="79">
+          <rect x="-0.5" y="-22" width="79" height="79" fill="#FFFFFF"/>
+          <g transform="translate(5.6265306,-5.0714286) scale(1.2897959)" stroke-width="3.5">
+            <rect x="0.5" y="6.3" width="57.75" height="22.4" rx="4.53579" stroke="#000000"/>
+            <ellipse cx="22.25" cy="17.5" rx="15.75" ry="15.3" fill="#FFFFFF"/>
+            <ellipse cx="22.25" cy="17.5" rx="15.75" ry="15.3" stroke="#000000"/>
+          </g>
+        </mask>
+      </defs>
+      <g mask="url(#knock-v21)">
+        <rect x="-0.5" y="-22" width="79" height="79" rx="16" fill="#00897B"/>
+        <g transform="translate(5.6265306,-5.0714286) scale(1.2897959)">
+          <ellipse cx="22.25" cy="17.5" rx="15.75" ry="15.3" fill="#00799B"/>
+        </g>
+      </g>
+    </svg>
+  </template>
+
+  <template class="ver"
+    data-v="v22"
+    data-name="Violet"
+    data-from="v18"
+    data-meta="79 × 79 · dial #6A3DE8 · drift 3.39"
+    data-note="<b>v18's shape, violet palette — and the one that goes on the dial instead.</b> #6A3DE8 sits at luminance 0.1223, <b>0.082 below the neutral point</b> and by far the furthest off of the four. A colour that dark costs theme evenness wherever you put it, so the question was only which slot costs less: the tile would spend that penalty twice, the dial spends it once. It goes on the dial. The tile, <b>#A35CD6</b>, is then solved to land on the neutral luminance exactly, 19° round the wheel toward purple. Because the given colour is genuinely darker rather than merely different, this is the one variant with real tonal separation — <b>1.47:1</b> tile against dial, comfortably the strongest of the set, and the dial reads as a solid object rather than an outlined one. The bill for that is theme drift of <b>3.39</b>, roughly double v18's. It is the most striking of the four and the least even; those are the same fact seen from two sides.">
+    <svg viewBox="-0.5 -22 79 79" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <mask id="knock-v22" maskUnits="userSpaceOnUse" x="-0.5" y="-22" width="79" height="79">
+          <rect x="-0.5" y="-22" width="79" height="79" fill="#FFFFFF"/>
+          <g transform="translate(5.6265306,-5.0714286) scale(1.2897959)" stroke-width="3.5">
+            <rect x="0.5" y="6.3" width="57.75" height="22.4" rx="4.53579" stroke="#000000"/>
+            <ellipse cx="22.25" cy="17.5" rx="15.75" ry="15.3" fill="#FFFFFF"/>
+            <ellipse cx="22.25" cy="17.5" rx="15.75" ry="15.3" stroke="#000000"/>
+          </g>
+        </mask>
+      </defs>
+      <g mask="url(#knock-v22)">
+        <rect x="-0.5" y="-22" width="79" height="79" rx="16" fill="#A35CD6"/>
+        <g transform="translate(5.6265306,-5.0714286) scale(1.2897959)">
+          <ellipse cx="22.25" cy="17.5" rx="15.75" ry="15.3" fill="#6A3DE8"/>
+        </g>
+      </g>
+    </svg>
+  </template>
+
+  <template class="ver"
+    data-v="v23"
+    data-name="Magenta+ — my spin"
+    data-from="v18"
+    data-meta="79 × 79 · dial #DE0E38 · drift 1.59"
+    data-note="<b>My spin on the magenta, and it deliberately leaves the tile alone.</b> #D4468F is 0.0007 off the theme-neutral point — the best neutral anywhere in this exploration, and nothing I could do to it would be an improvement. So the change is all in the dial, and the reasoning is this: at 1.19:1 luminance contrast, <b>hue and saturation were already doing all the work</b> of separating dial from tile. The obvious move is to darken the dial, but that is precisely the move that wrecks theme evenness. So instead the dial holds v18's luminance almost exactly (0.1613 against 0.1623) and spends its budget on <b>hue: 18.7° of separation against v18's 8.9°</b>, plus saturation up from 78% to 88%. <b>#DE0E38</b> is a crimson rather than a magenta-pink — the dial stops being a deeper shade of the tile and becomes a different colour sitting on it, which is what the eye actually needs at this luminance. Theme drift <b>1.59</b>, statistically indistinguishable from v18's 1.55: all of the added separation, none of the added cost.">
+    <svg viewBox="-0.5 -22 79 79" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <mask id="knock-v23" maskUnits="userSpaceOnUse" x="-0.5" y="-22" width="79" height="79">
+          <rect x="-0.5" y="-22" width="79" height="79" fill="#FFFFFF"/>
+          <g transform="translate(5.6265306,-5.0714286) scale(1.2897959)" stroke-width="3.5">
+            <rect x="0.5" y="6.3" width="57.75" height="22.4" rx="4.53579" stroke="#000000"/>
+            <ellipse cx="22.25" cy="17.5" rx="15.75" ry="15.3" fill="#FFFFFF"/>
+            <ellipse cx="22.25" cy="17.5" rx="15.75" ry="15.3" stroke="#000000"/>
+          </g>
+        </mask>
+      </defs>
+      <g mask="url(#knock-v23)">
+        <rect x="-0.5" y="-22" width="79" height="79" rx="16" fill="#D4468F"/>
+        <g transform="translate(5.6265306,-5.0714286) scale(1.2897959)">
+          <ellipse cx="22.25" cy="17.5" rx="15.75" ry="15.3" fill="#DE0E38"/>
+        </g>
+      </g>
+    </svg>
+  </template>
+
+  <template class="ver"
+    data-v="v24"
+    data-name="Inverted — the fills cut out"
+    data-from="v18"
+    data-meta="79 × 79 · fills cut, lines solid · 26.8% open"
+    data-note="<b>The mask turns inside out: the fills are cut and the lines stay solid.</b> Same four shapes, same order of operations, opposite roles — keep everything, cut the bar's interior, restore its rim, cut the dial's interior, restore its ring. The bar and the dial become windows in the tile, and what used to be knocked-out lines is now the only thing left holding the shape together. <b>One thing makes this work, and it is not obvious: the dial has to overhang the bar.</b> If the dial sat entirely inside the bar, its ring would be a closed loop floating in the middle of a hole with nothing anchoring it to anything. Because the dial pokes above and below, the ring meets solid tile at top and bottom and reads as fixed rather than adrift. The overhang argued over from v16 through v19 turns out to be load-bearing here in a way it never was before. Rims carry the deeper colour so the windows read as rimmed rather than raw; in a single colour the ring still renders — measured, a 16px band either side of the dial at 256 — but the whole thing collapses into one merged cutout instead of a knob on a strip. Vermilion because teal is out and a hue you have not been staring at makes it easier to judge the <i>construction</i> rather than re-judging a colour. <b>The honest caveat: 26.8% of the tile is now see-through, against v18's 16.3% — 1.6 times as much.</b> The contrast ratios are much like the other variants, but the icon's perceived weight swings far harder between themes: airy and open on the light card, a solid block pierced with dark voids on the dark one. That is not worse, but it is a design that will read as two different icons depending on the theme — the exact opposite of what v15 and v18 were tuned for. Worth knowing before it competes with them.">
+    <svg viewBox="-0.5 -22 79 79" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <mask id="knock-v24" maskUnits="userSpaceOnUse" x="-0.5" y="-22" width="79" height="79">
+          <rect x="-0.5" y="-22" width="79" height="79" fill="#FFFFFF"/>
+          <g transform="translate(5.6265306,-5.0714286) scale(1.2897959)" stroke-width="3.5">
+            <rect x="0.5" y="6.3" width="57.75" height="22.4" rx="4.53579" fill="#000000"/>
+            <rect x="0.5" y="6.3" width="57.75" height="22.4" rx="4.53579" stroke="#FFFFFF"/>
+            <ellipse cx="22.25" cy="17.5" rx="15.75" ry="15.3" fill="#000000"/>
+            <ellipse cx="22.25" cy="17.5" rx="15.75" ry="15.3" stroke="#FFFFFF"/>
+          </g>
+        </mask>
+      </defs>
+      <g mask="url(#knock-v24)">
+        <rect x="-0.5" y="-22" width="79" height="79" rx="16" fill="#E64A19"/>
+        <g transform="translate(5.6265306,-5.0714286) scale(1.2897959)" stroke-width="3.5">
+          <rect x="0.5" y="6.3" width="57.75" height="22.4" rx="4.53579" stroke="#E1091A"/>
+          <ellipse cx="22.25" cy="17.5" rx="15.75" ry="15.3" stroke="#E1091A"/>
+        </g>
+      </g>
+    </svg>
+  </template>
+
+</div>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <h1>Anthem Icon Workbench</h1>
+    <span class="dom">kohler_anthem_plus</span>
+    <p>Every version of the integration icon, on Home Assistant's real card colours at the
+       sizes it actually renders. Versions only ever get appended — nothing is replaced, so
+       a version number always means the same artwork.</p>
+  </header>
+
+  <section class="sec">
+    <div class="sec-head">
+      <h2>Side by side</h2>
+      <p class="hint">All versions at one size — for picking a winner.</p>
+      <div class="sizes" id="sizes" role="group" aria-label="Compare size"></div>
+    </div>
+    <div class="grounds">
+      <div class="strip on-light" id="cmp-light"><span class="strip-tag">Light</span></div>
+      <div class="strip on-dark"  id="cmp-dark"><span class="strip-tag">Dark</span></div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <div class="sec-head">
+      <h2>Versions</h2>
+      <p class="hint">One version across every size — for checking it survives shrinking.</p>
+    </div>
+    <div id="cards"></div>
+  </section>
+
+  <p class="foot">
+    Home Assistant reads these from <code>custom_components/kohler_anthem_plus/brand/</code>
+    as <code>icon.png</code> (256×256) and <code>icon@2x.png</code> (512×512), square, and
+    <b>trimmed</b> — the spec forbids padding, borders and transparent spacing around the
+    subject rather than requiring any, so artwork should reach the edges. HACS asks for the
+    same <code>brand/</code> directory with at least an <code>icon.png</code> in it. The
+    split square behind each hero is the light card meeting the dark card, so an opaque tile
+    sits on the seam unchanged while transparent artwork shows its two very different fates.
+  </p>
+
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  var SIZES = [128, 64, 48, 32, 24];
+  var STORE = "anthem-icon-workbench:size";
+  var vers  = [].slice.call(document.querySelectorAll("#lib .ver"));
+  var uid   = 0;
+
+  // Clones share ids with their source, and duplicate ids make url(#…)
+  // references resolve to whichever copy the parser saw first. Rename every
+  // id per clone so each render is self-contained.
+  function uniquify(svg){
+    var tag = "c" + (++uid);
+    [].forEach.call(svg.querySelectorAll("[id]"), function(el){
+      var was = el.id, now = was + "-" + tag;
+      el.id = now;
+      ["clip-path","fill","stroke","mask","filter"].forEach(function(attr){
+        [].forEach.call(svg.querySelectorAll("[" + attr + '*="#' + was + '"]'), function(u){
+          u.setAttribute(attr, u.getAttribute(attr).replace("#" + was, "#" + now));
+        });
+      });
+    });
+    return svg;
+  }
+
+  // Fit into a size×size box without distorting: landscape art stays landscape.
+  function render(tpl, box){
+    var svg = uniquify(tpl.content.firstElementChild.cloneNode(true));
+    var vb  = (svg.getAttribute("viewBox") || "0 0 1 1").split(/[\s,]+/);
+    var w   = parseFloat(vb[2]) || 1, h = parseFloat(vb[3]) || 1;
+    var k   = box / Math.max(w, h);
+    svg.setAttribute("width",  Math.round(w * k));
+    svg.setAttribute("height", Math.round(h * k));
+    svg.removeAttribute("id");
+    return svg;
+  }
+
+  function cell(tpl, box, cap){
+    var d = document.createElement("div");
+    d.className = "cell";
+    d.style.width = box + "px";
+    d.style.height = box + "px";
+    d.appendChild(render(tpl, box));
+    if (cap) {
+      var c = document.createElement("span");
+      c.className = "cell-cap";
+      c.textContent = box + "px";
+      d.appendChild(c);
+    }
+    return d;
+  }
+
+  /* ---- compare strip ---- */
+  var cmpL = document.getElementById("cmp-light"),
+      cmpD = document.getElementById("cmp-dark"),
+      btns = document.getElementById("sizes");
+
+  function drawCompare(box){
+    [cmpL, cmpD].forEach(function(strip){
+      while (strip.children.length > 1) strip.removeChild(strip.lastChild);
+      vers.forEach(function(tpl){
+        var item = document.createElement("div");
+        item.className = "cmp-item";
+        item.appendChild(cell(tpl, box, false));
+        var tag = document.createElement("span");
+        tag.className = "cmp-v";
+        tag.textContent = tpl.dataset.v;
+        item.appendChild(tag);
+        strip.appendChild(item);
+      });
+    });
+    [].forEach.call(btns.children, function(b){
+      b.setAttribute("aria-pressed", String(+b.dataset.size === box));
+    });
+    try { localStorage.setItem(STORE, String(box)); } catch (e) {}
+  }
+
+  var saved = 48;
+  try {
+    var s = parseInt(localStorage.getItem(STORE), 10);
+    if (SIZES.indexOf(s) > -1) saved = s;
+  } catch (e) {}
+
+  SIZES.forEach(function(sz){
+    var b = document.createElement("button");
+    b.type = "button";
+    b.dataset.size = sz;
+    b.textContent = sz;
+    b.setAttribute("aria-pressed", "false");
+    b.addEventListener("click", function(){ drawCompare(sz); });
+    btns.appendChild(b);
+  });
+
+  /* ---- version cards ---- */
+  var cards = document.getElementById("cards");
+
+  vers.forEach(function(tpl){
+    var d = tpl.dataset;
+    var card = document.createElement("section");
+    card.className = "card";
+
+    var head = document.createElement("div");
+    head.className = "card-head";
+    head.innerHTML =
+      '<span class="vchip">' + d.v + "</span>" +
+      "<h3>" + d.name + "</h3>" +
+      (d.badge ? '<span class="badge">' + d.badge + "</span>" : "") +
+      (d.from  ? '<span class="from">from ' + d.from + "</span>" : "") +
+      '<span class="card-meta">' + d.meta + "</span>";
+    card.appendChild(head);
+
+    var body = document.createElement("div");
+    body.className = "card-body";
+
+    var hero = document.createElement("div");
+    hero.className = "hero";
+    hero.appendChild(render(tpl, 168));
+    body.appendChild(hero);
+
+    var side = document.createElement("div");
+    side.className = "card-side";
+
+    var note = document.createElement("p");
+    note.className = "note";
+    note.innerHTML = d.note;
+    side.appendChild(note);
+
+    var grounds = document.createElement("div");
+    grounds.className = "grounds";
+    [["light", "Light"], ["dark", "Dark"]].forEach(function(g){
+      var strip = document.createElement("div");
+      strip.className = "strip on-" + g[0] + " has-caps";
+      var tag = document.createElement("span");
+      tag.className = "strip-tag";
+      tag.textContent = g[1];
+      strip.appendChild(tag);
+      SIZES.forEach(function(sz){ strip.appendChild(cell(tpl, sz, true)); });
+      grounds.appendChild(strip);
+    });
+    side.appendChild(grounds);
+
+    body.appendChild(side);
+    card.appendChild(body);
+
+    /* ---- source + copy ---- */
+    var src = tpl.innerHTML
+      .replace(/^\s*\n/, "").replace(/\s+$/, "")
+      .replace(/^ {4}/gm, "");
+
+    var foot = document.createElement("div");
+    foot.className = "card-foot";
+
+    var copy = document.createElement("button");
+    copy.type = "button";
+    copy.className = "copy";
+    copy.textContent = "Copy SVG";
+    copy.addEventListener("click", function(){
+      var done = function(){
+        copy.textContent = "Copied";
+        copy.dataset.done = "1";
+        setTimeout(function(){ copy.textContent = "Copy SVG"; copy.dataset.done = ""; }, 1400);
+      };
+      try {
+        navigator.clipboard.writeText(src).then(done, function(){ copy.textContent = "Select it below"; });
+      } catch (e) {
+        copy.textContent = "Select it below";
+      }
+    });
+    foot.appendChild(copy);
+
+    var det = document.createElement("details");
+    var sum = document.createElement("summary");
+    sum.textContent = "source";
+    det.appendChild(sum);
+    var pre = document.createElement("pre");
+    pre.textContent = src;
+    det.appendChild(pre);
+    foot.appendChild(det);
+
+    card.appendChild(foot);
+    cards.appendChild(card);
+  });
+
+  drawCompare(saved);
+})();
+</script>

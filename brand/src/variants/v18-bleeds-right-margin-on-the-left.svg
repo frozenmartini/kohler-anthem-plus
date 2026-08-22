@@ -1,0 +1,18 @@
+<svg viewBox="-0.5 -22 79 79" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <mask id="knock-v18" maskUnits="userSpaceOnUse" x="-0.5" y="-22" width="79" height="79">
+          <rect x="-0.5" y="-22" width="79" height="79" fill="#FFFFFF"/>
+          <g transform="translate(5.6265306,-5.0714286) scale(1.2897959)" stroke-width="3.5">
+            <rect x="0.5" y="6.3" width="57.75" height="22.4" rx="4.53579" stroke="#000000"/>
+            <ellipse cx="22.25" cy="17.5" rx="15.75" ry="15.3" fill="#FFFFFF"/>
+            <ellipse cx="22.25" cy="17.5" rx="15.75" ry="15.3" stroke="#000000"/>
+          </g>
+        </mask>
+      </defs>
+      <g mask="url(#knock-v18)">
+        <rect x="-0.5" y="-22" width="79" height="79" rx="16" fill="#D4468F"/>
+        <g transform="translate(5.6265306,-5.0714286) scale(1.2897959)">
+          <ellipse cx="22.25" cy="17.5" rx="15.75" ry="15.3" fill="#D81B60"/>
+        </g>
+      </g>
+    </svg>
