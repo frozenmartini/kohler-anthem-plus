@@ -183,7 +183,10 @@ CONF_RESTART_ON_RUNTIME_CUTOFF = "restart_on_runtime_cutoff"
 #
 # Persisting is still worth it (one fewer REST round trip on the hot path), but the "blind
 # window" that justified it is not the constraint it was believed to be. Reading it at setup
-# would close that window entirely — see `docs/gcs/api.md` §1c. Not yet done.
+# was done on 2026-08-17 and runs on every reseed since — `_async_seed_state` reads
+# `gcsadvancestate` and feeds `_learn_run_times`, so the window is closed and this
+# persistence is now the belt to that suspender (it still arms the feature during the
+# seconds before the first seed completes, and across a seed that fails).
 #
 # Without persistence the cutoff feature is inert after every restart until the valve happens
 # to announce again, which can be a long wait and gives no sign of why nothing is happening.
