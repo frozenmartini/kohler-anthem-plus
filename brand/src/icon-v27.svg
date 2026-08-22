@@ -1,0 +1,24 @@
+<svg viewBox="-0.5 -22 79 79" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Cuts the bar outline and the dial ring clean through the tile. The white
+         ellipse in the middle is the trick: it restores the dial before the ring
+         is cut, so the bar's lines stop at the dial instead of slicing across it. -->
+    <mask id="knock-v27" maskUnits="userSpaceOnUse" x="-0.5" y="-22" width="79" height="79">
+      <rect x="-0.5" y="-22" width="79" height="79" fill="#FFFFFF"/>
+      <g transform="translate(5.6265306,-5.0714286) scale(1.2897959)" stroke-width="3.5">
+        <rect x="0.5" y="6.3" width="57.75" height="22.4" rx="4.53579" stroke="#000000"/>
+        <ellipse cx="22.25" cy="17.5" rx="15.75" ry="15.3" fill="#FFFFFF"/>
+        <ellipse cx="22.25" cy="17.5" rx="15.75" ry="15.3" stroke="#000000"/>
+      </g>
+    </mask>
+  </defs>
+  <g mask="url(#knock-v27)">
+    <rect x="-0.5" y="-22" width="79" height="79" rx="16" fill="#A35CD6"/>
+    <g transform="translate(5.6265306,-5.0714286) scale(1.2897959)">
+      <!-- The third tone: a 70/30 tile-dial blend, so the strip reads as a quiet
+           surface the dial rides on rather than an outline etched into the tile. -->
+      <rect x="0.5" y="6.3" width="57.75" height="22.4" rx="4.53579" fill="#9253DB"/>
+      <ellipse cx="22.25" cy="17.5" rx="15.75" ry="15.3" fill="#6A3DE8"/>
+    </g>
+  </g>
+</svg>

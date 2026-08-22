@@ -14,7 +14,7 @@
 
 set -e
 
-VARIANT="${1:-v22}"
+VARIANT="${1:-v27}"
 
 SRC="$(cd "$(dirname "$0")" && pwd)"
 OUT="$(dirname "$SRC")"
