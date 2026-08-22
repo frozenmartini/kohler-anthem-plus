@@ -189,6 +189,7 @@ rename a device, its entity IDs change with it.
 | `MQTT Connection` | both | Whether the push stream is connected |
 | `Last Update` | both | Timestamp of the most recent message |
 | `Start new MQTT capture` | both | Button; rolls the raw capture over to a fresh file |
+| `Report Log` | both | Switch; one-file bug-report capture of the raw MQTT stream — see [The Report Log switch](#the-report-log-switch) |
 | `Zone N Hex` | valve | The current command word for that zone — copy it into `send_valve_hex` |
 | `Zone N Outlet M Max Run Time` | valve | That outlet's configured run-time ceiling, in seconds |
 | `Zone N Active` | valve | Whether that zone is currently running water |
@@ -274,9 +275,28 @@ producing a shower that doesn't stop on its own.
 > ⚠️ This deliberately defeats a safety-adjacent limit. It is off by default, and you should
 > understand why that limit exists on your installation before turning it on.
 
+### The Report Log switch
+
+The quick way to capture evidence for a bug report — or to document a healthy run on
+hardware this integration has never been verified against. A **Report Log** switch sits on
+both device pages (diagnostic section):
+
+* **Switch on** → a new capture file starts, recording every raw MQTT message.
+* **Restart Home Assistant mid-capture** → the same file continues. "It breaks when I
+  restart" is a bug report too, so the restart never splits the evidence.
+* **Switch off** → the capture ends. The next switch-on starts a fresh file.
+
+Files land in `custom_components/kohler_anthem_plus/reports/` (a `README.txt` there explains
+them), one per capture, capped at 8 MB with continuation parts. Attach them to a GitHub
+issue along with the diagnostics download. **Check them before sharing** — they contain your
+device identifiers and show when the shower was used. And note the folder lives inside the
+integration itself, so **updating or reinstalling the integration deletes it**; move files
+you want to keep first.
+
 ### Captures and journals
 
-The integration writes to `/config/kohler_anthem_plus_raw/`:
+Separately from the Report Log, the integration writes its development evidence to
+`/config/kohler_anthem_plus_raw/`:
 
 | File | What it holds |
 |---|---|

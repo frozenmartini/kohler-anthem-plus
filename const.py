@@ -124,6 +124,29 @@ RAW_MQTT_LOG_MAX_BYTES = 8 * 1024 * 1024
 RAW_MQTT_LOG_KEEP_FILES = None
 
 # ---------------------------------------------------------------------------
+# REPORT LOG — the consumer-side capture, keyed to the "Report Log" switch
+# ---------------------------------------------------------------------------
+# A second raw MQTT capture, deliberately separate from the one above: that one is the
+# development evidence machine (pinned on here, per-run files, `/config/kohler_anthem_plus_raw/`),
+# this one is a user's bug-report tool — a switch on both device pages, one file per
+# switch-on, and a Home Assistant restart appends to the SAME file rather than starting a
+# new one. See `anthem_plus/report_log.py` for the full semantics.
+#
+# The options key stores the active episode's name — its presence IS the switch state, so
+# an episode survives restarts. It is in `RELOAD_IGNORED_OPTION_KEYS` for the same reason
+# every switch-written key is: toggling a capture must not reload the entry and drop the
+# very MQTT stream being captured.
+CONF_REPORT_LOG_FILE = "report_log_file"
+
+# Inside the integration folder, at the owner's decision (2026-08-22): reports sit with the
+# integration they describe, reachable like any custom_components path. The accepted costs,
+# documented in the README this capture writes beside its files: a HACS update or reinstall
+# replaces the integration folder and deletes any reports still inside, and on the
+# development install the directory is gitignored.
+REPORT_LOG_DIR_NAME = "reports"
+REPORT_LOG_MAX_BYTES = 8 * 1024 * 1024
+
+# ---------------------------------------------------------------------------
 # CUTOFF DEBUG LOG — why the run-time cutoff fired, or didn't
 # ---------------------------------------------------------------------------
 # Full explanation and how to read it against the raw capture: `anthem_plus/cutoff_log.py`.
@@ -469,7 +492,12 @@ CONF_LAST_WARMUP_MODE = "last_warmup_mode"
 # chasing its own tail on the first start after the mode changed while Home Assistant was
 # down.
 RELOAD_IGNORED_OPTION_KEYS = frozenset(
-    {CONF_RESTART_ON_RUNTIME_CUTOFF, CONF_WARMUP_AUTO_RESTORE, CONF_LAST_WARMUP_MODE}
+    {
+        CONF_RESTART_ON_RUNTIME_CUTOFF,
+        CONF_WARMUP_AUTO_RESTORE,
+        CONF_LAST_WARMUP_MODE,
+        CONF_REPORT_LOG_FILE,
+    }
 )
 
 # One minute, as asked for. Long enough that a re-sync burst has finished writing before we

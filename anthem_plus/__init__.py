@@ -49,6 +49,7 @@ from .hub import HubCapabilities, HubDevice, zone_number, zone_outlet_flags
 from .mqtt import AnthemMqttStream, Envelope
 from .cutoff_log import CutoffDebugLog, WARMUP_README
 from .raw_log import RawMqttLog
+from .report_log import ReportLog
 from .runtime_cutoff import ZoneCutoff, ZoneCutoffDetector, ZoneReading
 from .state import GcsPreset, GcsState, HubState, HubZone
 from .warmup import journal_event, restore_target, should_restore_warmup
@@ -128,6 +129,7 @@ __all__ = [
     "CutoffDebugLog",
     "WARMUP_README",
     "RawMqttLog",
+    "ReportLog",
     "ZoneCutoff",
     "ZoneCutoffDetector",
     "ZoneReading",

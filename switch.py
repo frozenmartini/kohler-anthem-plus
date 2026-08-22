@@ -23,6 +23,7 @@ stuck for the round trip (measured 1.1-2.1 s on real hardware).
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any
 
 from homeassistant.components.switch import SwitchEntity
@@ -65,13 +66,18 @@ async def async_setup_entry(
         entities.append(ShowerSwitch(coordinator))
         entities.append(EndlessShowerSwitch(coordinator))
         entities.append(WarmupAutoRestoreSwitch(coordinator))
+        entities.append(ValveReportLogSwitch(coordinator))
         entities.extend(
             ZoneOutletSwitch(coordinator, zone, outlet)
             for zone in model.zones
             for outlet in range(1, model.outlets_in_zone(zone) + 1)
         )
     if coordinator.hub_device is not None:
-        entities += [HubShowerSwitch(coordinator), HubSystemSwitch(coordinator)]
+        entities += [
+            HubShowerSwitch(coordinator),
+            HubSystemSwitch(coordinator),
+            ControllerReportLogSwitch(coordinator),
+        ]
 
     async_add_entities(entities)
 
@@ -585,3 +591,73 @@ class HubSystemSwitch(KohlerControllerEntity, SwitchEntity):
             self._optimistic = None
             self.async_write_ha_state()
             raise
+
+
+class _ReportLogSwitch(SwitchEntity):
+    """Shared half of the Report Log switch — the consumer-side raw MQTT capture.
+
+    **What it is for.** A user who hits a bug — or wants to document a healthy run on
+    hardware this integration has never been verified against — flips this on, uses the
+    shower, flips it off, and attaches the resulting file to a GitHub issue. It is the
+    quick evidence switch, distinct from the development capture in
+    `/config/kohler_anthem_plus_raw/` (pinned by `const.py`, per-run files): this one is
+    **one file per switch-on**, and a Home Assistant restart mid-capture appends to the
+    **same** file rather than starting a new one, because "it breaks when I restart" is a
+    bug report too. Semantics live in `anthem_plus/report_log.py`.
+
+    **One capture, two switches.** The same switch appears on the valve and the controller
+    device pages (whichever exist), mirroring the diagnostics buttons — both toggle the one
+    underlying capture and always show the same state, refreshed together through
+    `async_update_listeners`.
+
+    Files land inside the integration's own folder
+    (`custom_components/kohler_anthem_plus/reports/`) — the owner's choice, so reports sit
+    with the code they describe. Known consequence, also stated in the folder's README: a
+    HACS update or reinstall replaces that folder, so files worth keeping should be moved
+    out before updating.
+    """
+
+    _attr_name = "Report Log"
+    _attr_icon = "mdi:record-rec"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    @property
+    def available(self) -> bool:
+        """A tool, not a reading — usable before any device state has arrived."""
+        return self.coordinator.last_update_success
+
+    @property
+    def is_on(self) -> bool:
+        return self.coordinator.report_log_active
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Where the capture is going, visible without shell access."""
+        log = self.coordinator.report_log
+        path = log.path if log is not None else None
+        return {
+            "file": os.path.basename(path) if path else None,
+            "folder": "custom_components/kohler_anthem_plus/reports",
+        }
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        await self.coordinator.async_start_report_log()
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        await self.coordinator.async_stop_report_log()
+
+
+class ValveReportLogSwitch(_ReportLogSwitch, KohlerValveEntity):
+    """The Report Log switch on the Anthem Valve device page."""
+
+    def __init__(self, coordinator: KohlerAnthemPlusCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{self._device_id}_report_log"
+
+
+class ControllerReportLogSwitch(_ReportLogSwitch, KohlerControllerEntity):
+    """The Report Log switch on the Anthem Plus device page."""
+
+    def __init__(self, coordinator: KohlerAnthemPlusCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{self._device_id}_report_log"

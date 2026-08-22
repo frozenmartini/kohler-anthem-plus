@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 import uuid
 from collections import deque
@@ -55,6 +56,7 @@ from .anthem_plus import (
     CutoffDebugLog,
     WARMUP_README,
     RawMqttLog,
+    ReportLog,
     ZoneCutoff,
     ZoneCutoffDetector,
     ZoneReading,
@@ -103,6 +105,9 @@ from .const import (
     ENABLE_CUTOFF_DEBUG_LOG,
     ENABLE_RAW_MQTT_LOG,
     RAW_MQTT_LOG_DIR,
+    CONF_REPORT_LOG_FILE,
+    REPORT_LOG_DIR_NAME,
+    REPORT_LOG_MAX_BYTES,
     RAW_MQTT_LOG_KEEP_FILES,
     RAW_MQTT_LOG_MAX_BYTES,
     RELOAD_IGNORED_DATA_KEYS,
@@ -305,6 +310,9 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.favorites: list[dict[str, Any]] = []
         self.stream: AnthemMqttStream | None = None
         self.raw_log: RawMqttLog | None = None
+        # REPORT LOG: the consumer-side capture behind the "Report Log" switch — one file
+        # per switch-on, appended across restarts. See `anthem_plus/report_log.py`.
+        self.report_log: ReportLog | None = None
         # One-shot: `async_setup` seeds, then `async_config_entry_first_refresh()` runs
         # milliseconds later and would seed the identical state all over again. See
         # `_async_update_data`.
@@ -421,6 +429,19 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # this creates a directory and opens a file.
         await self.hass.async_add_executor_job(self.raw_log.prepare)
 
+        # REPORT LOG: the consumer capture, in the integration's own folder (owner's
+        # choice — see the const.py section). The options key holds the active episode's
+        # name; its presence here means the switch was on when Home Assistant stopped, so
+        # re-attach to the SAME file — a capture of "it breaks when I restart" must not
+        # lose the interesting part to the restart itself.
+        self.report_log = ReportLog(
+            os.path.join(os.path.dirname(__file__), REPORT_LOG_DIR_NAME),
+            max_bytes=REPORT_LOG_MAX_BYTES,
+        )
+        episode = self.entry.options.get(CONF_REPORT_LOG_FILE)
+        if episode:
+            await self.hass.async_add_executor_job(self.report_log.resume, episode)
+
         # CUTOFF DEBUG LOG: same directory as the raw capture on purpose — the two are read
         # together, joined on `ts`. See `anthem_plus/cutoff_log.py`.
         self.cutoff_log = CutoffDebugLog(
@@ -479,6 +500,7 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             on_auth_error=self._handle_auth_error,
             mobile_device_id=mobile_device_id,
             raw_log=self.raw_log,
+            report_log=self.report_log,
             # Only a brand-new identity can plausibly need provisioning time. A reused one
             # has connected before, so silence from it is real silence.
             expect_warmup=first_registration,
@@ -1693,6 +1715,52 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # value and drops its optimistic guess exactly as it would on a device push.
         self.async_set_updated_data(self._snapshot())
         return self.gcs_state.warmup_mode
+
+    # ------------------------------------------------------------------ #
+    # Report log — the consumer capture behind the "Report Log" switch
+    # ------------------------------------------------------------------ #
+    @property
+    def report_log_active(self) -> bool:
+        """Whether a capture episode is in force.
+
+        Read from the entry options, not from the log object: the options key is what
+        survives a restart, and the switch must show ON after one even in the moments
+        before `async_setup` has re-attached the file.
+        """
+        return bool(self.entry.options.get(CONF_REPORT_LOG_FILE))
+
+    async def async_start_report_log(self) -> None:
+        """Begin a new capture episode — a fresh file, named for this moment.
+
+        Idempotent while an episode is running: turning an already-on switch on again must
+        not split the file. The episode name is persisted to the entry options so a
+        restart resumes the same file; the key is in `RELOAD_IGNORED_OPTION_KEYS`, so this
+        write does not reload the entry and drop the stream being captured.
+        """
+        if self.report_log is None or self.report_log_active:
+            return
+        episode = await self.hass.async_add_executor_job(self.report_log.start)
+        self.hass.config_entries.async_update_entry(
+            self.entry,
+            options={**self.entry.options, CONF_REPORT_LOG_FILE: episode},
+        )
+        # Both devices carry this switch; refresh them together so they never disagree.
+        self.async_update_listeners()
+
+    async def async_stop_report_log(self) -> None:
+        """End the capture episode. The files stay on disk until deleted by hand."""
+        if self.report_log is not None:
+            await self.hass.async_add_executor_job(self.report_log.stop)
+        if CONF_REPORT_LOG_FILE in self.entry.options:
+            self.hass.config_entries.async_update_entry(
+                self.entry,
+                options={
+                    k: v
+                    for k, v in self.entry.options.items()
+                    if k != CONF_REPORT_LOG_FILE
+                },
+            )
+        self.async_update_listeners()
 
     # ------------------------------------------------------------------ #
     # Warmup auto-restore

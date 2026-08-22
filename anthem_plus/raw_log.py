@@ -112,6 +112,33 @@ survive a restart; to keep capture on across restarts, set
 ENABLE_RAW_MQTT_LOG = True in the integration's const.py instead."""
 
 
+def format_record(
+    topic: str, payload: bytes, *, qos: int = 0, retain: bool = False
+) -> str | None:
+    """One capture line: ts/topic/qos/retain plus the payload exactly as it arrived.
+
+    Shared by this capture and by `report_log.py`'s consumer capture, so the two produce
+    byte-compatible records and every tool that reads one reads both. Decoding is the
+    consumer's problem, deliberately: a payload that fails to parse is the most interesting
+    kind, and re-serialising a parsed dict would quietly normalise away key order,
+    duplicates, and numeric formatting. None when the record cannot be serialised.
+    """
+    record: dict[str, Any] = {
+        "ts": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "topic": topic,
+        "qos": qos,
+        "retain": retain,
+    }
+    try:
+        record["payload"] = payload.decode("utf-8")
+    except UnicodeDecodeError:
+        record["payload_b64"] = base64.b64encode(payload).decode("ascii")
+    try:
+        return json.dumps(record, ensure_ascii=False, separators=(",", ":"))
+    except (TypeError, ValueError):  # pragma: no cover - defensive
+        return None
+
+
 class RawMqttLog:
     """Append raw MQTT payloads to rolling JSONL files, when switched on.
 
@@ -188,23 +215,8 @@ class RawMqttLog:
                 self.close()
             return
 
-        record: dict[str, Any] = {
-            "ts": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-            "topic": topic,
-            "qos": qos,
-            "retain": retain,
-        }
-        # Exactly what arrived. Decoding is the consumer's problem, deliberately: a payload
-        # that fails to parse is the most interesting kind, and re-serialising a parsed dict
-        # would quietly normalise away key order, duplicates, and numeric formatting.
-        try:
-            record["payload"] = payload.decode("utf-8")
-        except UnicodeDecodeError:
-            record["payload_b64"] = base64.b64encode(payload).decode("ascii")
-
-        try:
-            line = json.dumps(record, ensure_ascii=False, separators=(",", ":"))
-        except (TypeError, ValueError):  # pragma: no cover - defensive
+        line = format_record(topic, payload, qos=qos, retain=retain)
+        if line is None:  # pragma: no cover - defensive
             return
 
         with self._lock:

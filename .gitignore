@@ -3,6 +3,11 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 
+# Report Log captures — runtime output of the "Report Log" switch, written INSIDE the
+# integration folder by design (owner's decision, see const.py's REPORT LOG section).
+# User data, never repository content.
+reports/
+
 # Editor / workspace files (personal preference, not project content)
 .vscode/
 *.code-workspace

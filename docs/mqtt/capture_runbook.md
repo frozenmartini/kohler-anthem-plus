@@ -16,6 +16,15 @@ Kohler MQTT credentials.
 Every payload paho hands the integration, written before any decoding, so the messages the
 decoder drops are captured too.
 
+> **Two captures exist since 2026-08-22 — this section is the development one.** The
+> **Report Log** switch on the device pages is the *consumer* capture: same record format,
+> same pre-decode tap, but one file per switch-on, appended across restarts, written to
+> `custom_components/kohler_anthem_plus/reports/`. It exists so a user can attach evidence
+> to a GitHub issue without touching `logger.set_level` or `const.py`. Everything below —
+> the logger switch, the pinned constant, `/config/kohler_anthem_plus_raw/`, the per-run
+> files — is the development machine and is unchanged by it
+> (`anthem_plus/report_log.py` has the full design).
+
 **Switch it on with no restart and no file edit** — Developer Tools → Actions →
 `logger.set_level`, switched to YAML mode:
 

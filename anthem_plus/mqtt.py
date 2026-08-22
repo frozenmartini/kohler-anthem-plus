@@ -37,6 +37,7 @@ import paho.mqtt.client as mqtt
 from .auth import AuthError, AuthUnavailable
 from .client import KohlerClient
 from .raw_log import RawMqttLog
+from .report_log import ReportLog
 from .const import (
     MQTT_PORT,
     MQTT_RESPONSE_TOPIC,
@@ -114,6 +115,7 @@ class AnthemMqttStream:
         on_auth_error: Callable[[AuthError], None] | None = None,
         mobile_device_id: str | None = None,
         raw_log: RawMqttLog | None = None,
+        report_log: ReportLog | None = None,
         expect_warmup: bool = True,
         loop: asyncio.AbstractEventLoop | None = None,
         ssl_context: ssl.SSLContext | None = None,
@@ -152,6 +154,10 @@ class AnthemMqttStream:
         # RAW MQTT LOG: None disables capture entirely; the object itself is also a no-op
         # until switched on. See anthem_plus/raw_log.py.
         self._raw_log = raw_log
+        # REPORT LOG: the consumer-side capture, fed at the same pre-decode point so a
+        # user's bug report holds exactly what the development capture would. Independent
+        # switches, independent files — see anthem_plus/report_log.py.
+        self._report_log = report_log
         # Only a *newly registered* identity can plausibly need warm-up; one that has
         # connected before is already provisioned. Cleared for good by the first message —
         # data arriving is proof the channel works, whatever the clock says.
@@ -182,6 +188,10 @@ class AnthemMqttStream:
         # RAW MQTT LOG: release the capture file on unload.
         if self._raw_log is not None:
             self._raw_log.close()
+        # REPORT LOG: release the handle only — `close()` does not end the episode, so a
+        # reload resumes the same file from the persisted name.
+        if self._report_log is not None:
+            self._report_log.close()
 
     @property
     def warming_up(self) -> bool:
@@ -296,6 +306,13 @@ class AnthemMqttStream:
         # payloads that fail to parse are dropped entirely. Those are the ones worth having.
         if self._raw_log is not None:
             self._raw_log.write(
+                message.topic,
+                message.payload,
+                qos=message.qos,
+                retain=message.retain,
+            )
+        if self._report_log is not None:
+            self._report_log.write(
                 message.topic,
                 message.payload,
                 qos=message.qos,
