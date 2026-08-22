@@ -343,6 +343,17 @@ all — the `OFF` reports sit before the water and during the pause). **Never us
 status as the authority for "is water running"** — that is the valve's own `GCS_SOLO_STS`
 outlet bits; the integration's safety guards already read the GCS side.
 
+**And the entities deliberately do nothing further about staleness — closed 2026-08-22,
+owner's decision.** Session 10 flagged that the controller's entities report `available` on
+the state object existing, so 18 hours of silence looks healthy. That stays as designed: this
+is a push-only integration, silence is the *normal* state of an unused shower ("no messages"
+means "no changes", not "no data"), the REST reseed refreshes hub state on every reconnect,
+and the one honest freshness probe — the local ping — was deliberately removed 2026-08-15 as
+the integration's only polling loop, along with its outage counter. An availability timeout
+would mark a healthy-but-quiet system unavailable on every calm day. The controller's **Last
+Update** sensor (`ControllerLastUpdateSensor`) is the freshness surface: it answers "how old
+is this" without pretending to know whether old means broken.
+
 ### 5.2 `…/favorites`
 ```json
 { "deviceId":"gcs-sious0103D", "sku":"HUB", "tenantId":"<oid>",

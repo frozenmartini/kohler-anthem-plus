@@ -83,4 +83,15 @@ class KohlerControllerEntity(CoordinatorEntity[KohlerAnthemPlusCoordinator]):
 
     @property
     def available(self) -> bool:
+        """Available whenever hub state exists — deliberately no freshness test.
+
+        Session 10 flagged that 18 hours of silence looks healthy here; closed 2026-08-22 as
+        designed. This integration is push-only, so silence is the normal state of an unused
+        shower — "no messages" means "no changes", not "no data" — and the REST reseed
+        refreshes hub state on every reconnect. A staleness timeout would mark a
+        healthy-but-quiet system unavailable on every calm day, and the one honest probe (the
+        local ping) was removed 2026-08-15 as the integration's only polling loop. The
+        controller's Last Update sensor is the freshness surface instead. See
+        `docs/hub/cloud_api.md` §5.1.
+        """
         return super().available and self.coordinator.hub_state is not None
