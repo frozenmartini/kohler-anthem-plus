@@ -377,7 +377,18 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
             self.hub_state = HubState(self.model)
 
-        await self._async_seed_state()
+        try:
+            await self._async_seed_state()
+        except AuthUnavailable as err:
+            # Same split as the customer read above. The seed swallows `KohlerError` per
+            # read ("failures for one device do not blank the other"), but the token layer
+            # under every read raises `AuthError`, which is not a `KohlerError` — left bare,
+            # a rejection here escaped `async_setup_entry` as an unhandled exception: no
+            # reauth prompt, no retry, an entry stuck on "Failed to set up". Found 2026-08-21
+            # while proving the startup-read fold; fixed 2026-08-22.
+            raise ConfigEntryNotReady(f"Cannot reach Kohler: {err}") from err
+        except AuthError as err:
+            raise ConfigEntryAuthFailed(str(err)) from err
         # `async_config_entry_first_refresh()` follows immediately in `async_setup_entry` and
         # would repeat every read above for nothing. Claimed here, spent in
         # `_async_update_data`.

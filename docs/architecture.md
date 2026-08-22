@@ -561,6 +561,15 @@ and the stream existing.
 *was* measured is the fold: the first refresh logs
 `Finished fetching kohler_anthem_plus data in 0.000 seconds`.
 
+**Auth failures cannot escape setup.** Both reads `async_setup` awaits — the customer read and
+the seed — map `AuthUnavailable` → `ConfigEntryNotReady` (retry: Kohler was unreachable, the
+credential was not rejected) and every other `AuthError` → `ConfigEntryAuthFailed` (reauth
+prompt). The seed needs its own mapping because its internal handlers catch only `KohlerError`
+per read — deliberately, so one device's failure does not blank the other — while the token
+layer under every read raises `AuthError`, which is not a `KohlerError`. Until 2026-08-22 the
+seed call was bare, and a token rejection there escaped `async_setup_entry` unhandled: no reauth
+prompt, no retry (found 2026-08-21 while proving the startup-read fold).
+
 | Device | Message codes |
 |---|---|
 | GCS | `GCS_SOLO_STS`, `GCS_WARM_STS`, `READ_GCS_EXPERIENCE_STS` |
