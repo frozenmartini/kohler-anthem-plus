@@ -1963,6 +1963,16 @@ the list once the mode moves on.
 `warmupOutlets` on the controller's local API. So the dropdown picks the mode; the selection
 itself is configured on the device.
 
+**And that is the whole intended scope — closed 2026-08-22, owner's decision.** This
+integration deliberately offers no warmup *configuration* for the hub side: hub owners set
+the outlet selection themselves through the controller's local web UI, and the three modes
+the dropdown writes (off / all outlets / selected outlets) are enough surface. The dropdown
+does not exist to manage warmup — it exists because the hub keeps resetting the valve's mode
+to `warmUpDisabled` over its wired link (§3h), and something in Home Assistant has to be able
+to see that and put the mode back. Reading `warmupOutlets` would add nothing to that job, and
+would need the local API and the hub PIN, both ruled out. Carried since session 12 §6 as
+"'selected outlets' not readable from the cloud"; struck as by-design, not a gap.
+
 *Superseded 2026-08-20: this was briefly `switch.anthem_valve_warmup`, and before that the
 read-only `binary_sensor.anthem_valve_warmup_enabled`. Both are gone — a two-state control
 cannot express three modes, and the binary sensor duplicated what the dropdown now shows.*
