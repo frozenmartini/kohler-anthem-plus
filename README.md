@@ -329,15 +329,17 @@ directory (the folder name must be exactly `kohler_anthem_plus`) and restart.
 Temperature and water units are read from your Konnect account, not chosen here — set them in
 the Konnect app and they follow.
 
-### Options
+There is no Configure dialog — every setting that can change after setup is an entity on the
+device page (`Endless Shower`, `Warmup`, `Warmup Auto-Restore`), where automations and
+dashboards can reach it too.
 
-**Settings → Devices & Services → Kohler Anthem Plus → Configure**
+### Diagnostics
 
-| Option | Default | What it does |
-|---|---|---|
-| Restart on run-time cutoff | Off | Powers the `Endless Shower` switch |
-
-Saving options takes effect immediately without reloading the integration.
+Every device page and the integration card have a **Download diagnostics** button. It
+produces one JSON report describing the whole installation — model and outlet split as
+detected, what each device is reporting, configured limits — with credentials, account
+identity, and device serial numbers redacted. If you're on hardware other than a K-28212,
+attaching that file to an issue is the single most useful thing you can send.
 
 ## Automation examples
 
