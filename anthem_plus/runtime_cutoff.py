@@ -564,13 +564,14 @@ class ZoneCutoffDetector:
                 if suspected is not None:
                     _LOGGER.warning(
                         "Zone %s STOPPED (0x00) after %.1f s. That matches no limit the "
-                        "Anthem valve announced, but it is %.2f s past %d minutes — one of "
-                        "the four Max Shower Duration values the Anthem Plus controller "
-                        "offers, and the controller ends a shower exactly like this, a "
-                        "fraction of a second late. Endless Shower cannot restart it: only "
-                        "the valve's cutoff carries the pause flag. Set the controller's Max "
-                        "Shower Duration to the same value as the valve's (%s) so the valve "
-                        "cuts first",
+                        "Anthem valve announced, but it is %.2f s past %d minutes — a whole "
+                        "number of minutes, which is the shape of the Anthem Plus "
+                        "controller's Max Shower Duration (settable to any minute value), "
+                        "and the controller ends a shower exactly like this, a fraction of "
+                        "a second late. Endless Shower cannot restart it: only the valve's "
+                        "cutoff carries the pause flag. Set the controller's Max Shower "
+                        "Duration to the same value as the valve's (%s) so the valve cuts "
+                        "first",
                         zone,
                         duration,
                         duration - suspected,

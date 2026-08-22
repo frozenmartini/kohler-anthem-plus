@@ -354,7 +354,7 @@ RELOAD_IGNORED_DATA_KEYS = frozenset(
 # in an otherwise push-only design, at 1 Hz against the controller.
 #
 # Stale keys may remain in the config entry on installations that ran the old code; they are
-# ignored. `_async_migrate_entry_data` in `__init__.py` strips them on load.
+# ignored. `_async_purge_removed_diagnostics` in `__init__.py` strips them on load.
 # ---------------------------------------------------------------------------
 # Temperature slider bounds (Home Assistant side only)
 # ---------------------------------------------------------------------------

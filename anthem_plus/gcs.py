@@ -148,7 +148,7 @@ class GcsDevice:
         self.device_id = device_id
         self.temperature_unit = temperature_unit
         # The valve model decides how many outlets exist and which valve each sits on.
-        # It cannot be read reliably from the API, so the user picks it at setup.
+        # Detected from the API at setup where possible (topology.py), else user-picked.
         self.model = model if isinstance(model, ValveModel) else get_valve_model(model)
 
     @property

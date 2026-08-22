@@ -5,7 +5,9 @@ Two steps:
 1. ``user``  — email and password. Sign-in runs entirely server-side, so there is no
    browser round trip and nothing to paste back.
 2. ``valve`` — the valve model, which decides how many outlets exist and which valve each
-   one sits on. It cannot be read from the API, and it is required even on a HUB-only
+   one sits on. The split is detected from the API where possible (the valve's
+   ``gcsadvancestate``, else the controller's configuration) and the question is skipped;
+   the dropdown only appears when detection fails. A model is required even on a HUB-only
    account because the HUB's per-zone outlet arrays need the same split.
 
 Only the rotating refresh token is stored, never the password. When the token finally

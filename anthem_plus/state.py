@@ -161,12 +161,13 @@ class OutletLimits:
     outlet_id: int
     minimum_flow_byte: int
     maximum_flow_byte: int
-    # Seconds this outlet may run before the valve closes it on its own — `maximumRunTime`,
-    # 3600 on every outlet of this install. The cutoff is per outlet and timed from when
-    # that outlet opened, which is why total water-on can exceed it: measured runs of 65.6
-    # and 65.3 minutes contained no single outlet open longer than 3599.9 s.
+    # Seconds before the valve closes the water on its own — `maximumRunTime`. Reported
+    # per outlet, but **timed per zone**: the clock starts when the zone begins flowing
+    # and outlet changes within it do not reset it (see `runtime_cutoff.py`, where getting
+    # that wrong is documented in detail). 900 s on the reference install today, 3600 s
+    # before it was reconfigured — every outlet there has always agreed.
     #
-    # None when the valve has not announced this outlet yet. Never assume 3600.
+    # None when this outlet's value has not been learned yet. Never assume one.
     maximum_run_time: int | None = None
     # The outlet's configured starting flow, byte scale, from `defaultFlowRate`.
     #

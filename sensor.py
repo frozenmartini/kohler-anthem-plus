@@ -282,16 +282,19 @@ class ValveHexSensor(ValveDiagnosticSensor):
 
 
 class OutletMaxRunTimeSensor(ValveDiagnosticSensor):
-    """The `maximumRunTime` the valve has announced for one outlet.
+    """The `maximumRunTime` the valve has reported for one outlet.
 
-    **Nothing can ask the valve for this — it only ever announces it unprompted**, one outlet
-    at a time (`coordinator._learn_run_times`). This sensor exists so a shower-time-limit
-    change made on the panel or the app shows up in Home Assistant without waiting for a
-    shower: watch this value after changing the limit, rather than guessing whether it took.
+    Learned two ways: read over REST from `gcsadvancestate` at setup and on every MQTT
+    reconnect (the 2026-08-17 correction — this was long believed unreadable on demand),
+    and absorbed from the valve's unprompted one-outlet-at-a-time MQTT announcements.
+    Both funnel through `coordinator._learn_run_times`. This sensor exists so a
+    shower-time-limit change made on the panel or the app shows up in Home Assistant
+    without waiting for a shower: watch this value after changing the limit, rather than
+    guessing whether it took.
 
-    **Reads `unknown` until the valve has announced this specific outlet at least once** —
-    typically within seconds of Home Assistant starting, but genuinely unknown before that,
-    not zero. It is also the same figure the run-time cutoff feature arms itself from
+    **Reads `unknown` until this specific outlet has been learned at least once** —
+    normally within seconds of Home Assistant starting, via the REST read, but genuinely
+    unknown before that, not zero. It is also the same figure the run-time cutoff feature arms itself from
     (`coordinator.outlet_run_times`), so a value showing up here means that outlet is now
     protected by the cutoff, too.
 

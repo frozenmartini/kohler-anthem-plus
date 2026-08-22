@@ -1,8 +1,9 @@
 """Kohler Anthem hardware models and their outlet topology.
 
-The number of outlets, and **which valve each one lives on**, varies by valve model. This
-cannot be inferred reliably from the API, so the user selects their model at setup and
-everything downstream derives from it.
+The number of outlets, and **which valve each one lives on**, varies by valve model. Setup
+detects the split from the API where it can (``topology.py``: the valve's own settings,
+else the controller's configuration — both verified live) and asks the user only when
+detection fails; either way everything downstream derives from the resulting model.
 
 Getting this wrong is not cosmetic. On a 4-outlet system, outlet 3 is the *first* outlet of
 valve 2 — but on a 6-outlet system, outlet 3 is the *third* outlet of valve 1. Code that

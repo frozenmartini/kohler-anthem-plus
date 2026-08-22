@@ -7,9 +7,10 @@ Supports both products in the Anthem line, and works with either or both on an a
 * **Anthem Plus** (SKU ``HUB``) — the Linux system controller that adds music, lighting,
   and steam. Controlled through favourites.
 
-State is push-based over Azure IoT Hub MQTT, with a slow REST poll as a safety net. All
-protocol handling lives in the bundled ``anthem_plus`` package, which has no Home Assistant
-imports and can be tested offline.
+State is push-only over Azure IoT Hub MQTT — there is no polling interval. REST is read on
+events: once at setup and again on every MQTT (re)connect, because the broker replays
+nothing on connect. All protocol handling lives in the bundled ``anthem_plus`` package,
+which has no Home Assistant imports and can be tested offline.
 """
 
 from __future__ import annotations

@@ -37,7 +37,10 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up temperature and flow numbers for each zone the valve has."""
+    """Set up a temperature number for each zone the valve has.
+
+    No flow number, deliberately — see the module docstring.
+    """
     coordinator: KohlerAnthemPlusCoordinator = hass.data[DOMAIN][entry.entry_id]
     if coordinator.gcs_device is None:
         # The controller offers no live temperature or flow control — only favourites.

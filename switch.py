@@ -136,7 +136,7 @@ class ShowerSwitch(KohlerValveEntity, SwitchEntity):
         await self._async_command(False)
 
     async def _async_command(self, target: bool) -> None:
-        """Start the preset, or pause. Optimistic, like the outlet switches."""
+        """Start the preset, or stop with mask 0x00. Optimistic, like the outlet switches."""
         self._optimistic = target
         self.async_write_ha_state()
         try:
