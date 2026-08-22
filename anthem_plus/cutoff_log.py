@@ -174,8 +174,11 @@ Records
   mode              the mode moved. `before` -> `after`, `ours` (did we write it), and
                     `source`: `mqtt` if the valve announced it, `rest` if a reseed found it
                     already changed. A `rest` one means the move happened while the stream
-                    was down; it carries `restored: false`, because auto-restore does not
-                    act on these.
+                    was down, so it can never carry a `before_window` — but since 2026-08-22
+                    it carries `restoring` and a discovered disable is restored through the
+                    same machinery as an announced one (a hub sign-in during an outage was
+                    the hole). Journals before that date carry `restored: false` here
+                    instead: recorded, deliberately never restored.
   announced         the valve restated a mode it was already in. Carries `mode` and `ours`.
                     No decision attached — 28 of the 43 announcements in the raw corpus are
                     these. ⚠️ **Check `ours` before reading one as the valve volunteering.**

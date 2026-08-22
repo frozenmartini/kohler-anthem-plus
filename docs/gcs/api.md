@@ -1972,7 +1972,12 @@ cannot express three modes, and the binary sensor duplicated what the dropdown n
 A **diagnostic switch, off by default**, that answers the hub's warmup-disable writes (once
 §3e's open question, solved in §3h) by undoing
 them. When the valve announces `warmUpDisabled` over MQTT and this integration did not cause
-it, the mode is set back **60 s later** to the last enabled mode seen on the valve.
+it, the mode is set back **60 s later** to the last enabled mode seen on the valve. Since
+2026-08-22 a disable *discovered* by the reconnect reseed — the mode read back different over
+REST after an MQTT outage — restores through the same machinery: same decision function, same
+delay, and the restore re-checks the live mode before writing, so acting on a read of unknown
+age never writes against current state. A hub sign-in during an outage was the hole this
+closes.
 
 | | |
 |---|---|
@@ -2005,7 +2010,7 @@ on first would miss it, and an *unrestored* disable is the cleaner observation o
 | record | when | what it carries |
 |---|---|---|
 | `baseline` | first line of every file | `mode` as read over REST at setup, plus `auto_restore` and `restores_to` — what the file started from |
-| `mode` | the mode moved | `before`, `after`, `ours`, and `source`: `mqtt` if the valve announced it, `rest` if a reseed found it already changed |
+| `mode` | the mode moved | `before`, `after`, `ours`, and `source`: `mqtt` if the valve announced it, `rest` if a reseed found it already changed — `rest` records also carry `restoring`, the restore decision (since 2026-08-22) |
 | `announced` | the valve restated a mode it was already in | `mode`, `ours`. ⚠️ **A dropdown change lands here, not on `mode`** — the write reads itself back over REST at once, so our state has moved before the valve's ~3.4 s echo. `ours: true` is how you tell those from the valve volunteering |
 | `disabled` | the mode went to `warmUpDisabled` | `ours`, `restoring`, `water_running`, and **`before_window`**: every MQTT message in the preceding 120 s |
 | `context` | 45 s after a disable | **`after_window`** — what followed |
@@ -2019,10 +2024,13 @@ happened"**, and the valve's restatements are missing entirely, including the ~4
 `GCS_WARM_STS`. **28 of the 43 announcements in the raw corpus are restatements**, so on the
 pre-08-21 journals the raw capture is the only complete record of them.
 
-⚠️ **A `mode` record with `source: rest` is not restored.** It means the mode moved while the
-MQTT stream was down and the reseed found it already changed, so there is no `before_window`
-behind it and auto-restore is deliberately not wired to it. Before 2026-08-21 this case was
-not recorded at all — it is the one way a disable can happen and leave no trace in the journal.
+⚠️ **A `mode` record with `source: rest` never carries a `before_window`** — the mode moved
+while the MQTT stream was down, so the wire context of the change happened while there was no
+wire. Three eras for anything already captured: before 2026-08-21 this case was not recorded at
+all (the one way a disable could happen and leave no trace in the journal); from 08-21 to 08-22
+it was recorded with `restored: false` and deliberately not restored; since 2026-08-22 it
+carries `restoring` and a discovered disable restores through the same machinery as an
+announced one (§3f).
 
 **Why both windows.** The four known disables sit inside a burst of configuration re-sync
 traffic, but the most distinctive marker — `SYSTEM_STS: SYSTEM_READY` — landed **7 to 9 s

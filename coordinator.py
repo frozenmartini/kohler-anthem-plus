@@ -1156,31 +1156,46 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
                 was_warmup = self.gcs_state.warmup_mode
                 self.gcs_state.apply_rest_state(payload)
-                if (
-                    was_warmup is not None
-                    and self.gcs_state.warmup_mode != was_warmup
-                ):
+                mode_now = self.gcs_state.warmup_mode
+                if was_warmup is not None and mode_now != was_warmup:
                     # The mode moved while we were not listening. `apply_rest_state` writes
                     # `warmup_mode` straight in, so this never reaches
                     # `_handle_warmup_mode_change` and nothing else would record it — the
                     # one way a disable can happen and leave no trace in the journal at all.
                     #
                     # This reseed runs on every MQTT reconnect, so the gap it covers is a
-                    # change during a stream outage, which is exactly when the valve's own
-                    # announcement is the thing that got lost.
+                    # change during a stream outage — which the hub web UI causes for real:
+                    # any signed-in use of it writes `warmUpDisabled` (api.md §3h), and a
+                    # sign-in while the stream is down lands exactly here.
                     #
-                    # ⚠️ **Records only; auto-restore is deliberately not wired to this.**
-                    # Restoring from a REST read means acting on state of unknown age with
-                    # no `before_window` behind it, and that is a behaviour change, not the
-                    # evidence fix this is. Left open 2026-08-21 — see the session handoff.
+                    # A discovered disable restores through the same machinery as an
+                    # announced one: same decision function, same self-write grace, same
+                    # single-flight guard — and `_async_restore_warmup` waits its delay and
+                    # re-checks the *live* mode before writing, so "the REST read is of
+                    # unknown age" costs nothing by write time. What a discovery still
+                    # cannot have is a `before_window` — the wire context happened while
+                    # there was no wire — so `source: "rest"` stays on the record and the
+                    # `restoring` field says what was decided. Recorded-but-never-restored
+                    # from 2026-08-21 until 2026-08-22 (owner's decision to wire it).
+                    write_age, ours = self._warmup_write_status(mode_now)
+                    restoring = should_restore_warmup(
+                        was_warmup,
+                        mode_now,
+                        enabled=self.warmup_auto_restore,
+                        self_write_mode=self._warmup_self_write_mode,
+                        self_write_age=write_age,
+                        grace_seconds=WARMUP_SELF_WRITE_GRACE_SECONDS,
+                    )
                     self._warmup_journal(
                         "mode",
                         before=was_warmup,
-                        after=self.gcs_state.warmup_mode,
-                        ours=False,
+                        after=mode_now,
+                        ours=ours,
                         source="rest",
-                        restored=False,
+                        restoring=restoring,
                     )
+                    if restoring:
+                        self._schedule_warmup_restore(was_warmup)
                 # The third way to learn a mode, and the one `_remember_warmup_mode`'s
                 # docstring used to miss. MQTT alone forgets a mode set while the stream was
                 # down; our own writes alone forget a mode set from the app or touchscreen;
@@ -1783,6 +1798,41 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 options={**self.entry.options, CONF_LAST_WARMUP_MODE: mode},
             )
 
+    def _warmup_write_status(self, after: str | None) -> tuple[float | None, bool]:
+        """How long ago we last wrote a warmup mode, and whether ``after`` was that write.
+
+        The pair every warmup observation needs, whichever channel it arrived on:
+        ``write_age`` feeds ``should_restore_warmup``'s self-write grace, and ``ours`` is
+        the journal's answer to "did we do this?" — true only when the observed mode matches
+        the mode we wrote and the write is recent enough to be the cause.
+        """
+        write_age = (
+            None
+            if self._warmup_self_write_at is None
+            else time.monotonic() - self._warmup_self_write_at
+        )
+        ours = (
+            self._warmup_self_write_mode == after
+            and write_age is not None
+            and write_age <= WARMUP_SELF_WRITE_GRACE_SECONDS
+        )
+        return write_age, ours
+
+    def _schedule_warmup_restore(self, taken_away: str | None) -> None:
+        """Spawn one restore task, or record why not.
+
+        Shared by both callers — the MQTT announcement path and the reseed discovery path —
+        because two restores in flight would race `async_set_warmup` against itself over a
+        single field, and the journal should say a second trigger arrived rather than let
+        the tasks interleave silently.
+        """
+        if self._warmup_restore_task is not None and not self._warmup_restore_task.done():
+            self._warmup_journal("restore_skipped", reason="a restore is already pending")
+            return
+        self._warmup_restore_task = self.hass.async_create_task(
+            self._async_restore_warmup(taken_away)
+        )
+
     @callback
     def _handle_warmup_mode_change(
         self, before: str | None, after: str | None, *, announced: bool = False
@@ -1803,16 +1853,7 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         # Computed before the branch because **an announcement needs `ours` just as much as a
         # transition does** — see the note on the `announced` record below.
-        write_age = (
-            None
-            if self._warmup_self_write_at is None
-            else time.monotonic() - self._warmup_self_write_at
-        )
-        ours = (
-            self._warmup_self_write_mode == after
-            and write_age is not None
-            and write_age <= WARMUP_SELF_WRITE_GRACE_SECONDS
-        )
+        write_age, ours = self._warmup_write_status(after)
 
         if record == "announced":
             # The valve restating a mode it is already in.
@@ -1877,12 +1918,7 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         if not restoring:
             return
-        if self._warmup_restore_task is not None and not self._warmup_restore_task.done():
-            self._warmup_journal("restore_skipped", reason="a restore is already pending")
-            return
-        self._warmup_restore_task = self.hass.async_create_task(
-            self._async_restore_warmup(before)
-        )
+        self._schedule_warmup_restore(before)
 
     async def _async_restore_warmup(self, taken_away: str | None = None) -> None:
         """Wait out the delay, re-check, and put the mode back.

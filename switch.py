@@ -284,12 +284,14 @@ class WarmupAutoRestoreSwitch(KohlerValveEntity, SwitchEntity):
     reproductions in a day. Nothing reachable from outside the hub's firmware prevents it,
     so putting the mode back is the fix that exists. See `docs/gcs/api.md` §3h.
 
-    **What this does.** When the valve announces `warmUpDisabled` over MQTT, and this
-    integration did not cause it, wait 60 seconds and set the mode back to the last enabled
-    one seen on the valve. That target is remembered in the entry options, so it survives a
-    restart and reinstates what the fixture actually had — never a default, because "all
-    outlets" and "selected outlets" are different fixtures' worth of water. With no remembered
-    mode it does nothing and says so.
+    **What this does.** When warmup goes to `warmUpDisabled` and this integration did not
+    cause it — announced by the valve over MQTT, or discovered by the reconnect reseed after
+    an MQTT outage (a hub sign-in during one causes exactly that; the reseed path acts since
+    2026-08-22) — wait 60 seconds, re-check that it is still disabled, and set the mode back
+    to the last enabled one seen on the valve. That target is remembered in the entry
+    options, so it survives a restart and reinstates what the fixture actually had — never a
+    default, because "all outlets" and "selected outlets" are different fixtures' worth of
+    water. With no remembered mode it does nothing and says so.
 
     ⚠️ **This treats a symptom.** It cannot stop the hub's routine writing the field — that
     is hub firmware — and a restore is a write to Kohler's cloud like any other. It is off by
