@@ -1842,6 +1842,15 @@ as `/platform/api/{version}/commands/gcs/warmup`; the app substitutes `v1`.
 > could be holding one, but nothing establishes what their delay is — the app has no control
 > that sets one, and "delay" appears nowhere in its 3,278 string resources.
 >
+
+> ⚠️ **"All outlets" excludes the tub filler — measured 2026-08-22, owner-confirmed.** A
+> warm-up under `warmUpAllOutletsWithNoStartDelay` opened zone 1 at `0x07` (all three
+> outlets) but zone 2 at `0x03` — and zone 2 outlet 3 is this install's **tub filler**,
+> assigned, not empty. So "all outlets" means "all outlets that make sense to warm through":
+> a warm-up that runs the tub filler would fill the tub. One install, one fixture type
+> excluded so far — whether the exclusion is by the tub-filler outlet *type* specifically or
+> some broader rule is unestablished; a second excluded type would distinguish. Capture:
+> `reports/report_20260822T191054Z.jsonl` (19:11:22Z, the first consumer Report Log episode).
 > ✅ **Settled deliberately, 2026-08-20.** The owner set each mode from the current Konnect
 > app to confirm the names, and `gcs-state` read back
 > `warmUpSelectedOutletsWithNoStartDelay` — the value the decompile called unverified and

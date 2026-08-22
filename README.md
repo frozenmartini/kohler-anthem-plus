@@ -237,6 +237,9 @@ Kohler's pre-heat feature: run water until it reaches temperature, so the shower
 when you step in. The dropdown offers the three modes the app can actually write —
 **Off**, **All outlets**, **Selected outlets**.
 
+> **"All outlets" skips a tub filler** (measured): a warm-up that ran the tub filler would
+> fill the tub, so the valve leaves that outlet closed and warms through the others.
+
 The protocol defines five modes, including two delayed-start variants. Those remain decodable
 because a valve can be holding one, but nothing defines their delay and they are refused as
 write targets. If your valve is holding one, it appears in the dropdown while it is in force
