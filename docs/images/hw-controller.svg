@@ -1,0 +1,12 @@
+<svg width="90" height="42" viewBox="0 0 90 42" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Anthem Plus system controller, seen from above">
+  <g stroke="#8E8799" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="6.5" y="7" width="77" height="28" rx="4.5"/>
+    <path d="M30 15.5 H60"/>
+    <path d="M30 21 H60"/>
+    <path d="M30 26.5 H60"/>
+    <rect x="24" y="35" width="6" height="4" rx="1"/>
+    <rect x="36" y="35" width="6" height="4" rx="1"/>
+    <rect x="48" y="35" width="6" height="4" rx="1"/>
+    <rect x="60" y="35" width="6" height="4" rx="1"/>
+  </g>
+</svg>
