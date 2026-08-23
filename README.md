@@ -34,22 +34,22 @@ both, you get both.
 </tr>
 
 <tr>
-<td align="center"><sub>IN THE KONNECT APP</sub><br><br>
+<td align="center" width="50%"><sub>IN THE KONNECT APP</sub><br><br>
 <img src="docs/images/konnect-anthem.png" width="230" alt="The Konnect app's Anthem screen">
 </td>
-<td align="center"><sub>IN THE KONNECT APP</sub><br><br>
+<td align="center" width="50%"><sub>IN THE KONNECT APP</sub><br><br>
 <img src="docs/images/konnect-anthem-plus.png" width="230" alt="The Konnect app's Anthem Plus screen">
 </td>
 </tr>
 
 <tr>
-<td align="center"><sub>IN HOME ASSISTANT</sub><br><br>
+<td align="center" width="50%"><sub>IN HOME ASSISTANT</sub><br><br>
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/ha-anthem-valve-dark.png">
   <img src="docs/images/ha-anthem-valve-light.png" width="230" alt="The Anthem valve card in Home Assistant">
 </picture>
 </td>
-<td align="center"><sub>IN HOME ASSISTANT</sub><br><br>
+<td align="center" width="50%"><sub>IN HOME ASSISTANT</sub><br><br>
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/ha-anthem-plus-dark.png">
   <img src="docs/images/ha-anthem-plus-light.png" width="230" alt="The Anthem Plus card in Home Assistant">
@@ -58,7 +58,7 @@ both, you get both.
 </tr>
 
 <tr>
-<td valign="top">
+<td valign="top" width="50%">
 <sub>HIGHLIGHTS</sub>
 <ul>
 <li><b>Per-outlet control</b> — every outlet is its own switch, in both zones.</li>
@@ -72,7 +72,7 @@ immediately. No scene to apply, no confirm step.</li>
 <li><b>Warm-up modes</b> — pre-heat before you step in, put back if something disables it.</li>
 </ul>
 </td>
-<td valign="top">
+<td valign="top" width="50%">
 <sub>HIGHLIGHTS</sub>
 <ul>
 <li><b>Per-outlet and temperature sensors</b> — what the controller sees, outlet by outlet.</li>
@@ -85,37 +85,22 @@ The touchscreen makes you stop each of them separately.</li>
 </tr>
 
 <tr>
-<td align="center"><sub>HARDWARE</sub><br><br>
-<table>
-<tr>
-<td align="center"><img src="docs/images/hw-valve.svg" width="56" alt="Digital valve"></td>
-<td align="center">+</td>
-<td align="center"><img src="docs/images/hw-interface.svg" width="90" alt="Anthem interface"></td>
-</tr>
-<tr>
-<td align="center"><sub><b>Digital Valve</b></sub></td>
-<td></td>
-<td align="center"><sub><b>Anthem Interface</b><br>K-28214</sub></td>
-</tr>
-</table>
+<td align="center" width="50%"><sub>HARDWARE</sub><br><br>
+<img src="docs/images/hw-valve.svg" width="56" alt="Digital valve"><br>
+<sub><b>Digital Valve</b></sub><br><br>
++<br><br>
+<img src="docs/images/hw-interface.svg" width="90" alt="Anthem interface"><br>
+<sub><b>Anthem Interface</b><br>K-28214</sub>
 </td>
-<td align="center"><sub>HARDWARE</sub><br><br>
-<table>
-<tr>
-<td align="center"><img src="docs/images/hw-valve.svg" width="56" alt="Digital valve"></td>
-<td align="center">+</td>
-<td align="center"><img src="docs/images/hw-controller.svg" width="82" alt="Anthem Plus system controller"></td>
-<td align="center">+</td>
-<td align="center"><img src="docs/images/hw-interface-plus.svg" width="82" alt="Anthem Plus interface"></td>
-</tr>
-<tr>
-<td align="center"><sub><b>Digital Valve</b></sub></td>
-<td></td>
-<td align="center"><sub><b>System Controller</b><br>K-27756</sub></td>
-<td></td>
-<td align="center"><sub><b>Anthem+ Interface</b><br>K-28214-ASC</sub></td>
-</tr>
-</table>
+<td align="center" width="50%"><sub>HARDWARE</sub><br><br>
+<img src="docs/images/hw-valve.svg" width="56" alt="Digital valve"><br>
+<sub><b>Digital Valve</b></sub><br><br>
++<br><br>
+<img src="docs/images/hw-controller.svg" width="82" alt="Anthem Plus system controller"><br>
+<sub><b>System Controller</b><br>K-27756</sub><br><br>
++<br><br>
+<img src="docs/images/hw-interface-plus.svg" width="82" alt="Anthem Plus interface"><br>
+<sub><b>Anthem+ Interface</b><br>K-28214-ASC</sub>
 </td>
 </tr>
 
@@ -123,26 +108,16 @@ The touchscreen makes you stop each of them separately.</li>
 <td colspan="2" align="center">
 <sub>BOTH AT ONCE — ONE VALVE, TWO INTERFACES</sub>
 <br><br>
-<table>
-<tr>
-<td align="center"><img src="docs/images/hw-valve.svg" width="56" alt="Digital valve"></td>
-<td align="center">+</td>
-<td align="center"><img src="docs/images/hw-interface.svg" width="82" alt="Anthem interface"></td>
-<td align="center">+</td>
-<td align="center"><img src="docs/images/hw-controller.svg" width="82" alt="Anthem Plus system controller"></td>
-<td align="center">+</td>
-<td align="center"><img src="docs/images/hw-interface-plus.svg" width="82" alt="Anthem Plus interface"></td>
-</tr>
-<tr>
-<td align="center"><sub><b>Digital Valve</b></sub></td>
-<td></td>
-<td align="center"><sub><b>Anthem Interface</b><br>K-28214</sub></td>
-<td></td>
-<td align="center"><sub><b>System Controller</b><br>K-27756</sub></td>
-<td></td>
-<td align="center"><sub><b>Anthem+ Interface</b><br>K-28214-ASC</sub></td>
-</tr>
-</table>
+<img src="docs/images/hw-valve.svg" width="52" alt="Digital valve">
+&nbsp;+&nbsp;
+<img src="docs/images/hw-interface.svg" width="78" alt="Anthem interface">
+&nbsp;+&nbsp;
+<img src="docs/images/hw-controller.svg" width="78" alt="Anthem Plus system controller">
+&nbsp;+&nbsp;
+<img src="docs/images/hw-interface-plus.svg" width="78" alt="Anthem Plus interface">
+<br>
+<sub><b>Digital Valve</b> + <b>Anthem Interface</b> + <b>System Controller</b> + <b>Anthem+ Interface</b></sub>
+<br><br>
 A digital valve has <b>two interface ports</b>, so the Anthem interface and the system controller
 can be wired to the same valve at the same time. Home Assistant then shows <b>both cards</b> — the
 valve and the controller — as two devices.
