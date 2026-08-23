@@ -91,7 +91,7 @@ The touchscreen makes you stop each of them separately.</li>
 <sub><b>System Controller</b><br>K-27756</sub><br><br>
 +<br><br>
 <img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-interface-plus.svg" width="82" alt="Anthem Plus interface"><br>
-<sub><b>Anthem+ Interface</b><br>K-28214-ASC</sub>
+<sub><b>Anthem Plus Interface</b><br>K-28214-ASC</sub>
 </td>
 </tr>
 
@@ -99,15 +99,15 @@ The touchscreen makes you stop each of them separately.</li>
 <td colspan="2" align="center">
 <sub>BOTH AT ONCE — ONE VALVE, TWO INTERFACES</sub>
 <br><br>
-<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-valve.svg" width="52" alt="Digital valve">
-+
-<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-interface.svg" width="78" alt="Anthem interface">
-+
-<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-controller.svg" width="78" alt="Anthem Plus system controller">
-+
-<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-interface-plus.svg" width="78" alt="Anthem Plus interface">
+<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-valve.svg" width="46" alt="Digital valve">
+<span>+</span>
+<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-controller.svg" width="68" alt="Anthem Plus system controller">
+<span>+</span>
+<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-interface-plus.svg" width="68" alt="Anthem Plus interface">
+<span>++</span>
+<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-interface.svg" width="68" alt="Anthem interface">
 <br>
-<sub><b>Digital Valve</b> + <b>Anthem Interface</b> + <b>System Controller</b> + <b>Anthem+ Interface</b></sub>
+<sub><b>Anthem Plus System</b> ++ <b>Anthem Interface</b></sub>
 <br><br>
 A digital valve has <b>two interface ports</b>, so the Anthem interface and the system controller
 can be wired to the same valve at the same time. Home Assistant then shows <b>both cards</b> — the
