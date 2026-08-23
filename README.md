@@ -86,21 +86,36 @@ The touchscreen makes you stop each of them separately.</li>
 
 <tr>
 <td align="center"><sub>HARDWARE</sub><br><br>
-<img src="docs/images/hw-valve.svg" width="62" alt="Digital valve">
-&nbsp;+&nbsp;
-<img src="docs/images/hw-interface.svg" width="98" alt="Anthem interface">
-<br>
-<sub><b>Digital Valve</b> &nbsp;+&nbsp; <b>Anthem Interface</b> (K-28214)</sub>
+<table>
+<tr>
+<td align="center"><img src="docs/images/hw-valve.svg" width="56" alt="Digital valve"></td>
+<td align="center">+</td>
+<td align="center"><img src="docs/images/hw-interface.svg" width="90" alt="Anthem interface"></td>
+</tr>
+<tr>
+<td align="center"><sub><b>Digital Valve</b></sub></td>
+<td></td>
+<td align="center"><sub><b>Anthem Interface</b><br>K-28214</sub></td>
+</tr>
+</table>
 </td>
 <td align="center"><sub>HARDWARE</sub><br><br>
-<img src="docs/images/hw-valve.svg" width="52" alt="Digital valve">
-&nbsp;+&nbsp;
-<img src="docs/images/hw-controller.svg" width="82" alt="Anthem Plus system controller">
-&nbsp;+&nbsp;
-<img src="docs/images/hw-interface-plus.svg" width="82" alt="Anthem Plus interface">
-<br>
-<sub><b>Digital Valve</b> &nbsp;+&nbsp; <b>System Controller</b> (K-27756) &nbsp;+&nbsp;
-<b>Anthem+ Interface</b> (K-28214-ASC)</sub>
+<table>
+<tr>
+<td align="center"><img src="docs/images/hw-valve.svg" width="56" alt="Digital valve"></td>
+<td align="center">+</td>
+<td align="center"><img src="docs/images/hw-controller.svg" width="82" alt="Anthem Plus system controller"></td>
+<td align="center">+</td>
+<td align="center"><img src="docs/images/hw-interface-plus.svg" width="82" alt="Anthem Plus interface"></td>
+</tr>
+<tr>
+<td align="center"><sub><b>Digital Valve</b></sub></td>
+<td></td>
+<td align="center"><sub><b>System Controller</b><br>K-27756</sub></td>
+<td></td>
+<td align="center"><sub><b>Anthem+ Interface</b><br>K-28214-ASC</sub></td>
+</tr>
+</table>
 </td>
 </tr>
 
@@ -108,14 +123,26 @@ The touchscreen makes you stop each of them separately.</li>
 <td colspan="2" align="center">
 <sub>BOTH AT ONCE — ONE VALVE, TWO INTERFACES</sub>
 <br><br>
-<img src="docs/images/hw-valve.svg" width="52" alt="Digital valve">
-&nbsp;+&nbsp;
-<img src="docs/images/hw-interface.svg" width="82" alt="Anthem interface">
-&nbsp;+&nbsp;
-<img src="docs/images/hw-controller.svg" width="82" alt="Anthem Plus system controller">
-&nbsp;+&nbsp;
-<img src="docs/images/hw-interface-plus.svg" width="82" alt="Anthem Plus interface">
-<br><br>
+<table>
+<tr>
+<td align="center"><img src="docs/images/hw-valve.svg" width="56" alt="Digital valve"></td>
+<td align="center">+</td>
+<td align="center"><img src="docs/images/hw-interface.svg" width="82" alt="Anthem interface"></td>
+<td align="center">+</td>
+<td align="center"><img src="docs/images/hw-controller.svg" width="82" alt="Anthem Plus system controller"></td>
+<td align="center">+</td>
+<td align="center"><img src="docs/images/hw-interface-plus.svg" width="82" alt="Anthem Plus interface"></td>
+</tr>
+<tr>
+<td align="center"><sub><b>Digital Valve</b></sub></td>
+<td></td>
+<td align="center"><sub><b>Anthem Interface</b><br>K-28214</sub></td>
+<td></td>
+<td align="center"><sub><b>System Controller</b><br>K-27756</sub></td>
+<td></td>
+<td align="center"><sub><b>Anthem+ Interface</b><br>K-28214-ASC</sub></td>
+</tr>
+</table>
 A digital valve has <b>two interface ports</b>, so the Anthem interface and the system controller
 can be wired to the same valve at the same time. Home Assistant then shows <b>both cards</b> — the
 valve and the controller — as two devices.
@@ -150,7 +177,7 @@ that rotates its refresh token on every use.</li>
 <tr>
 <td colspan="2">
 
-<h2 id="what-you-would-actually-do-with-it">What you would actually do with it</h2>
+<h2 id="automation-examples">Automation examples</h2>
 
 <ul>
 <li><b>Start the shower from the wall.</b> Bind it to a scene controller by the door — no phone,
@@ -233,24 +260,27 @@ device page, where automations and dashboards can reach it too.</p>
 <tr>
 <td colspan="2">
 
-<h2 id="supported-valves">Supported valves</h2>
+<h2 id="hardware">What works, and what does not</h2>
 
-<p>A physical Anthem valve is one unit containing up to two zones, each with up to three
-outlets.</p>
+<b>Supported</b>
+<ul>
+<li><b>Kohler Anthem Digital Valve</b> — <code>K-28209</code>, <code>K-28210</code>,
+<code>K-28211</code>, <code>K-28212</code>. One unit containing up to two zones, each with up to
+three outlets. An installation that doesn't match one of the four still works — an unrecognised
+outlet split produces a usable model rather than an error.</li>
+<li><b>Anthem Interface</b> (<code>K-28214</code>) and <b>Anthem+ Interface</b>
+(<code>K-28214-ASC</code>), with the <b>Anthem+ System Controller</b> (<code>K-27756</code>).</li>
+</ul>
 
-<table>
-<tr><th>Model</th><th>Outlets</th><th>Zone 1</th><th>Zone 2</th></tr>
-<tr><td>K-28209</td><td>2</td><td>2</td><td>—</td></tr>
-<tr><td>K-28210</td><td>3</td><td>3</td><td>—</td></tr>
-<tr><td>K-28211</td><td>4</td><td>2</td><td>2</td></tr>
-<tr><td>K-28212</td><td>6</td><td>3</td><td>3</td></tr>
-</table>
-
-<p>An installation that doesn't match one of these four still works — an unrecognised outlet split
-produces a usable model rather than an error.</p>
-
-<p>⚠️ <b>Digital Anthem, not the mechanical Anthem.</b> Kohler sells both under that name. Only
-the digital, network-connected one has an API to talk to.</p>
+<b>Not supported</b>
+<ul>
+<li><b>The older DTV systems.</b> A previous generation of Kohler digital showering, on a
+different protocol entirely. Nothing here applies to them.</li>
+<li><b>Kohler Duo Control.</b> No Wi-Fi and no Konnect connection, so there is nothing for an
+integration to talk to.</li>
+<li>⚠️ <b>The mechanical Anthem.</b> Kohler sells both under that name. Only the digital,
+network-connected one has an API.</li>
+</ul>
 
 </td>
 </tr>
@@ -258,7 +288,7 @@ the digital, network-connected one has an API to talk to.</p>
 <tr>
 <td colspan="2">
 
-<h2 id="reporting">Reporting</h2>
+<h2 id="contributing">Contributing</h2>
 
 <p>Different hardware is the most useful thing anyone can contribute. Two things make a report
 diagnosable:</p>
@@ -285,12 +315,9 @@ used. The reports folder lives inside the integration, so updating or reinstalli
 
 <ul>
 <li><b>Cloud-only.</b> No local control path exists for either product.</li>
-<li><b>No flow entity.</b> The valve honours a flow byte, but the Anthem Plus touchscreen
-overwrites temperature and flow, so a setpoint could not be relied on to stay put.</li>
-<li><b>Music, lighting and steam are read-only.</b> Driving them means activating a favourite that
-includes them.</li>
-<li><b>Warm-up's selected outlets cannot be read</b> from the cloud API — that lives on the
-controller's local API.</li>
+<li><b>No flow control.</b> Both interfaces overwrite the flow limits with their own
+calibration, so a flow setting cannot be held accurately — not by this integration, and not by
+the Konnect app either.</li>
 <li><b>The API is undocumented</b> and Kohler can change it without notice.</li>
 <li><b>One installation tested.</b> A single K-28212 — six outlets, three and three — with a
 controller on firmware 2.88. Other models are supported on what the protocol says, not on anyone
