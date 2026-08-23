@@ -1,8 +1,5 @@
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/images/anthem-system-dark.png">
-    <img src="docs/images/anthem-system-light.png" width="300" alt="A Kohler digital valve feeding a rainhead, a body-spray panel and a handshower">
-  </picture>
+  <img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/anthem-system-light.png" width="300" alt="A Kohler digital valve feeding a rainhead, a body-spray panel and a handshower">
 </p>
 
 <h1 align="center">Kohler Anthem Plus</h1>
@@ -35,25 +32,19 @@ both, you get both.
 
 <tr>
 <td align="center" width="50%"><sub>IN THE KONNECT APP</sub><br><br>
-<img src="docs/images/konnect-anthem.png" width="230" alt="The Konnect app's Anthem screen">
+<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/konnect-anthem.png" width="230" alt="The Konnect app's Anthem screen">
 </td>
 <td align="center" width="50%"><sub>IN THE KONNECT APP</sub><br><br>
-<img src="docs/images/konnect-anthem-plus.png" width="230" alt="The Konnect app's Anthem Plus screen">
+<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/konnect-anthem-plus.png" width="230" alt="The Konnect app's Anthem Plus screen">
 </td>
 </tr>
 
 <tr>
 <td align="center" width="50%"><sub>IN HOME ASSISTANT</sub><br><br>
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/ha-anthem-valve-dark.png">
-  <img src="docs/images/ha-anthem-valve-light.png" width="230" alt="The Anthem valve card in Home Assistant">
-</picture>
+<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/ha-anthem-valve-light.png" width="230" alt="The Anthem valve card in Home Assistant">
 </td>
 <td align="center" width="50%"><sub>IN HOME ASSISTANT</sub><br><br>
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/ha-anthem-plus-dark.png">
-  <img src="docs/images/ha-anthem-plus-light.png" width="230" alt="The Anthem Plus card in Home Assistant">
-</picture>
+<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/ha-anthem-plus-light.png" width="230" alt="The Anthem Plus card in Home Assistant">
 </td>
 </tr>
 
@@ -86,20 +77,20 @@ The touchscreen makes you stop each of them separately.</li>
 
 <tr>
 <td align="center" width="50%"><sub>HARDWARE</sub><br><br>
-<img src="docs/images/hw-valve.svg" width="56" alt="Digital valve"><br>
+<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-valve.svg" width="56" alt="Digital valve"><br>
 <sub><b>Digital Valve</b></sub><br><br>
 +<br><br>
-<img src="docs/images/hw-interface.svg" width="90" alt="Anthem interface"><br>
+<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-interface.svg" width="90" alt="Anthem interface"><br>
 <sub><b>Anthem Interface</b><br>K-28214</sub>
 </td>
 <td align="center" width="50%"><sub>HARDWARE</sub><br><br>
-<img src="docs/images/hw-valve.svg" width="56" alt="Digital valve"><br>
+<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-valve.svg" width="56" alt="Digital valve"><br>
 <sub><b>Digital Valve</b></sub><br><br>
 +<br><br>
-<img src="docs/images/hw-controller.svg" width="82" alt="Anthem Plus system controller"><br>
+<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-controller.svg" width="82" alt="Anthem Plus system controller"><br>
 <sub><b>System Controller</b><br>K-27756</sub><br><br>
 +<br><br>
-<img src="docs/images/hw-interface-plus.svg" width="82" alt="Anthem Plus interface"><br>
+<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-interface-plus.svg" width="82" alt="Anthem Plus interface"><br>
 <sub><b>Anthem+ Interface</b><br>K-28214-ASC</sub>
 </td>
 </tr>
@@ -108,13 +99,13 @@ The touchscreen makes you stop each of them separately.</li>
 <td colspan="2" align="center">
 <sub>BOTH AT ONCE — ONE VALVE, TWO INTERFACES</sub>
 <br><br>
-<img src="docs/images/hw-valve.svg" width="52" alt="Digital valve">
+<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-valve.svg" width="52" alt="Digital valve">
 &nbsp;+&nbsp;
-<img src="docs/images/hw-interface.svg" width="78" alt="Anthem interface">
+<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-interface.svg" width="78" alt="Anthem interface">
 &nbsp;+&nbsp;
-<img src="docs/images/hw-controller.svg" width="78" alt="Anthem Plus system controller">
+<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-controller.svg" width="78" alt="Anthem Plus system controller">
 &nbsp;+&nbsp;
-<img src="docs/images/hw-interface-plus.svg" width="78" alt="Anthem Plus interface">
+<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-interface-plus.svg" width="78" alt="Anthem Plus interface">
 <br>
 <sub><b>Digital Valve</b> + <b>Anthem Interface</b> + <b>System Controller</b> + <b>Anthem+ Interface</b></sub>
 <br><br>
@@ -311,14 +302,14 @@ can run water deserves that caution.</p>
 
 <h2 id="documentation">Documentation</h2>
 
-<p><b><a href="docs/user_guide.md">The full guide</a></b> covers every entity, the
+<p><b><a href="https://github.com/frozenmartini/kohler-anthem-plus/blob/main/docs/user_guide.md">The full guide</a></b> covers every entity, the
 <code>send_valve_hex</code> service, each feature in detail, automation examples and
 troubleshooting.</p>
 
-<p><b><a href="docs/">docs/</a></b> is a complete protocol reference, not just integration notes —
+<p><b><a href="https://github.com/frozenmartini/kohler-anthem-plus/tree/main/docs">docs/</a></b> is a complete protocol reference, not just integration notes —
 the valve command word byte by byte, both REST APIs, the MQTT message catalogue, and case studies
 that work real showers through message by message. Start with
-<a href="docs/architecture.md">docs/architecture.md</a> for the two-device model.</p>
+<a href="https://github.com/frozenmartini/kohler-anthem-plus/blob/main/docs/architecture.md">docs/architecture.md</a> for the two-device model.</p>
 
 </td>
 </tr>
@@ -328,7 +319,7 @@ that work real showers through message by message. Start with
 
 <h2 id="prior-art">Prior art</h2>
 
-<p><a href="docs/prior_art.md">docs/prior_art.md</a> credits the two projects this one started
+<p><a href="https://github.com/frozenmartini/kohler-anthem-plus/blob/main/docs/prior_art.md">docs/prior_art.md</a> credits the two projects this one started
 from — <a href="https://github.com/kenyonj/kohler-konnect-ha">kohler-konnect-ha</a> and
 <a href="https://github.com/yon/kohler-anthem">kohler-anthem</a> — and records where their
 readings differ from what the wire actually does.</p>
@@ -341,7 +332,7 @@ readings differ from what the wire actually does.</p>
 
 <h2 id="licence-and-trademarks">Licence and trademarks</h2>
 
-<p>MIT — see <a href="LICENSE">LICENSE</a>.</p>
+<p>MIT — see <a href="https://github.com/frozenmartini/kohler-anthem-plus/blob/main/LICENSE">LICENSE</a>.</p>
 
 <p>Kohler, Anthem, Anthem+ and Konnect are trademarks of Kohler Co. This project is not affiliated
 with, authorised by, or endorsed by Kohler Co., and is not a supported product.</p>

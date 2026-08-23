@@ -24,13 +24,25 @@ and PRs against it are auto-closed with a pointer to this mechanism.
 Filenames the proxy recognises: `icon.png`, `icon@2x.png`, `logo.png`, `logo@2x.png`,
 and a `dark_` prefixed form of each.
 
-Two consequences worth knowing:
+Three consequences worth knowing:
 
 - **The icons need a Home Assistant Core restart to appear.** They are read at
   integration load, not on a browser refresh.
 - **On Home Assistant older than 2026.3 the folder is simply ignored** and the default
   puzzle-piece icon shows instead. That is a graceful fallback, so `hacs.json` does not
   need its `homeassistant: 2024.2.0` minimum raised on account of these files.
+- **The HACS store still shows a generic icon, and this folder cannot fix it.** Verified
+  2026-08-23 against HACS **2.0.5** (the current release): its bundled frontend builds the
+  store list's icon URL itself as `https://brands.home-assistant.io/_/{domain}/icon.png` —
+  the **CDN**, not the local `/api/brands/...` proxy — so it never looks here. That URL
+  returns HTTP 200 for *any* domain, serving a placeholder that is byte-identical to the one
+  returned for a domain that does not exist, which is why it reads as a missing icon rather
+  than a broken image. `hacs.json` cannot override it — HACS's manifest schema
+  (`HacsManifest` in `hacs/repositories/base.py`) has no icon field. The old route, a PR
+  adding `custom_integrations/kohler_anthem_plus/` to `home-assistant/brands`, is closed off:
+  that folder is marked legacy since HA 2026.3.0 and new `Add custom_integrations/…` PRs are
+  being closed unmerged. So the icon is correct everywhere inside Home Assistant and stays
+  generic in the HACS store until HACS adopts the proxy.
 
 ## The mark
 
