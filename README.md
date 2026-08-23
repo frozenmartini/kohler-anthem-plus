@@ -18,12 +18,10 @@
   <sub>Unofficial. Not affiliated with or endorsed by Kohler.</sub>
 </p>
 
----
-
 <table>
 <tr>
-<th width="50%">Anthem<br><sub>THE VALVE CARD</sub></th>
-<th width="50%">Anthem Plus<br><sub>THE CONTROLLER CARD</sub></th>
+<th width="50%">Anthem<br><sub>THE VALVE CARD</sub><br><img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/accent-anthem.svg" width="140" alt=""></th>
+<th width="50%">Anthem Plus<br><sub>THE CONTROLLER CARD</sub><br><img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/accent-anthem-plus.svg" width="140" alt=""></th>
 </tr>
 
 <tr>
@@ -35,6 +33,8 @@
 </td>
 </tr>
 
+<tr><td width="50%"><hr></td><td width="50%"><hr></td></tr>
+
 <tr>
 <td align="center" width="50%"><sub>IN HOME ASSISTANT</sub><br><br>
 <img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/ha-anthem-valve-dark.png" width="140" alt="The Anthem valve card in Home Assistant">
@@ -44,9 +44,11 @@
 </td>
 </tr>
 
+<tr><td width="50%"><hr></td><td width="50%"><hr></td></tr>
+
 <tr>
 <td valign="top" width="50%">
-<b>HIGHLIGHTS</b>
+<b>HIGHLIGHTS</b><br><img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/accent-anthem.svg" width="140" alt="">
 <ul>
 <li><b>Per-outlet control</b> — every outlet is its own switch, in both zones.</li>
 <li><b>Endless Shower</b> — your shower is no longer capped at <b>60 minutes</b>. The moment the
@@ -56,7 +58,7 @@ immediately. No scene to apply, no confirm step.</li>
 </ul>
 </td>
 <td valign="top" width="50%">
-<b>HIGHLIGHTS</b>
+<b>HIGHLIGHTS</b><br><img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/accent-anthem-plus.svg" width="140" alt="">
 <ul>
 <li><b>Per-outlet and temperature sensors</b> — what the controller sees, outlet by outlet.</li>
 <li><b>Start the default shower</b> — one switch, no scene to pick first.</li>
@@ -67,15 +69,17 @@ The touchscreen makes you stop each of them separately.</li>
 </td>
 </tr>
 
+<tr><td width="50%"><hr></td><td width="50%"><hr></td></tr>
+
 <tr>
-<td align="center" width="50%"><b>HARDWARE</b><br><br>
+<td align="center" width="50%"><b>HARDWARE</b><br><img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/accent-anthem.svg" width="140" alt=""><br><br>
 <img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-valve.svg" width="56" alt="Digital valve"><br>
 <sub><b>Digital Valve</b></sub><br>
 +<br>
 <img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-interface.svg" width="90" alt="Anthem interface"><br>
 <sub><b>Anthem Interface</b><br>K-28214</sub>
 </td>
-<td align="center" width="50%"><b>HARDWARE</b><br><br>
+<td align="center" width="50%"><b>HARDWARE</b><br><img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/accent-anthem-plus.svg" width="140" alt=""><br><br>
 <img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-valve.svg" width="56" alt="Digital valve"><br>
 <sub><b>Digital Valve</b></sub><br>
 +<br>
@@ -87,8 +91,12 @@ The touchscreen makes you stop each of them separately.</li>
 </td>
 </tr>
 
+<tr><td colspan="2"><hr></td></tr>
+
 <tr>
-<td colspan="2" align="center">
+<td colspan="2">
+
+<center><p align="center">
 <b>BOTH AT ONCE — TWO SYSTEMS COMBINED</b>
 <br><br>
 <img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-valve.svg" width="46" align="middle" alt="Digital valve">
@@ -105,11 +113,10 @@ Plug the <b>System Controller</b> into a valve port and add an <b>Anthem Interfa
 into the other, and the Anthem Plus system gains full Anthem shower control alongside everything it
 already does. The two stay in step — start at either panel and the other follows — and Home
 Assistant shows <b>both cards</b>, valve and controller, as two devices working in tandem.
-</td>
-</tr>
+</p></center>
 
-<tr>
-<td colspan="2">
+<hr>
+
 
 <h2 id="real-time-state">MQTT real-time state</h2>
 
@@ -127,11 +134,9 @@ minute late.</li>
 The connection stays open and waits.</li>
 </ul>
 
-</td>
-</tr>
 
-<tr>
-<td colspan="2">
+<hr>
+
 
 <h2 id="automation-examples">Automation examples</h2>
 
@@ -149,11 +154,9 @@ bathroom lights to where you want them.</li>
 arrive.</li>
 </ul>
 
-</td>
-</tr>
 
-<tr>
-<td colspan="2">
+<hr>
+
 
 <h2 id="requirements">Requirements</h2>
 
@@ -166,11 +169,9 @@ unreachable, nothing here can turn the shower on or off.</li>
 
 <p>The only Python dependency is <code>paho-mqtt</code>, installed automatically.</p>
 
-</td>
-</tr>
 
-<tr>
-<td colspan="2">
+<hr>
+
 
 <h2 id="install">Install</h2>
 
@@ -192,11 +193,9 @@ its contents into <code>custom_components/kohler_anthem_plus/</code> in your Hom
 configuration directory (the folder name must be exactly <code>kohler_anthem_plus</code>) and
 restart.</p>
 
-</td>
-</tr>
 
-<tr>
-<td colspan="2">
+<hr>
+
 
 <h2 id="setup">Setup</h2>
 
@@ -211,11 +210,9 @@ uses.</p>
 <p>There is no Configure dialog. Every setting that can change after setup is an entity on the
 device page, where automations and dashboards can reach it too.</p>
 
-</td>
-</tr>
 
-<tr>
-<td colspan="2">
+<hr>
+
 
 <h2 id="hardware">What works, and what does not</h2>
 
@@ -239,11 +236,9 @@ integration to talk to.</li>
 network-connected one has an API.</li>
 </ul>
 
-</td>
-</tr>
 
-<tr>
-<td colspan="2">
+<hr>
+
 
 <h2 id="contributing">Contributing</h2>
 
@@ -262,11 +257,9 @@ one piece of evidence.</li>
 <p><b>Check both before sharing</b> — they carry device identifiers and show when the shower was
 used. The reports folder lives inside the integration, so updating or reinstalling deletes it.</p>
 
-</td>
-</tr>
 
-<tr>
-<td colspan="2">
+<hr>
+
 
 <h2 id="known-limitations">Known limitations</h2>
 
@@ -285,11 +278,9 @@ having run them.</li>
 protocol. It is not a supported product, and it comes with no warranty of any kind. Anything that
 can run water deserves that caution.</p>
 
-</td>
-</tr>
 
-<tr>
-<td colspan="2">
+<hr>
+
 
 <h2 id="documentation">Documentation</h2>
 
@@ -302,11 +293,9 @@ the valve command word byte by byte, both REST APIs, the MQTT message catalogue,
 that work real showers through message by message. Start with
 <a href="https://github.com/frozenmartini/kohler-anthem-plus/blob/main/docs/architecture.md">docs/architecture.md</a> for the two-device model.</p>
 
-</td>
-</tr>
 
-<tr>
-<td colspan="2">
+<hr>
+
 
 <h2 id="prior-art">Prior art</h2>
 
@@ -315,11 +304,9 @@ from — <a href="https://github.com/kenyonj/kohler-konnect-ha">kohler-konnect-h
 <a href="https://github.com/yon/kohler-anthem">kohler-anthem</a> — and records where their
 readings differ from what the wire actually does.</p>
 
-</td>
-</tr>
 
-<tr>
-<td colspan="2">
+<hr>
+
 
 <h2 id="licence-and-trademarks">Licence and trademarks</h2>
 
