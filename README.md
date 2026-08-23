@@ -49,9 +49,8 @@
 <b>HIGHLIGHTS</b>
 <ul>
 <li><b>Per-outlet control</b> — every outlet is its own switch, in both zones.</li>
-<li><b>Endless Shower</b> — your shower is no longer capped at <b>60 minutes</b>, the hardware's
-longest setting. The moment the valve shuts off, it goes back on automatically — same outlets, same
-temperature.</li>
+<li><b>Endless Shower</b> — your shower is no longer capped at <b>60 minutes</b>. The moment the
+valve shuts off, it goes back on automatically — same outlets, same temperature.</li>
 <li><b>Live outlet and temperature</b> — move a setpoint or flip an outlet and the water follows
 immediately. No scene to apply, no confirm step.</li>
 </ul>
@@ -90,7 +89,7 @@ The touchscreen makes you stop each of them separately.</li>
 
 <tr>
 <td colspan="2" align="center">
-<b>BOTH AT ONCE — ONE VALVE, TWO INTERFACES</b>
+<b>BOTH AT ONCE — TWO SYSTEMS COMBINED</b>
 <br><br>
 <img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-valve.svg" width="46" align="middle" alt="Digital valve">
 <span>+</span>
