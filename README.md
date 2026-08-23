@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/anthem-system-light.png" width="300" alt="A Kohler digital valve feeding a rainhead, a body-spray panel and a handshower">
+  <img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/anthem-system-dark.png" width="300" alt="A Kohler digital valve feeding a rainhead, a body-spray panel and a handshower">
 </p>
 
 <h1 align="center">Kohler Anthem Plus</h1>
@@ -32,19 +32,19 @@ both, you get both.
 
 <tr>
 <td align="center" width="50%"><sub>IN THE KONNECT APP</sub><br><br>
-<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/konnect-anthem.png" width="230" alt="The Konnect app's Anthem screen">
+<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/konnect-anthem.png" width="140" alt="The Konnect app's Anthem screen">
 </td>
 <td align="center" width="50%"><sub>IN THE KONNECT APP</sub><br><br>
-<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/konnect-anthem-plus.png" width="230" alt="The Konnect app's Anthem Plus screen">
+<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/konnect-anthem-plus.png" width="140" alt="The Konnect app's Anthem Plus screen">
 </td>
 </tr>
 
 <tr>
 <td align="center" width="50%"><sub>IN HOME ASSISTANT</sub><br><br>
-<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/ha-anthem-valve-light.png" width="230" alt="The Anthem valve card in Home Assistant">
+<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/ha-anthem-valve-dark.png" width="140" alt="The Anthem valve card in Home Assistant">
 </td>
 <td align="center" width="50%"><sub>IN HOME ASSISTANT</sub><br><br>
-<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/ha-anthem-plus-light.png" width="230" alt="The Anthem Plus card in Home Assistant">
+<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/ha-anthem-plus-dark.png" width="140" alt="The Anthem Plus card in Home Assistant">
 </td>
 </tr>
 
@@ -100,11 +100,11 @@ The touchscreen makes you stop each of them separately.</li>
 <sub>BOTH AT ONCE — ONE VALVE, TWO INTERFACES</sub>
 <br><br>
 <img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-valve.svg" width="52" alt="Digital valve">
-&nbsp;+&nbsp;
++
 <img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-interface.svg" width="78" alt="Anthem interface">
-&nbsp;+&nbsp;
++
 <img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-controller.svg" width="78" alt="Anthem Plus system controller">
-&nbsp;+&nbsp;
++
 <img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-interface-plus.svg" width="78" alt="Anthem Plus interface">
 <br>
 <sub><b>Digital Valve</b> + <b>Anthem Interface</b> + <b>System Controller</b> + <b>Anthem+ Interface</b></sub>
@@ -188,7 +188,7 @@ unreachable, nothing here can turn the shower on or off.</li>
 <b>Via HACS</b>
 <ol>
 <li>In HACS, open the ⋮ menu and choose <b>Custom repositories</b></li>
-<li>Add <code>https://github.com/frozenmartini/kohler-anthem-plus</code>, category
+<li>Add <code>frozenmartini/kohler-anthem-plus</code> (or the full GitHub URL), category
 <b>Integration</b></li>
 <li>Find <b>Kohler Anthem Plus</b> in HACS and install it</li>
 <li>Restart Home Assistant</li>
@@ -197,7 +197,7 @@ unreachable, nothing here can turn the shower on or off.</li>
 
 <b>Manually</b>
 <p>This repository <b>is</b> the integration — <code>manifest.json</code> sits at its root. Copy
-its contents into <code>config/custom_components/kohler_anthem_plus/</code> in your Home Assistant
+its contents into <code>custom_components/kohler_anthem_plus/</code> in your Home Assistant
 configuration directory (the folder name must be exactly <code>kohler_anthem_plus</code>) and
 restart.</p>
 
