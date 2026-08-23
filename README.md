@@ -20,10 +20,6 @@
 
 ---
 
-Kohler sells two products under the Anthem name, and an account can have either or both. They
-speak different protocols, so they arrive in Home Assistant as **two devices** — and if you own
-both, you get both.
-
 <table>
 <tr>
 <th width="50%">Anthem<br><sub>THE VALVE CARD</sub></th>
@@ -94,7 +90,7 @@ The touchscreen makes you stop each of them separately.</li>
 
 <tr>
 <td colspan="2" align="center">
-<sub>BOTH AT ONCE — ONE VALVE, TWO INTERFACES</sub>
+<sub><b>BOTH AT ONCE — ONE VALVE, TWO INTERFACES</b></sub>
 <br><br>
 <img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-valve.svg" width="46" align="middle" alt="Digital valve">
 <span>+</span>
@@ -106,27 +102,26 @@ The touchscreen makes you stop each of them separately.</li>
 <br>
 <sub><b>Anthem Plus System</b>&emsp;&emsp;&emsp;++&emsp;&emsp;&emsp;<b>Anthem Interface</b></sub>
 <br><br>
-A digital valve has <b>two interface ports</b>. Put the <b>System Controller</b> in one and an
-<b>Anthem Interface</b> (<code>K-28214</code>) in the other, and an Anthem Plus system gains the
-full Anthem shower alongside everything it already does. The two stay in step — start at either
-panel and the other follows — and Home Assistant shows <b>both cards</b>, valve and controller, as
-two devices working in tandem.
+Plug the <b>System Controller</b> into a valve port and add an <b>Anthem Interface (K-28214)</b>
+into the other, and the Anthem Plus system gains full Anthem shower control alongside everything it
+already does. The two stay in step — start at either panel and the other follows — and Home
+Assistant shows <b>both cards</b>, valve and controller, as two devices working in tandem.
 </td>
 </tr>
 
 <tr>
 <td colspan="2">
 
-<h2 id="real-time-state">Real-time state</h2>
+<h2 id="real-time-state">MQTT real-time state</h2>
 
 <p>Kohler's cloud tells Home Assistant the moment anything changes, and this integration simply
-listens. Nothing here checks the shower on a timer.</p>
+listens. Nothing here needlessly checks the shower's state every 10 seconds.</p>
 
 <ul>
 <li><b>It is live.</b> Open an outlet at the touchscreen, nudge the temperature in the Konnect app,
 or let the shower stop itself — Home Assistant knows as it happens, not on the next check.</li>
 <li><b>Nothing slips past.</b> A shower is full of brief moments: a pause, a shut-off, the restart
-right behind it. Each one arrives, instead of falling between two checks.</li>
+right behind it. Each one arrives instantly, with no changes lost between checking intervals.</li>
 <li><b>Automations fire on the moment.</b> The trigger is the event itself, so nothing runs a
 minute late.</li>
 <li><b>Easy on your network — and on Kohler's.</b> No constant asking, no signing in over and over.
