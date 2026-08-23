@@ -46,18 +46,18 @@
 
 <tr>
 <td valign="top" width="50%">
-<sub>HIGHLIGHTS</sub>
+<b>HIGHLIGHTS</b>
 <ul>
 <li><b>Per-outlet control</b> — every outlet is its own switch, in both zones.</li>
-<li><b>Endless Shower</b> — the hardware will not run a shower past <b>60 minutes</b>, its longest
-allowed setting. This reopens the zone the moment the valve closes it, same outlets, same
+<li><b>Endless Shower</b> — your shower is no longer capped at <b>60 minutes</b>, the hardware's
+longest setting. The moment the valve shuts off, it goes back on automatically — same outlets, same
 temperature.</li>
 <li><b>Live outlet and temperature</b> — move a setpoint or flip an outlet and the water follows
 immediately. No scene to apply, no confirm step.</li>
 </ul>
 </td>
 <td valign="top" width="50%">
-<sub>HIGHLIGHTS</sub>
+<b>HIGHLIGHTS</b>
 <ul>
 <li><b>Per-outlet and temperature sensors</b> — what the controller sees, outlet by outlet.</li>
 <li><b>Start the default shower</b> — one switch, no scene to pick first.</li>
@@ -69,14 +69,14 @@ The touchscreen makes you stop each of them separately.</li>
 </tr>
 
 <tr>
-<td align="center" width="50%"><sub>HARDWARE</sub><br><br>
+<td align="center" width="50%"><b>HARDWARE</b><br><br>
 <img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-valve.svg" width="56" alt="Digital valve"><br>
 <sub><b>Digital Valve</b></sub><br>
 +<br>
 <img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-interface.svg" width="90" alt="Anthem interface"><br>
 <sub><b>Anthem Interface</b><br>K-28214</sub>
 </td>
-<td align="center" width="50%"><sub>HARDWARE</sub><br><br>
+<td align="center" width="50%"><b>HARDWARE</b><br><br>
 <img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-valve.svg" width="56" alt="Digital valve"><br>
 <sub><b>Digital Valve</b></sub><br>
 +<br>
@@ -90,7 +90,7 @@ The touchscreen makes you stop each of them separately.</li>
 
 <tr>
 <td colspan="2" align="center">
-<sub><b>BOTH AT ONCE — ONE VALVE, TWO INTERFACES</b></sub>
+<b>BOTH AT ONCE — ONE VALVE, TWO INTERFACES</b>
 <br><br>
 <img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-valve.svg" width="46" align="middle" alt="Digital valve">
 <span>+</span>
