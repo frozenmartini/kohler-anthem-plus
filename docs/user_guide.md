@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/images/anthem-system-dark.png">
-    <img src="docs/images/anthem-system-light.png" width="300" alt="A Kohler digital valve feeding a rainhead, a body-spray panel and a handshower">
+    <source media="(prefers-color-scheme: dark)" srcset="images/anthem-system-dark.png">
+    <img src="images/anthem-system-light.png" width="300" alt="A Kohler digital valve feeding a rainhead, a body-spray panel and a handshower">
   </picture>
 </p>
 
@@ -19,6 +19,10 @@
 
 <p align="center">
   <sub>Unofficial. Not affiliated with or endorsed by Kohler.</sub>
+</p>
+
+<p align="center">
+  <sub>The full guide. For the short overview, see the <a href="../README.md">README</a>.</sub>
 </p>
 
 ---
@@ -96,8 +100,8 @@ A physical Anthem valve is **one unit containing two zones**, each with up to th
 
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/images/valve-zones-dark.png">
-    <img src="docs/images/valve-zones-light.png" width="480" alt="Two valve modules labelled Zone 1 and Zone 2, each with three ports">
+    <source media="(prefers-color-scheme: dark)" srcset="images/valve-zones-dark.png">
+    <img src="images/valve-zones-light.png" width="480" alt="Two valve modules labelled Zone 1 and Zone 2, each with three ports">
   </picture>
 </p>
 
@@ -129,7 +133,7 @@ until the hardware happened to say something.
 into four bytes. Temperature is a 10-bit value spanning two bytes — `°C = ((byte0 & 0x03) << 8
 | byte1) / 10` — so `0x184` (388) is 38.8 °C, or 101.8 °F. Flow is a single byte from `0x10`
 (16) to `0xC8` (200), where `0xC8` (200) is 100 %. The full breakdown, including the outlet
-mask and the pause bit, is in [`docs/gcs/valve_hex.md`](docs/gcs/valve_hex.md).
+mask and the pause bit, is in [`gcs/valve_hex.md`](gcs/valve_hex.md).
 
 **The controller is not commanded that way.** It only activates named favourites — whole
 scenes configured in the Konnect app, combining outlets, temperature, lighting, music and
@@ -137,16 +141,16 @@ steam. You cannot ask it for "outlet 2 at 39 °C"; that goes to the valve.
 
 **Both are cloud-only.** The controller exposes a local LAN API, but it can read configuration
 and cannot actuate anything. Establishing that cost real debugging time; see
-[`docs/architecture.md`](docs/architecture.md).
+[`architecture.md`](architecture.md).
 
 ## In Home Assistant
 
 Two devices, one per product, each with its own entities.
 
 <p align="center">
-  <img src="docs/images/ha-valve.png" width="45%" alt="The Anthem Valve device page in Home Assistant">
+  <img src="images/ha-valve.png" width="45%" alt="The Anthem Valve device page in Home Assistant">
   &nbsp;&nbsp;
-  <img src="docs/images/ha-controller.png" width="45%" alt="The Anthem Plus device page in Home Assistant">
+  <img src="images/ha-controller.png" width="45%" alt="The Anthem Plus device page in Home Assistant">
 </p>
 
 ## Entities
@@ -257,7 +261,7 @@ identified and documented: **ordinary signed-in use of the Anthem Plus controlle
 UI silently writes the valve's warmup mode to disabled** — a PIN sign-in alone is enough —
 every time, as a fixed part of its login routine. It cannot be prevented from outside the
 hub's firmware, so putting the mode back is the fix that exists. Reproduced live six times in
-one day; the full evidence is in [`docs/gcs/api.md`](docs/gcs/api.md) §3h.
+one day; the full evidence is in [`gcs/api.md`](gcs/api.md) §3h.
 
 When enabled, this switch sets the mode back sixty seconds after a disable this integration
 did not cause — including one discovered only on reconnect, after it happened while the push
@@ -310,7 +314,7 @@ Separately from the Report Log, the integration writes its development evidence 
 Each is capped at 8 MB per file and rolls over rather than pruning. The `Start new MQTT
 capture` button opens a fresh file, which is useful before a deliberate experiment. If you
 report a problem, these are the files that make it diagnosable —
-[`docs/mqtt/capture_runbook.md`](docs/mqtt/capture_runbook.md) explains how to read them.
+[`mqtt/capture_runbook.md`](mqtt/capture_runbook.md) explains how to read them.
 
 ## Requirements
 
@@ -471,7 +475,7 @@ Konnect app.
 ## Tested against
 
 **One installation.** A single K-28212 — 6 outlets, 3 + 3 across two zones — plus an Anthem
-Plus controller on firmware 2.88. Every finding in [`docs/`](docs/) is derived from and
+Plus controller on firmware 2.88. Every finding in [``](./) is derived from and
 verified against that one system.
 
 Other models and configurations are supported on the basis of what the protocol says, not on
@@ -481,19 +485,19 @@ of it.
 
 ## Documentation
 
-[`docs/`](docs/) is a full protocol reference, not just integration notes.
+[``](./) is a full protocol reference, not just integration notes.
 
 | Document | What's in it |
 |---|---|
-| [`docs/README.md`](docs/README.md) | Index, and how to read the rest |
-| [`docs/architecture.md`](docs/architecture.md) | **Start here.** The two-device model, topology, and why most confusion comes from conflating them |
-| [`docs/gcs/valve_hex.md`](docs/gcs/valve_hex.md) | The valve command word, byte by byte |
-| [`docs/gcs/api.md`](docs/gcs/api.md) | The valve's REST API |
-| [`docs/hub/cloud_api.md`](docs/hub/cloud_api.md) | The controller's cloud API |
-| [`docs/hub/local_api.md`](docs/hub/local_api.md) | The controller's local LAN API, and what it can't do |
-| [`docs/hub/lighting.md`](docs/hub/lighting.md) | Lighting and Lumiwave |
-| [`docs/mqtt/capture_runbook.md`](docs/mqtt/capture_runbook.md) | Capturing and reading MQTT traffic |
-| [`docs/case_studies/`](docs/case_studies/) | Real showers, worked through message by message |
+| [`README.md`](README.md) | Index, and how to read the rest |
+| [`architecture.md`](architecture.md) | **Start here.** The two-device model, topology, and why most confusion comes from conflating them |
+| [`gcs/valve_hex.md`](gcs/valve_hex.md) | The valve command word, byte by byte |
+| [`gcs/api.md`](gcs/api.md) | The valve's REST API |
+| [`hub/cloud_api.md`](hub/cloud_api.md) | The controller's cloud API |
+| [`hub/local_api.md`](hub/local_api.md) | The controller's local LAN API, and what it can't do |
+| [`hub/lighting.md`](hub/lighting.md) | Lighting and Lumiwave |
+| [`mqtt/capture_runbook.md`](mqtt/capture_runbook.md) | Capturing and reading MQTT traffic |
+| [`case_studies/`](case_studies/) | Real showers, worked through message by message |
 
 The case studies are where the reasoning lives. They're how the run-time cutoff behaviour,
 the zone interaction bugs and the valve reboot fault were each established, and they show
@@ -501,7 +505,7 @@ their working rather than just stating conclusions.
 
 ## Prior art
 
-[`docs/prior_art.md`](docs/prior_art.md) credits the two projects this one started from —
+[`prior_art.md`](prior_art.md) credits the two projects this one started from —
 [kohler-konnect-ha](https://github.com/kenyonj/kohler-konnect-ha) and
 [kohler-anthem](https://github.com/yon/kohler-anthem) — and records where their readings
 differ from what the wire actually does.
@@ -523,7 +527,7 @@ they contain your device identifiers.
 
 ## Licence and trademarks
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](../LICENSE).
 
 Kohler, Anthem, Anthem+ and Konnect are trademarks of Kohler Co. This project is not
 affiliated with, authorised by, or endorsed by Kohler Co., and is not a supported product.
