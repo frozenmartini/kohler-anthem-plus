@@ -121,147 +121,229 @@ can be wired to the same valve at the same time. Home Assistant then shows <b>bo
 valve and the controller — as two devices.
 </td>
 </tr>
+
+<tr>
+<td colspan="2">
+
+<h2 id="real-time-state">Real-time state</h2>
+
+<p>Kohler's cloud pushes every change over Azure IoT Hub MQTT, and the integration simply listens
+— there is <b>no polling loop at all</b>. REST is read twice: once at setup, and again on every
+reconnect, because the broker replays nothing when you join.</p>
+
+<ul>
+<li><b>Seconds, not intervals.</b> A poller has to choose between stale state and hammering
+someone else's cloud. Push has no interval — a change at the touchscreen, in the Konnect app, or
+by the valve itself is here as it happens.</li>
+<li><b>Every transition, not just the endpoints.</b> Short-lived states slip between polls: a
+pause that resolves after about two minutes, a run-time cutoff and the restore right behind it.
+Push carries each one.</li>
+<li><b>Automations fire on the event.</b> Not on the next scheduled check, and never an interval
+late.</li>
+<li><b>No token churn.</b> Nothing refreshing credentials on a timer against an identity provider
+that rotates its refresh token on every use.</li>
+</ul>
+
+</td>
+</tr>
+
+<tr>
+<td colspan="2">
+
+<h2 id="what-you-would-actually-do-with-it">What you would actually do with it</h2>
+
+<ul>
+<li><b>Start the shower from the wall.</b> Bind it to a scene controller by the door — no phone,
+no touchscreen.</li>
+<li><b>Clear the steam afterwards.</b> Run the exhaust fan for 30 minutes after the water stops,
+then shut it off.</li>
+<li><b>Music on the same switch.</b> One press starts the shower and the playlist together.</li>
+<li><b>One command ends everything.</b> Shower, music, steam and light, in a single action.</li>
+<li><b>Dim the lights when it is ready.</b> The moment the water reaches temperature, drop the
+bathroom lights to where you want them.</li>
+<li><b>Fill the tub on the way home.</b> Fifteen minutes of tub filler, timed to when you actually
+arrive.</li>
+</ul>
+
+</td>
+</tr>
+
+<tr>
+<td colspan="2">
+
+<h2 id="requirements">Requirements</h2>
+
+<ul>
+<li>Home Assistant <b>2024.2</b> or later</li>
+<li>A Kohler Konnect account, with the shower already set up in the Konnect app</li>
+<li><b>Internet access.</b> Control is cloud-only for both products. If Kohler's cloud is
+unreachable, nothing here can turn the shower on or off.</li>
+</ul>
+
+<p>The only Python dependency is <code>paho-mqtt</code>, installed automatically.</p>
+
+</td>
+</tr>
+
+<tr>
+<td colspan="2">
+
+<h2 id="install">Install</h2>
+
+<p>This integration is <b>not in HACS's default store.</b> Add it as a custom repository.</p>
+
+<b>Via HACS</b>
+<ol>
+<li>In HACS, open the ⋮ menu and choose <b>Custom repositories</b></li>
+<li>Add <code>https://github.com/frozenmartini/kohler-anthem-plus</code>, category
+<b>Integration</b></li>
+<li>Find <b>Kohler Anthem Plus</b> in HACS and install it</li>
+<li>Restart Home Assistant</li>
+</ol>
+<p>HACS installs from <b>releases</b>, not from the latest commit.</p>
+
+<b>Manually</b>
+<p>This repository <b>is</b> the integration — <code>manifest.json</code> sits at its root. Copy
+its contents into <code>config/custom_components/kohler_anthem_plus/</code> in your Home Assistant
+configuration directory (the folder name must be exactly <code>kohler_anthem_plus</code>) and
+restart.</p>
+
+</td>
+</tr>
+
+<tr>
+<td colspan="2">
+
+<h2 id="setup">Setup</h2>
+
+<p><b>Settings → Devices &amp; Services → Add Integration → Kohler Anthem Plus</b></p>
+
+<p>Sign in with your Konnect account and you are done. The integration reads the account, works
+out which hardware you have — valve model, how the outlets split across zones, whether a
+controller is in front of it — and builds the matching devices itself. Your password is exchanged
+for a token and never stored, and temperature units follow whatever your Konnect account already
+uses.</p>
+
+<p>There is no Configure dialog. Every setting that can change after setup is an entity on the
+device page, where automations and dashboards can reach it too.</p>
+
+</td>
+</tr>
+
+<tr>
+<td colspan="2">
+
+<h2 id="supported-valves">Supported valves</h2>
+
+<p>A physical Anthem valve is one unit containing up to two zones, each with up to three
+outlets.</p>
+
+<table>
+<tr><th>Model</th><th>Outlets</th><th>Zone 1</th><th>Zone 2</th></tr>
+<tr><td>K-28209</td><td>2</td><td>2</td><td>—</td></tr>
+<tr><td>K-28210</td><td>3</td><td>3</td><td>—</td></tr>
+<tr><td>K-28211</td><td>4</td><td>2</td><td>2</td></tr>
+<tr><td>K-28212</td><td>6</td><td>3</td><td>3</td></tr>
 </table>
 
-## Real-time state
+<p>An installation that doesn't match one of these four still works — an unrecognised outlet split
+produces a usable model rather than an error.</p>
 
-Kohler's cloud pushes every change over Azure IoT Hub MQTT, and the integration simply listens —
-there is **no polling loop at all**. REST is read twice: once at setup, and again on every
-reconnect, because the broker replays nothing when you join.
+<p>⚠️ <b>Digital Anthem, not the mechanical Anthem.</b> Kohler sells both under that name. Only
+the digital, network-connected one has an API to talk to.</p>
 
-* **Seconds, not intervals.** A poller has to choose between stale state and hammering someone
-  else's cloud. Push has no interval — a change at the touchscreen, in the Konnect app, or by the
-  valve itself is here as it happens.
-* **Every transition, not just the endpoints.** Short-lived states slip between polls: a pause that
-  resolves after about two minutes, a run-time cutoff and the restore right behind it. Push carries
-  each one.
-* **Automations fire on the event.** Not on the next scheduled check, and never an interval late.
-* **No token churn.** Nothing refreshing credentials on a timer against an identity provider that
-  rotates its refresh token on every use.
+</td>
+</tr>
 
-## What you would actually do with it
+<tr>
+<td colspan="2">
 
-* **Start the shower from the wall.** Bind it to a scene controller by the door — no phone, no
-  touchscreen.
-* **Clear the steam afterwards.** Run the exhaust fan for 30 minutes after the water stops, then
-  shut it off.
-* **Music on the same switch.** One press starts the shower and the playlist together.
-* **One command ends everything.** Shower, music, steam and light, in a single action.
-* **Dim the lights when it is ready.** The moment the water reaches temperature, drop the bathroom
-  lights to where you want them.
-* **Fill the tub on the way home.** Fifteen minutes of tub filler, timed to when you actually
-  arrive.
+<h2 id="reporting">Reporting</h2>
 
-## Requirements
+<p>Different hardware is the most useful thing anyone can contribute. Two things make a report
+diagnosable:</p>
 
-* Home Assistant **2024.2** or later
-* A Kohler Konnect account, with the shower already set up in the Konnect app
-* **Internet access.** Control is cloud-only for both products. If Kohler's cloud is unreachable,
-  nothing here can turn the shower on or off.
+<ul>
+<li><b>Download diagnostics</b> — on the integration card and both device pages. One JSON report
+of the whole installation, with credentials, account identity and serial numbers redacted. On
+anything other than a K-28212, this is the single most useful file you can send.</li>
+<li><b>Report Log</b> — a switch on both device pages that captures every raw MQTT message, one
+file per switch-on, continuing across a Home Assistant restart so "it breaks when I restart" stays
+one piece of evidence.</li>
+</ul>
 
-The only Python dependency is `paho-mqtt`, installed automatically.
+<p><b>Check both before sharing</b> — they carry device identifiers and show when the shower was
+used. The reports folder lives inside the integration, so updating or reinstalling deletes it.</p>
 
-## Install
+</td>
+</tr>
 
-This integration is **not in HACS's default store.** Add it as a custom repository.
+<tr>
+<td colspan="2">
 
-**Via HACS**
+<h2 id="known-limitations">Known limitations</h2>
 
-1. In HACS, open the ⋮ menu and choose **Custom repositories**
-2. Add `https://github.com/frozenmartini/kohler-anthem-plus`, category **Integration**
-3. Find **Kohler Anthem Plus** in HACS and install it
-4. Restart Home Assistant
+<ul>
+<li><b>Cloud-only.</b> No local control path exists for either product.</li>
+<li><b>No flow entity.</b> The valve honours a flow byte, but the Anthem Plus touchscreen
+overwrites temperature and flow, so a setpoint could not be relied on to stay put.</li>
+<li><b>Music, lighting and steam are read-only.</b> Driving them means activating a favourite that
+includes them.</li>
+<li><b>Warm-up's selected outlets cannot be read</b> from the cloud API — that lives on the
+controller's local API.</li>
+<li><b>The API is undocumented</b> and Kohler can change it without notice.</li>
+<li><b>One installation tested.</b> A single K-28212 — six outlets, three and three — with a
+controller on firmware 2.88. Other models are supported on what the protocol says, not on anyone
+having run them.</li>
+</ul>
 
-HACS installs from **releases**, not from the latest commit.
-
-**Manually**
-
-This repository **is** the integration — `manifest.json` sits at its root. Copy its contents into
-`config/custom_components/kohler_anthem_plus/` in your Home Assistant configuration directory (the
-folder name must be exactly `kohler_anthem_plus`) and restart.
-
-## Setup
-
-**Settings → Devices & Services → Add Integration → Kohler Anthem Plus**
-
-Sign in with your Konnect account and you are done. The integration reads the account, works out
-which hardware you have — valve model, how the outlets split across zones, whether a controller is
-in front of it — and builds the matching devices itself. Your password is exchanged for a token and
-never stored, and temperature units follow whatever your Konnect account already uses.
-
-There is no Configure dialog. Every setting that can change after setup is an entity on the device
-page, where automations and dashboards can reach it too.
-
-## Supported valves
-
-A physical Anthem valve is one unit containing up to two zones, each with up to three outlets.
-
-| Model | Outlets | Zone 1 | Zone 2 |
-|---|---|---|---|
-| K-28209 | 2 | 2 | — |
-| K-28210 | 3 | 3 | — |
-| K-28211 | 4 | 2 | 2 |
-| K-28212 | 6 | 3 | 3 |
-
-An installation that doesn't match one of these four still works — an unrecognised outlet split
-produces a usable model rather than an error.
-
-> ⚠️ **Digital Anthem, not the mechanical Anthem.** Kohler sells both under that name. Only the
-> digital, network-connected one has an API to talk to.
-
-## Reporting
-
-Different hardware is the most useful thing anyone can contribute. Two things make a report
-diagnosable:
-
-* **Download diagnostics** — on the integration card and both device pages. One JSON report of the
-  whole installation, with credentials, account identity and serial numbers redacted. On anything
-  other than a K-28212, this is the single most useful file you can send.
-* **Report Log** — a switch on both device pages that captures every raw MQTT message, one file per
-  switch-on, continuing across a Home Assistant restart so "it breaks when I restart" stays one
-  piece of evidence.
-
-**Check both before sharing** — they carry device identifiers and show when the shower was used.
-The reports folder lives inside the integration, so updating or reinstalling deletes it.
-
-## Known limitations
-
-* **Cloud-only.** No local control path exists for either product.
-* **No flow entity.** The valve honours a flow byte, but the Anthem Plus touchscreen overwrites
-  temperature and flow, so a setpoint could not be relied on to stay put.
-* **Music, lighting and steam are read-only.** Driving them means activating a favourite that
-  includes them.
-* **Warm-up's selected outlets cannot be read** from the cloud API — that lives on the controller's
-  local API.
-* **The API is undocumented** and Kohler can change it without notice.
-* **One installation tested.** A single K-28212 — six outlets, three and three — with a controller
-  on firmware 2.88. Other models are supported on what the protocol says, not on anyone having run
-  them.
-
-This is an unofficial, community-built integration, reverse-engineered from Kohler's cloud
+<p>This is an unofficial, community-built integration, reverse-engineered from Kohler's cloud
 protocol. It is not a supported product, and it comes with no warranty of any kind. Anything that
-can run water deserves that caution.
+can run water deserves that caution.</p>
 
-## Documentation
+</td>
+</tr>
 
-**[The full guide](docs/user_guide.md)** covers every entity, the `send_valve_hex` service, each
-feature in detail, automation examples and troubleshooting.
+<tr>
+<td colspan="2">
 
-**[`docs/`](docs/)** is a complete protocol reference, not just integration notes — the valve
-command word byte by byte, both REST APIs, the MQTT message catalogue, and case studies that work
-real showers through message by message. Start with
-[`docs/architecture.md`](docs/architecture.md) for the two-device model.
+<h2 id="documentation">Documentation</h2>
 
-## Prior art
+<p><b><a href="docs/user_guide.md">The full guide</a></b> covers every entity, the
+<code>send_valve_hex</code> service, each feature in detail, automation examples and
+troubleshooting.</p>
 
-[`docs/prior_art.md`](docs/prior_art.md) credits the two projects this one started from —
-[kohler-konnect-ha](https://github.com/kenyonj/kohler-konnect-ha) and
-[kohler-anthem](https://github.com/yon/kohler-anthem) — and records where their readings differ
-from what the wire actually does.
+<p><b><a href="docs/">docs/</a></b> is a complete protocol reference, not just integration notes —
+the valve command word byte by byte, both REST APIs, the MQTT message catalogue, and case studies
+that work real showers through message by message. Start with
+<a href="docs/architecture.md">docs/architecture.md</a> for the two-device model.</p>
 
-## Licence and trademarks
+</td>
+</tr>
 
-MIT — see [LICENSE](LICENSE).
+<tr>
+<td colspan="2">
 
-Kohler, Anthem, Anthem+ and Konnect are trademarks of Kohler Co. This project is not affiliated
-with, authorised by, or endorsed by Kohler Co., and is not a supported product.
+<h2 id="prior-art">Prior art</h2>
+
+<p><a href="docs/prior_art.md">docs/prior_art.md</a> credits the two projects this one started
+from — <a href="https://github.com/kenyonj/kohler-konnect-ha">kohler-konnect-ha</a> and
+<a href="https://github.com/yon/kohler-anthem">kohler-anthem</a> — and records where their
+readings differ from what the wire actually does.</p>
+
+</td>
+</tr>
+
+<tr>
+<td colspan="2">
+
+<h2 id="licence-and-trademarks">Licence and trademarks</h2>
+
+<p>MIT — see <a href="LICENSE">LICENSE</a>.</p>
+
+<p>Kohler, Anthem, Anthem+ and Konnect are trademarks of Kohler Co. This project is not affiliated
+with, authorised by, or endorsed by Kohler Co., and is not a supported product.</p>
+
+</td>
+</tr>
+</table>
