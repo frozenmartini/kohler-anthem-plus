@@ -53,14 +53,11 @@ both, you get both.
 <sub>HIGHLIGHTS</sub>
 <ul>
 <li><b>Per-outlet control</b> — every outlet is its own switch, in both zones.</li>
-<li><b>Custom outlet service</b> — a service call that sets any outlet, temperature and flow
-combination the dropdowns can't reach.</li>
 <li><b>Endless Shower</b> — the hardware will not run a shower past <b>60 minutes</b>, its longest
 allowed setting. This reopens the zone the moment the valve closes it, same outlets, same
 temperature.</li>
 <li><b>Live outlet and temperature</b> — move a setpoint or flip an outlet and the water follows
 immediately. No scene to apply, no confirm step.</li>
-<li><b>Warm-up modes</b> — pre-heat before you step in, put back if something disables it.</li>
 </ul>
 </td>
 <td valign="top" width="50%">
@@ -109,9 +106,11 @@ The touchscreen makes you stop each of them separately.</li>
 <br>
 <sub><b>Anthem Plus System</b>&emsp;&emsp;&emsp;++&emsp;&emsp;&emsp;<b>Anthem Interface</b></sub>
 <br><br>
-A digital valve has <b>two interface ports</b>, so the Anthem interface and the system controller
-can be wired to the same valve at the same time. Home Assistant then shows <b>both cards</b> — the
-valve and the controller — as two devices.
+A digital valve has <b>two interface ports</b>. Put the <b>System Controller</b> in one and an
+<b>Anthem Interface</b> (<code>K-28214</code>) in the other, and an Anthem Plus system gains the
+full Anthem shower alongside everything it already does. The two stay in step — start at either
+panel and the other follows — and Home Assistant shows <b>both cards</b>, valve and controller, as
+two devices working in tandem.
 </td>
 </tr>
 
@@ -120,21 +119,18 @@ valve and the controller — as two devices.
 
 <h2 id="real-time-state">Real-time state</h2>
 
-<p>Kohler's cloud pushes every change over Azure IoT Hub MQTT, and the integration simply listens
-— there is <b>no polling loop at all</b>. REST is read twice: once at setup, and again on every
-reconnect, because the broker replays nothing when you join.</p>
+<p>Kohler's cloud tells Home Assistant the moment anything changes, and this integration simply
+listens. Nothing here checks the shower on a timer.</p>
 
 <ul>
-<li><b>Seconds, not intervals.</b> A poller has to choose between stale state and hammering
-someone else's cloud. Push has no interval — a change at the touchscreen, in the Konnect app, or
-by the valve itself is here as it happens.</li>
-<li><b>Every transition, not just the endpoints.</b> Short-lived states slip between polls: a
-pause that resolves after about two minutes, a run-time cutoff and the restore right behind it.
-Push carries each one.</li>
-<li><b>Automations fire on the event.</b> Not on the next scheduled check, and never an interval
-late.</li>
-<li><b>No token churn.</b> Nothing refreshing credentials on a timer against an identity provider
-that rotates its refresh token on every use.</li>
+<li><b>It is live.</b> Open an outlet at the touchscreen, nudge the temperature in the Konnect app,
+or let the shower stop itself — Home Assistant knows as it happens, not on the next check.</li>
+<li><b>Nothing slips past.</b> A shower is full of brief moments: a pause, a shut-off, the restart
+right behind it. Each one arrives, instead of falling between two checks.</li>
+<li><b>Automations fire on the moment.</b> The trigger is the event itself, so nothing runs a
+minute late.</li>
+<li><b>Easy on your network — and on Kohler's.</b> No constant asking, no signing in over and over.
+The connection stays open and waits.</li>
 </ul>
 
 </td>
@@ -151,8 +147,9 @@ no touchscreen.</li>
 <li><b>Clear the steam afterwards.</b> Run the exhaust fan for 30 minutes after the water stops,
 then shut it off.</li>
 <li><b>Music on the same switch.</b> One press starts the shower and the playlist together.</li>
-<li><b>One command ends everything.</b> Shower, music, steam and light, in a single action.</li>
-<li><b>Dim the lights when it is ready.</b> The moment the water reaches temperature, drop the
+<li><b>One switch ends everything.</b> No more turning off the shower, then the music, then the
+steam, then the light — one command stops all of it.</li>
+<li><b>Dim the lights when the water is ready.</b> The moment it reaches temperature, drop the
 bathroom lights to where you want them.</li>
 <li><b>Fill the tub on the way home.</b> Fifteen minutes of tub filler, timed to when you actually
 arrive.</li>
