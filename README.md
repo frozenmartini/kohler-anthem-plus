@@ -118,7 +118,7 @@ Assistant shows <b>both cards</b>, valve and controller, as two devices working 
 <hr>
 
 
-<h2 id="real-time-state">MQTT real-time state</h2>
+<h3 id="real-time-state">MQTT real-time state</h3>
 
 <p>Kohler's cloud tells Home Assistant the moment anything changes, and this integration simply
 listens. Nothing here needlessly checks the shower's state every 10 seconds.</p>
@@ -138,7 +138,7 @@ The connection stays open and waits.</li>
 <hr>
 
 
-<h2 id="automation-examples">Automation examples</h2>
+<h3 id="automation-examples">Automation examples</h3>
 
 <ul>
 <li><b>Start the shower from the wall.</b> Bind it to a scene controller by the door — no phone,
@@ -158,7 +158,7 @@ arrive.</li>
 <hr>
 
 
-<h2 id="requirements">Requirements</h2>
+<h3 id="requirements">Requirements</h3>
 
 <ul>
 <li>Home Assistant <b>2024.2</b> or later</li>
@@ -173,7 +173,7 @@ unreachable, nothing here can turn the shower on or off.</li>
 <hr>
 
 
-<h2 id="install">Install</h2>
+<h3 id="install">Install</h3>
 
 <p>This integration is <b>not in HACS's default store.</b> Add it as a custom repository.</p>
 
@@ -197,7 +197,7 @@ restart.</p>
 <hr>
 
 
-<h2 id="setup">Setup</h2>
+<h3 id="setup">Setup</h3>
 
 <p><b>Settings → Devices &amp; Services → Add Integration → Kohler Anthem Plus</b></p>
 
@@ -214,7 +214,7 @@ device page, where automations and dashboards can reach it too.</p>
 <hr>
 
 
-<h2 id="hardware">What works, and what does not</h2>
+<h3 id="hardware">What works, and what does not</h3>
 
 <b>Supported</b>
 <ul>
@@ -240,7 +240,7 @@ network-connected one has an API.</li>
 <hr>
 
 
-<h2 id="contributing">Contributing</h2>
+<h3 id="contributing">Contributing</h3>
 
 <p>Different hardware is the most useful thing anyone can contribute. Two things make a report
 diagnosable:</p>
@@ -261,7 +261,7 @@ used. The reports folder lives inside the integration, so updating or reinstalli
 <hr>
 
 
-<h2 id="known-limitations">Known limitations</h2>
+<h3 id="known-limitations">Known limitations</h3>
 
 <ul>
 <li><b>Cloud-only.</b> No local control path exists for either product.</li>
@@ -282,7 +282,7 @@ can run water deserves that caution.</p>
 <hr>
 
 
-<h2 id="documentation">Documentation</h2>
+<h3 id="documentation">Documentation</h3>
 
 <p><b><a href="https://github.com/frozenmartini/kohler-anthem-plus/blob/main/docs/user_guide.md">The full guide</a></b> covers every entity, the
 <code>send_valve_hex</code> service, each feature in detail, automation examples and
@@ -297,7 +297,7 @@ that work real showers through message by message. Start with
 <hr>
 
 
-<h2 id="prior-art">Prior art</h2>
+<h3 id="prior-art">Prior art</h3>
 
 <p><a href="https://github.com/frozenmartini/kohler-anthem-plus/blob/main/docs/prior_art.md">docs/prior_art.md</a> credits the two projects this one started
 from — <a href="https://github.com/kenyonj/kohler-konnect-ha">kohler-konnect-ha</a> and
@@ -308,13 +308,48 @@ readings differ from what the wire actually does.</p>
 <hr>
 
 
-<h2 id="licence-and-trademarks">Licence and trademarks</h2>
+<h3 id="licence-and-trademarks">Licence and trademarks</h3>
 
 <p>MIT — see <a href="https://github.com/frozenmartini/kohler-anthem-plus/blob/main/LICENSE">LICENSE</a>.</p>
 
 <p>Kohler, Anthem, Anthem+ and Konnect are trademarks of Kohler Co. This project is not affiliated
 with, authorised by, or endorsed by Kohler Co., and is not a supported product.</p>
 
+</td>
+</tr>
+</table>
+
+<hr>
+
+<p align="center"><sub><b>LAYOUT TEST</b> — checking how a floated divider and <code>cellpadding</code> render in the HACS store. Removed in the next release.</sub></p>
+
+<table align="center" cellpadding="6">
+<tr>
+<td colspan="2" align="center">
+<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-valve.svg" width="56" align="middle" alt="Digital valve">&emsp;&emsp;<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/vline-blue.svg" width="2" align="middle" alt="">&emsp;&emsp;<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-interface.svg" width="90" align="middle" alt="Anthem interface">
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top" align="left">
+<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/vline-blue.svg" width="2" align="right" alt="">
+<b>HIGHLIGHTS</b>
+<ul>
+<li><b>Per-outlet control</b> — every outlet is its own switch, in both zones.</li>
+<li><b>Endless Shower</b> — your shower is no longer capped at <b>60 minutes</b>. The moment the
+valve shuts off, it goes back on automatically — same outlets, same temperature.</li>
+<li><b>Live outlet and temperature</b> — move a setpoint or flip an outlet and the water follows
+immediately. No scene to apply, no confirm step.</li>
+</ul>
+</td>
+<td width="50%" valign="top" align="left">
+<b>HIGHLIGHTS</b>
+<ul>
+<li><b>Per-outlet and temperature sensors</b> — what the controller sees, outlet by outlet.</li>
+<li><b>Start the default shower</b> — one switch, no scene to pick first.</li>
+<li><b>Stop everything at once</b> — one switch ends the shower, music, steam and light together.
+The touchscreen makes you stop each of them separately.</li>
+<li><b>Music, steam and light</b> — each reported as its own sensor.</li>
+</ul>
 </td>
 </tr>
 </table>
