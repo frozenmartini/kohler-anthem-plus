@@ -28,7 +28,7 @@
       "invalid_auth": "Kohler rejected that email or password.",
       "cannot_connect": "Could not reach Kohler. Check your internet connection and try again.",
       "signin_blocked": "Kohler needs an extra step to sign in (for example two-factor authentication), which this integration cannot complete.",
-      "no_devices": "That account has no Anthem or Anthem Plus devices. Note that an Anthem Plus touchscreen (K-28214-ACS) only adds the controller — adding the valve itself requires a first-generation Anthem touchscreen (K-28214)."
+      "no_devices": "That account has no Anthem or Anthem Plus devices. Note that an Anthem Plus touchscreen (K-28214-ASC) only adds the controller — adding the valve itself requires a first-generation Anthem touchscreen (K-28214)."
     },
     "abort": {
       "already_configured": "This Kohler account is already set up.",

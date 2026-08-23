@@ -373,10 +373,10 @@ Not documented by Kohler, and it explains why an account shows what it shows:
 | Interface | Plugs into | Adds to Konnect |
 |---|---|---|
 | **K-28214** (first-gen Anthem) | the digital valve directly | the **GCS valve** |
-| **K-28214-ACS** (Anthem Plus) | the **HUB** system controller | the **HUB** only |
+| **K-28214-ASC** (Anthem Plus) | the **HUB** system controller | the **HUB** only |
 
 The Anthem Plus screen offers **no option to add the GCS valve** to the app. So an Anthem
-Plus owner with only the `-ACS` screen sees a HUB on their account and no GCS, even though
+Plus owner with only the `-ASC` screen sees a HUB on their account and no GCS, even though
 a digital valve is physically installed — and therefore cannot use any GCS-only
 integration.
 

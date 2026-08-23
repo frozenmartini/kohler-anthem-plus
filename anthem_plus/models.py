@@ -199,11 +199,11 @@ def resolve_outlet_source(has_gcs: bool, has_hub: bool) -> OutletStateSource | N
 #
 #   K-28214       first-generation Anthem touchscreen. Plugs directly into the digital
 #                 valve. This is the ONLY way to add a GCS valve to the Konnect app.
-#   K-28214-ACS   Anthem Plus touchscreen. Plugs into the HUB system controller, not the
+#   K-28214-ASC   Anthem Plus touchscreen. Plugs into the HUB system controller, not the
 #                 valve. Adds the HUB to the Konnect app — and offers NO option to add the
 #                 GCS valve.
 #
-# So an Anthem Plus owner with only the -ACS screen sees a HUB on their account and no
+# So an Anthem Plus owner with only the -ASC screen sees a HUB on their account and no
 # GCS, even though a digital valve is physically present.
 #
 # A digital valve has TWO interface ports, and although the manual does not say so, a
@@ -211,4 +211,4 @@ def resolve_outlet_source(has_gcs: bool, has_hub: bool) -> OutletStateSource | N
 # interfaces stay consistent because they read state from MQTT and the wired link. That is
 # how an account ends up with both a GCS and a HUB entry for one physical shower.
 TOUCHSCREEN_GCS = "K-28214"
-TOUCHSCREEN_HUB = "K-28214-ACS"
+TOUCHSCREEN_HUB = "K-28214-ASC"
