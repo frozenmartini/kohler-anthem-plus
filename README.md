@@ -175,6 +175,10 @@ unreachable, nothing here can turn the shower on or off.</li>
 <p>This integration is <b>not in HACS's default store.</b> Add it as a custom repository.</p>
 
 <b>Via HACS</b>
+<p><a href="https://my.home-assistant.io/redirect/hacs_repository/?owner=frozenmartini&amp;repository=kohler-anthem-plus&amp;category=integration"><img src="https://my.home-assistant.io/badges/hacs_repository.svg" alt="Open this repository in HACS on your Home Assistant"></a></p>
+<p>That button opens this repository in HACS on your own instance, adds it as a custom repository
+and offers the download. It needs <a href="https://my.home-assistant.io/">My Home Assistant</a>
+set up in your browser. Otherwise, add it by hand:</p>
 <ol>
 <li>In HACS, open the ⋮ menu and choose <b>Custom repositories</b></li>
 <li>Add <code>frozenmartini/kohler-anthem-plus</code> (or the full GitHub URL), category
