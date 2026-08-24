@@ -20,9 +20,9 @@
 
 <table cellpadding="6">
 <tr>
-<th width="49%">Anthem<br><sub>THE VALVE CARD</sub><br><img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/accent-anthem.svg" width="300" alt=""></th>
+<th width="49%"><h3>Anthem</h3><sub>THE VALVE CARD</sub></th>
 <th></th>
-<th width="49%">Anthem Plus<br><sub>THE CONTROLLER CARD</sub><br><img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/accent-anthem-plus.svg" width="300" alt=""></th>
+<th width="49%"><h3>Anthem Plus</h3><sub>THE CONTROLLER CARD</sub></th>
 </tr>
 
 <tr>
@@ -47,7 +47,7 @@
 
 <tr>
 <td valign="top" width="49%">
-<b>HIGHLIGHTS</b><br><img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/accent-anthem.svg" width="300" alt=""><br><br>
+<b>HIGHLIGHTS</b><br><br>
 <b>Per-outlet control</b> — every outlet is its own switch, in both zones.
 <br><br>
 <b>Endless Shower</b> — your shower is no longer capped at <b>60 minutes</b>. The moment the valve
@@ -58,7 +58,7 @@ immediately. No scene to apply, no confirm step.
 </td>
 <td width="2%" align="center"><img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/vline-grey-340.svg" width="1" height="340" alt=""></td>
 <td valign="top" width="49%">
-<b>HIGHLIGHTS</b><br><img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/accent-anthem-plus.svg" width="300" alt=""><br><br>
+<b>HIGHLIGHTS</b><br><br>
 <b>Per-outlet and temperature sensors</b> — what the controller sees, outlet by outlet.
 <br><br>
 <b>Start the default shower</b> — one switch, no scene to pick first.
@@ -71,7 +71,7 @@ touchscreen makes you stop each of them separately.
 </tr>
 
 <tr>
-<td align="center" width="49%"><b>HARDWARE</b><br><img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/accent-anthem.svg" width="300" alt=""><br><br>
+<td align="center" width="49%"><b>HARDWARE</b><br><br>
 <img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-valve.svg" width="84" alt="Digital valve"><br>
 <sub><b>Digital Valve</b></sub><br>
 +<br>
@@ -79,7 +79,7 @@ touchscreen makes you stop each of them separately.
 <sub><b>Anthem Interface</b><br>K-28214</sub>
 </td>
 <td width="2%" align="center"><img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/vline-grey-324.svg" width="1" height="324" alt=""></td>
-<td align="center" width="49%"><b>HARDWARE</b><br><img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/accent-anthem-plus.svg" width="300" alt=""><br><br>
+<td align="center" width="49%"><b>HARDWARE</b><br><br>
 <img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-valve.svg" width="84" alt="Digital valve"><br>
 <sub><b>Digital Valve</b></sub><br>
 +<br>
@@ -90,18 +90,17 @@ touchscreen makes you stop each of them separately.
 <sub><b>Anthem Plus Interface</b><br>K-28214-ASC</sub>
 </td>
 </tr>
-
-<tr><td colspan="3"><hr></td></tr>
-
 <tr>
 <td colspan="3">
+
+<hr>
 
 <center><p align="center">
 <b>BOTH AT ONCE, 2 SYSTEMS COMBINED</b>
 <br><br>
 <img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-combo.svg" width="483" alt="Anthem Plus interface plus system controller plus Anthem interface">
 <br>
-<sub><b>Anthem Plus System</b>&emsp;+&emsp;<b>Anthem Interface</b></sub>
+<b>Anthem Plus System</b>&emsp;+&emsp;<b>Anthem Interface</b>
 <br><br>
 Plug the <b>System Controller</b> into a valve port and add an <b>Anthem Interface (K-28214)</b>
 into the other, and the Anthem Plus system gains full Anthem shower control alongside everything it
@@ -110,6 +109,12 @@ Assistant shows <b>both cards</b>, valve and controller, as two devices working 
 </p></center>
 
 <hr>
+
+</td>
+</tr>
+
+<tr>
+<td colspan="3">
 
 <h3 id="real-time-state">MQTT real-time state</h3>
 
