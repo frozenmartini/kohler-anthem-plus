@@ -20,33 +20,33 @@
 
 <table cellpadding="6">
 <tr>
-<th width="46%">Anthem<br><sub>THE VALVE CARD</sub><br><img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/accent-anthem.svg" width="300" alt=""></th>
+<th width="49%">Anthem<br><sub>THE VALVE CARD</sub><br><img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/accent-anthem.svg" width="300" alt=""></th>
 <th></th>
-<th width="46%">Anthem Plus<br><sub>THE CONTROLLER CARD</sub><br><img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/accent-anthem-plus.svg" width="300" alt=""></th>
+<th width="49%">Anthem Plus<br><sub>THE CONTROLLER CARD</sub><br><img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/accent-anthem-plus.svg" width="300" alt=""></th>
 </tr>
 
 <tr>
-<td align="center" width="46%"><sub>IN THE KONNECT APP</sub><br><br>
+<td align="center" width="49%"><sub>IN THE KONNECT APP</sub><br><br>
 <img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/konnect-anthem.png" width="300" alt="The Konnect app's Anthem screen">
 </td>
-<td width="8%" align="center"><img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/vline-grey-300.svg" width="1" height="300" alt=""></td>
-<td align="center" width="46%"><sub>IN THE KONNECT APP</sub><br><br>
+<td width="2%"></td>
+<td align="center" width="49%"><sub>IN THE KONNECT APP</sub><br><br>
 <img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/konnect-anthem-plus.png" width="300" alt="The Konnect app's Anthem Plus screen">
 </td>
 </tr>
 
 <tr>
-<td align="center" width="46%"><sub>IN HOME ASSISTANT</sub><br><br>
+<td align="center" width="49%"><sub>IN HOME ASSISTANT</sub><br><br>
 <img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/ha-anthem-valve-dark.png" width="300" alt="The Anthem valve card in Home Assistant">
 </td>
-<td width="8%" align="center"><img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/vline-grey-280.svg" width="1" height="280" alt=""></td>
-<td align="center" width="46%"><sub>IN HOME ASSISTANT</sub><br><br>
+<td width="2%"></td>
+<td align="center" width="49%"><sub>IN HOME ASSISTANT</sub><br><br>
 <img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/ha-anthem-plus-dark.png" width="300" alt="The Anthem Plus card in Home Assistant">
 </td>
 </tr>
 
 <tr>
-<td valign="top" width="46%">
+<td valign="top" width="49%">
 <b>HIGHLIGHTS</b><br><img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/accent-anthem.svg" width="300" alt=""><br><br>
 <b>Per-outlet control</b> — every outlet is its own switch, in both zones.
 <br><br>
@@ -56,8 +56,8 @@ shuts off, it goes back on automatically — same outlets, same temperature.
 <b>Live outlet and temperature</b> — move a setpoint or flip an outlet and the water follows
 immediately. No scene to apply, no confirm step.
 </td>
-<td width="8%" align="center"><img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/vline-grey-340.svg" width="1" height="340" alt=""></td>
-<td valign="top" width="46%">
+<td width="2%" align="center"><img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/vline-grey-340.svg" width="1" height="340" alt=""></td>
+<td valign="top" width="49%">
 <b>HIGHLIGHTS</b><br><img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/accent-anthem-plus.svg" width="300" alt=""><br><br>
 <b>Per-outlet and temperature sensors</b> — what the controller sees, outlet by outlet.
 <br><br>
@@ -71,15 +71,15 @@ touchscreen makes you stop each of them separately.
 </tr>
 
 <tr>
-<td align="center" width="46%"><b>HARDWARE</b><br><img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/accent-anthem.svg" width="300" alt=""><br><br>
+<td align="center" width="49%"><b>HARDWARE</b><br><img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/accent-anthem.svg" width="300" alt=""><br><br>
 <img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-valve.svg" width="56" alt="Digital valve"><br>
 <sub><b>Digital Valve</b></sub><br>
 +<br>
 <img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-interface.svg" width="90" alt="Anthem interface"><br>
 <sub><b>Anthem Interface</b><br>K-28214</sub>
 </td>
-<td width="8%" align="center"><img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/vline-grey-324.svg" width="1" height="324" alt=""></td>
-<td align="center" width="46%"><b>HARDWARE</b><br><img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/accent-anthem-plus.svg" width="300" alt=""><br><br>
+<td width="2%" align="center"><img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/vline-grey-324.svg" width="1" height="324" alt=""></td>
+<td align="center" width="49%"><b>HARDWARE</b><br><img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/accent-anthem-plus.svg" width="300" alt=""><br><br>
 <img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-valve.svg" width="56" alt="Digital valve"><br>
 <sub><b>Digital Valve</b></sub><br>
 +<br>
@@ -99,13 +99,13 @@ touchscreen makes you stop each of them separately.
 <center><p align="center">
 <b>BOTH AT ONCE — TWO SYSTEMS COMBINED</b>
 <br><br>
-<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-valve.svg" width="46" align="middle" alt="Digital valve">
+<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-valve.svg" width="56" align="middle" alt="Digital valve">
 <span>+</span>
-<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-controller.svg" width="68" align="middle" alt="Anthem Plus system controller">
+<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-controller.svg" width="82" align="middle" alt="Anthem Plus system controller">
 <span>+</span>
-<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-interface-plus.svg" width="68" align="middle" alt="Anthem Plus interface">
+<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-interface-plus.svg" width="82" align="middle" alt="Anthem Plus interface">
 <span>++</span>
-<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-interface.svg" width="68" align="middle" alt="Anthem interface">
+<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-interface.svg" width="90" align="middle" alt="Anthem interface">
 <br>
 <sub><b>Anthem Plus System</b>&emsp;&emsp;&emsp;++&emsp;&emsp;&emsp;<b>Anthem Interface</b></sub>
 <br><br>
