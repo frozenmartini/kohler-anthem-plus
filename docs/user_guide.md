@@ -1,8 +1,5 @@
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="images/anthem-system-dark.png">
-    <img src="images/anthem-system-light.png" width="300" alt="A Kohler digital valve feeding a rainhead, a body-spray panel and a handshower">
-  </picture>
+  <img src="images/banner-mark.svg" width="150" alt="Kohler Anthem Plus">
 </p>
 
 <h1 align="center">Kohler Anthem Plus</h1>
