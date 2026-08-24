@@ -93,14 +93,7 @@ assuming there is one device when there are two.
 | Granularity | Any outlet, any temperature, any time | Whole scenes only |
 | In the code and docs | `GCS` | `HUB` |
 
-A physical Anthem valve is **one unit containing two zones**, each with up to three outlets:
-
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="images/valve-zones-dark.png">
-    <img src="images/valve-zones-light.png" width="480" alt="Two valve modules labelled Zone 1 and Zone 2, each with three ports">
-  </picture>
-</p>
+A physical Anthem valve is **one unit containing two zones**, each with up to three outlets.
 
 Four valve models exist, and the integration knows the outlet split for each:
 
@@ -143,12 +136,6 @@ and cannot actuate anything. Establishing that cost real debugging time; see
 ## In Home Assistant
 
 Two devices, one per product, each with its own entities.
-
-<p align="center">
-  <img src="images/ha-valve.png" width="45%" alt="The Anthem Valve device page in Home Assistant">
-  &nbsp;&nbsp;
-  <img src="images/ha-controller.png" width="45%" alt="The Anthem Plus device page in Home Assistant">
-</p>
 
 ## Entities
 
