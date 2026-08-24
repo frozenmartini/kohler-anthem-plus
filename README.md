@@ -72,21 +72,21 @@ touchscreen makes you stop each of them separately.
 
 <tr>
 <td align="center" width="49%"><b>HARDWARE</b><br><img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/accent-anthem.svg" width="300" alt=""><br><br>
-<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-valve.svg" width="56" alt="Digital valve"><br>
+<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-valve.svg" width="84" alt="Digital valve"><br>
 <sub><b>Digital Valve</b></sub><br>
 +<br>
-<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-interface.svg" width="90" alt="Anthem interface"><br>
+<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-interface.svg" width="135" alt="Anthem interface"><br>
 <sub><b>Anthem Interface</b><br>K-28214</sub>
 </td>
 <td width="2%" align="center"><img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/vline-grey-324.svg" width="1" height="324" alt=""></td>
 <td align="center" width="49%"><b>HARDWARE</b><br><img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/accent-anthem-plus.svg" width="300" alt=""><br><br>
-<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-valve.svg" width="56" alt="Digital valve"><br>
+<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-valve.svg" width="84" alt="Digital valve"><br>
 <sub><b>Digital Valve</b></sub><br>
 +<br>
-<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-controller.svg" width="82" alt="Anthem Plus system controller"><br>
+<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-controller.svg" width="123" alt="Anthem Plus system controller"><br>
 <sub><b>System Controller</b><br>K-27756</sub><br>
 +<br>
-<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-interface-plus.svg" width="82" alt="Anthem Plus interface"><br>
+<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-interface-plus.svg" width="123" alt="Anthem Plus interface"><br>
 <sub><b>Anthem Plus Interface</b><br>K-28214-ASC</sub>
 </td>
 </tr>
@@ -99,13 +99,13 @@ touchscreen makes you stop each of them separately.
 <center><p align="center">
 <b>BOTH AT ONCE — TWO SYSTEMS COMBINED</b>
 <br><br>
-<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-valve.svg" width="56" align="middle" alt="Digital valve">
+<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-valve.svg" width="84" align="middle" alt="Digital valve">
 <span>+</span>
-<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-controller.svg" width="82" align="middle" alt="Anthem Plus system controller">
+<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-controller.svg" width="123" align="middle" alt="Anthem Plus system controller">
 <span>+</span>
-<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-interface-plus.svg" width="82" align="middle" alt="Anthem Plus interface">
+<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-interface-plus.svg" width="123" align="middle" alt="Anthem Plus interface">
 <span>++</span>
-<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-interface.svg" width="90" align="middle" alt="Anthem interface">
+<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-interface.svg" width="135" align="middle" alt="Anthem interface">
 <br>
 <sub><b>Anthem Plus System</b>&emsp;&emsp;&emsp;++&emsp;&emsp;&emsp;<b>Anthem Interface</b></sub>
 <br><br>
