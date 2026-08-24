@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="316" height="316" viewBox="-0.5 -22 79 79" fill="none" role="img" aria-label="Kohler Anthem Plus">
+  <!-- The v27 mark without its knock-out mask. The masked original (brand/src/icon-v27.svg)
+       cuts the bar outline and dial ring clean through the tile so the page shows through
+       them; a mask forces the renderer to rasterise, which pixelates when the 79x79 canvas
+       is scaled up. Here the same lines are painted white instead — fixed rather than
+       theme-adaptive, but pure vector and crisp at any size. Paint order matters: the dial
+       goes on last so it covers the bar's stroke where they meet, which is what the mask's
+       white-ellipse trick achieved. -->
+  <rect x="-0.5" y="-22" width="79" height="79" rx="16" fill="#A35CD6"/>
+  <g transform="translate(5.6265306,-5.0714286) scale(1.2897959)" stroke="#FFFFFF" stroke-width="3.5">
+    <rect x="0.5" y="6.3" width="57.75" height="22.4" rx="4.53579" fill="#9253DB"/>
+    <ellipse cx="22.25" cy="17.5" rx="15.75" ry="15.3" fill="#6A3DE8"/>
+  </g>
+</svg>

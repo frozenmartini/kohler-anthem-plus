@@ -1,7 +1,7 @@
 <center>
 
 <p align="center">
-<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/banner-anthem.svg" width="100%" alt="Anthem panel illustration">
+<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/banner-mark.svg" width="150" alt="Kohler Anthem Plus">
 </p>
 
 <h1 align="center">Kohler Anthem Plus</h1>
