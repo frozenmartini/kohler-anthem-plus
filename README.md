@@ -97,17 +97,11 @@ touchscreen makes you stop each of them separately.
 <td colspan="3">
 
 <center><p align="center">
-<b>BOTH AT ONCE — TWO SYSTEMS COMBINED</b>
+<b>BOTH AT ONCE, 2 SYSTEMS COMBINED</b>
 <br><br>
-<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-valve.svg" width="84" align="middle" alt="Digital valve">
-<span>+</span>
-<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-controller.svg" width="123" align="middle" alt="Anthem Plus system controller">
-<span>+</span>
-<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-interface-plus.svg" width="123" align="middle" alt="Anthem Plus interface">
-<span>++</span>
-<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-interface.svg" width="135" align="middle" alt="Anthem interface">
+<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-combo.svg" width="483" alt="Anthem Plus interface plus system controller plus Anthem interface">
 <br>
-<sub><b>Anthem Plus System</b>&emsp;&emsp;&emsp;++&emsp;&emsp;&emsp;<b>Anthem Interface</b></sub>
+<sub><b>Anthem Plus System</b>&emsp;+&emsp;<b>Anthem Interface</b></sub>
 <br><br>
 Plug the <b>System Controller</b> into a valve port and add an <b>Anthem Interface (K-28214)</b>
 into the other, and the Anthem Plus system gains full Anthem shower control alongside everything it

@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="322" height="42" viewBox="0 0 322 42" role="img" aria-label="Anthem Plus interface plus system controller plus Anthem interface, on one valve">
+  <g stroke="#8E8799" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+
+    <g transform="translate(0,0)">
+      <path d="M41.71 7 H79 A4.5 4.5 0 0 1 83.5 11.5 V30.5 A4.5 4.5 0 0 1 79 35 H41.71" stroke-linecap="butt"/>
+      <path d="M18.29 7 H11 A4.5 4.5 0 0 0 6.5 11.5 V30.5 A4.5 4.5 0 0 0 11 35 H18.29" stroke-linecap="butt"/>
+      <circle cx="30" cy="21" r="17.5"/>
+      <path d="M54.25 21 H59.75 M57 18.25 V23.75"/>
+      <path d="M62.75 21 H68.25 M65.5 18.25 V23.75"/>
+      <path d="M71.25 21 H76.75 M74 18.25 V23.75"/>
+    </g>
+
+    <path d="M97 21 H109 M103 15 V27"/>
+
+    <g transform="translate(116,0)">
+      <rect x="6.5" y="7" width="77" height="28" rx="4.5"/>
+      <path d="M30 15.5 H60"/>
+      <path d="M30 21 H60"/>
+      <path d="M30 26.5 H60"/>
+      <rect x="24" y="35" width="6" height="4" rx="1"/>
+      <rect x="36" y="35" width="6" height="4" rx="1"/>
+      <rect x="48" y="35" width="6" height="4" rx="1"/>
+      <rect x="60" y="35" width="6" height="4" rx="1"/>
+    </g>
+
+    <path d="M213 21 H225 M219 15 V27"/>
+
+    <g transform="translate(232,0)">
+      <path d="M41.71 7 H79 A4.5 4.5 0 0 1 83.5 11.5 V30.5 A4.5 4.5 0 0 1 79 35 H41.71" stroke-linecap="butt"/>
+      <path d="M18.29 7 H11 A4.5 4.5 0 0 0 6.5 11.5 V30.5 A4.5 4.5 0 0 0 11 35 H18.29" stroke-linecap="butt"/>
+      <circle cx="30" cy="21" r="17.5"/>
+    </g>
+
+  </g>
+</svg>
