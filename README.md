@@ -1,5 +1,7 @@
+<center>
+
 <p align="center">
-  <img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/anthem-system-dark.png" width="300" alt="A Kohler digital valve feeding a rainhead, a body-spray panel and a handshower">
+<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/banner-anthem.svg" width="100%" alt="Anthem panel illustration">
 </p>
 
 <h1 align="center">Kohler Anthem Plus</h1>
@@ -18,10 +20,13 @@
   <sub>Unofficial. Not affiliated with or endorsed by Kohler.</sub>
 </p>
 
+</center>
+
+
 <table cellpadding="6">
 <tr>
 <th width="49%"><h3>Anthem</h3><sub>THE VALVE CARD</sub></th>
-<th></th>
+<th width="2%" align="center"><img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/vline-grey-70.svg" width="1" height="70" alt=""></th>
 <th width="49%"><h3>Anthem Plus</h3><sub>THE CONTROLLER CARD</sub></th>
 </tr>
 
@@ -29,7 +34,7 @@
 <td align="center" width="49%"><sub>IN THE KONNECT APP</sub><br><br>
 <img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/konnect-anthem.png" width="300" alt="The Konnect app's Anthem screen">
 </td>
-<td width="2%"></td>
+<td width="2%" align="center"><img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/vline-grey-465.svg" width="1" height="465" alt=""></td>
 <td align="center" width="49%"><sub>IN THE KONNECT APP</sub><br><br>
 <img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/konnect-anthem-plus.png" width="300" alt="The Konnect app's Anthem Plus screen">
 </td>
@@ -39,7 +44,7 @@
 <td align="center" width="49%"><sub>IN HOME ASSISTANT</sub><br><br>
 <img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/ha-anthem-valve-dark.png" width="300" alt="The Anthem valve card in Home Assistant">
 </td>
-<td width="2%"></td>
+<td width="2%" align="center"><img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/vline-grey-428.svg" width="1" height="428" alt=""></td>
 <td align="center" width="49%"><sub>IN HOME ASSISTANT</sub><br><br>
 <img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/ha-anthem-plus-dark.png" width="300" alt="The Anthem Plus card in Home Assistant">
 </td>
