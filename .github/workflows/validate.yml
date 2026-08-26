@@ -14,7 +14,7 @@ jobs:
     name: HACS
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: hacs/action@main
         with:
           category: integration
@@ -28,7 +28,7 @@ jobs:
       # manifest.json in /github/workspace and the name it compares is "workspace".
       # Checking out into custom_components/kohler_anthem_plus mirrors the layout HACS
       # installs into, which is what hassfest is really asking about.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           path: custom_components/kohler_anthem_plus
       - uses: home-assistant/actions/hassfest@master
