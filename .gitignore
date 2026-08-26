@@ -45,3 +45,13 @@ docs/handoff/
 # ⚠️ Like docs/handoff/, git is not backing these up.
 CLAUDE.md
 intro.md
+
+# Agent working layer — deliberately NOT published, same category as CLAUDE.md / intro.md.
+#
+# `.claude/agents/` holds the subagent definitions this project delegates to. They describe
+# *this machine* — /homeassistant/kohler_anthem_plus_raw, the kohler-work venv,
+# `tests/run_offline.sh` — none of which exist for anyone who clones this repo, so shipping
+# them would mislead rather than help.
+#
+# ⚠️ Like docs/handoff/, git is not backing these up.
+.claude/
