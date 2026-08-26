@@ -532,13 +532,19 @@ for **both**. Filter on `payload.deviceid` and `payload.sku`.
 
 ### What this integration reads over REST, and when
 
-`SCAN_INTERVAL = None` — there is no polling loop. REST is read on two events only: **setup**,
-and **every MQTT (re)connect**. A manual `homeassistant.update_entity` is the only other way in.
+`SCAN_INTERVAL = None` — there is no polling loop. REST is read on **setup** and on **every
+MQTT (re)connect**. A manual `homeassistant.update_entity` is the only other routine way in, and
+a warmup write reads `gcs-state` back up to three times to confirm itself.
+
+⚠️ **One more read exists, and it is still not a poll** — the cloud reachability check
+(`cloud_watch.py`). It is driven by two push events, never by a clock: the controller reporting
+a zone running while the valve stays silent for 60 s, or the valve going quiet for three hours.
+At most one read per thirty minutes either way. See §"Reachability" below.
 
 | Call | Taken from it |
 |---|---|
 | `GET /customer-device/{tenant}` | Device list (nested under `customerHome[].devices[]` — singular key), `temperatureUnit`, `waterUnits`. The unit is load-bearing: **HUB favourite temperatures are written in it** |
-| `GET /gcs-state/{id}` | Both valve words — temperature, flow, outlet mask, pause flag; `warmUpState.warmUp` → mode and `warmUpState.state` → in-progress; `totalVolume`; `presetOrExperienceId` |
+| `GET /gcs-state/{id}` | Both valve words — temperature, flow, outlet mask, pause flag; `warmUpState.warmUp` → mode and `warmUpState.state` → in-progress; `totalVolume`; `presetOrExperienceId`. **Also `connectionState`** — a sibling of `state`, not inside it, so `apply_rest_state` does not see it; `cloud_watch.py` takes it off every one of these reads |
 | `GET /gcs-state/gcsadvancestate/{id}` | Per-outlet `minimumFlowrate` / `maximumFlowrate` / `maximumRuntime` → `OutletLimits`. This is what arms Endless Shower |
 | `GET /gcs-preset/{id}` | Preset id, title, `isExperience`. The raw payload is also handed to the preset-1 timer sync, which needs fields `apply_preset_list` discards |
 | `GET /hub-state/{id}` | Per-zone status/outlets/temperature/flowRate, `musicStateModel.status`, `hubSteamState.status`, `light[].status`, top-level `showerWarmUp` |
@@ -548,6 +554,37 @@ and **every MQTT (re)connect**. A manual `homeassistant.update_entity` is the on
 
 **A cold start is 14 calls; a reconnect is 6** — the mobile-settings POST plus the five reseed
 GETs, with `hub-configuration` skipped once known.
+
+### Reachability — the one fact neither transport volunteers
+
+**The valve drops off Kohler's cloud on its own and returns only on a power cycle.** While it is
+gone the controller, the account and the MQTT stream are all healthy, so nothing in the
+integration goes red and every valve entity simply freezes.
+
+**MQTT can never report it.** Every message on that stream is published *by* the valve, so a
+disconnect is silence — and `GCS_SOLO_STS.IoTActive` reads `Active` in 1 020 of 1 020 captured
+samples for exactly that reason: a disconnected device cannot publish a message saying so.
+
+**Silence cannot report it either**, and this is the measurement that decides the design.
+Across a 19-day corpus the longest silence *provably benign* — capture never stopped, no reboot,
+and the valve answered a command at the end of it — is **12 h 02 m**. The one real outage was
+**12 h 22 m**. Twenty minutes apart. Every threshold low enough to catch the outage fires on
+healthy overnight quiet, and every threshold quiet enough to live with misses it.
+
+So silence never decides anything here; it only decides **when to ask**. The answer always comes
+from `connectionState`, which is ground truth. Two push events ask:
+
+| Trigger | Needs | Evidence |
+|---|---|---|
+| Controller reports a zone `ON`, valve silent 60 s | a HUB | 435 of 437 zone-`ON` `SHOWER_VALVE_STS` had a valve message within 60 s; **the only 2 that did not are the outage** |
+| Valve silent for 3 h | nothing | Covers valve-only accounts, and the 64 % of silence the controller sleeps through |
+
+⚠️ **Zone `ON` only.** An all-`OFF` card is republished with no valve action during favourite
+activity — every `SHOWER_VALVE_STS` in the captured favourite bursts reads `z1:OFF z2:OFF` — so
+a missing valve message there means nothing.
+
+Surfaced as `binary_sensor.anthem_valve_cloud_connection`. A **failed** read is never a verdict:
+"we cannot reach Kohler" and "Kohler cannot reach the valve" are different faults.
 
 ⚠️ **Setup used to read the whole account three times.** `async_setup` seeds, then
 `async_config_entry_first_refresh()` made the base class seed again milliseconds later, and the

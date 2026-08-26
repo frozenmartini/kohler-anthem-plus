@@ -83,6 +83,7 @@ from .anthem_plus.valve_hex import (
     encode_word,
     normalize_word,
 )
+from .cloud_watch import CloudConnectionWatch
 from .const import (
     CONF_MOBILE_DEVICE_ID,
     CONF_OUTLET_RUN_TIMES,
@@ -309,6 +310,9 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.hub_capabilities = HubCapabilities()
         self.favorites: list[dict[str, Any]] = []
         self.stream: AnthemMqttStream | None = None
+        # CLOUD CONNECTION WATCH: created in `async_setup` only on accounts that have a
+        # valve, because it is the valve's reachability it reports. See `cloud_watch.py`.
+        self.cloud_watch: CloudConnectionWatch | None = None
         self.raw_log: RawMqttLog | None = None
         # REPORT LOG: the consumer-side capture behind the "Report Log" switch — one file
         # per switch-on, appended across restarts. See `anthem_plus/report_log.py`.
@@ -378,6 +382,7 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self.model,
             )
             self.gcs_state = GcsState(self.model, self.temperature_unit)
+            self.cloud_watch = CloudConnectionWatch(self)
         if self.hub_device is not None:
             self.hub = HubDevice(
                 self.client, self.hub_device.device_id, self.temperature_unit
@@ -546,6 +551,10 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # the valve's limit is journalled but not warned: no HA-side action exists.
             else:
                 _LOGGER.warning(ENDLESS_SHOWER_NOT_SET_UP)
+        if self.cloud_watch is not None:
+            # Arms trigger B's countdown. Nothing is asked of Kohler until the valve has
+            # actually been quiet for the full interval, and any valve message resets it.
+            self.cloud_watch.async_start()
         self.async_refresh_setup_issue()
 
     @callback
@@ -674,6 +683,9 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def async_shutdown_stream(self) -> None:
         """Stop the MQTT stream on unload."""
+        if self.cloud_watch is not None:
+            # Before the stream, so a timer cannot fire into a half-torn-down coordinator.
+            self.cloud_watch.async_stop()
         if self.stream is not None:
             await self.stream.async_stop()
             self.stream = None
@@ -705,6 +717,10 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
             self._remember_open_masks()
             self._check_runtime_cutoff()
+            if self.cloud_watch is not None:
+                # A valve message is proof of reachability, and settles any pending
+                # contradiction check. CLOUD CONNECTION WATCH.
+                self.cloud_watch.note_gcs_message()
         if (
             self.hub_state is not None
             and self.hub_device is not None
@@ -714,6 +730,9 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._remember_message(envelope)
             if self.hub_state.favorites:
                 self.favorites = self.hub_state.favorites
+            if self.cloud_watch is not None:
+                # Trigger A: a controller report of a zone ON, with the valve silent.
+                self.cloud_watch.note_hub_envelope(envelope)
         if changed:
             self.async_set_updated_data(self._snapshot())
 
@@ -1131,7 +1150,22 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "gcs_last_update": self.gcs_state.last_update if self.gcs_state else None,
             "hub_last_update": self.hub_state.last_update if self.hub_state else None,
             "mqtt_connected": bool(self.stream and self.stream.connected),
+            # CLOUD CONNECTION WATCH. Carried here so a check result re-renders the entity
+            # the same way a device push does — the value itself lives on the watch.
+            "cloud_connected": (
+                self.cloud_watch.connected if self.cloud_watch is not None else None
+            ),
         }
+
+    @callback
+    def async_refresh_entities(self) -> None:
+        """Re-render entities from what is already in memory, with no network read.
+
+        For state that changes without a message arriving — currently only the cloud
+        reachability check, which is answered over REST on its own schedule and has no push
+        source to ride in on.
+        """
+        self.async_set_updated_data(self._snapshot())
 
     # ------------------------------------------------------------------ #
     # Poll
@@ -1187,6 +1221,18 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 payload = await self.client.async_get_gcs_state(
                     self.gcs_device.device_id
                 )
+                if self.cloud_watch is not None:
+                    # CLOUD CONNECTION WATCH. `connectionState` is a sibling of `state` in
+                    # this payload, and `apply_rest_state` below reads only `state` — so
+                    # without this line the field we already paid for is discarded, and the
+                    # sensor sits at `unknown` until a trigger fires hours later. Free: no
+                    # extra request, and it does not consume the check cooldown.
+                    #
+                    # `notify=False` — this runs during `async_setup`, before the platforms
+                    # exist; every caller of this method pushes a snapshot of its own.
+                    self.cloud_watch.note_rest_payload(
+                        payload, "REST seed (setup, reconnect or update_entity)", notify=False
+                    )
                 was_warmup = self.gcs_state.warmup_mode
                 self.gcs_state.apply_rest_state(payload)
                 mode_now = self.gcs_state.warmup_mode
@@ -1710,6 +1756,11 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except KohlerError as err:
             _LOGGER.debug("Could not read warmup mode: %s", err)
             return None
+        if self.cloud_watch is not None:
+            # CLOUD CONNECTION WATCH — the fourth free read. A warmup write reads this back
+            # up to three times; each one carries `connectionState` and would otherwise
+            # discard it.
+            self.cloud_watch.note_rest_payload(payload, "warmup read-back")
         self.gcs_state.apply_rest_state(payload)
         # Same notification path as an MQTT update, so the dropdown lands on the confirmed
         # value and drops its optimistic guess exactly as it would on a device push.

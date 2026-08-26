@@ -174,7 +174,8 @@ rename a device, its entity IDs change with it.
 
 | Entity | Device | What it does |
 |---|---|---|
-| `MQTT Connection` | both | Whether the push stream is connected |
+| `MQTT Connection` | both | Whether the push stream is connected — **our** link to Kohler |
+| `Cloud Connection` | valve | Whether **Kohler's cloud** can reach the valve. A different question, and the one behind "the app says my valve is offline" — see [When the valve drops off the cloud](#when-the-valve-drops-off-the-cloud) |
 | `Last Update` | both | Timestamp of the most recent message |
 | `Start new MQTT capture` | both | Button; rolls the raw capture over to a fresh file |
 | `Report Log` | both | Switch; one-file bug-report capture of the raw MQTT stream — see [The Report Log switch](#the-report-log-switch) |
@@ -403,11 +404,11 @@ automation:
           option: All outlets
 ```
 
-**Alert if the cloud connection drops**
+**Alert if the push stream drops** — this is about *your* connection to Kohler.
 
 ```yaml
 automation:
-  - alias: Anthem offline
+  - alias: Anthem push stream lost
     triggers:
       - trigger: state
         entity_id: binary_sensor.anthem_valve_mqtt_connection
@@ -419,11 +420,58 @@ automation:
           message: Lost the push connection to the Anthem valve.
 ```
 
+**Alert if the valve drops off Kohler's cloud** — a different fault, and the one that needs
+you to go and unplug something.
+
+```yaml
+automation:
+  - alias: Anthem valve offline
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.anthem_valve_cloud_connection
+        to: "off"
+    actions:
+      - action: persistent_notification.create
+        data:
+          message: >-
+            Kohler cannot reach the Anthem valve. The shower still works at the wall.
+            Power-cycle the valve to bring it back.
+```
+
+⚠️ **Do not trigger on `unknown`.** That state means the check has not run yet — usually just
+after a restart — not that anything is wrong.
+
 ## Troubleshooting
 
 **Entities are unavailable, or state is stale.** Check the `MQTT Connection` diagnostic binary
 sensor on either device. Control is cloud-only, so an internet outage or a Kohler-side problem
 takes everything with it. The integration reconnects and reseeds from REST on its own.
+
+### When the valve drops off the cloud
+
+**The Konnect app says the valve is offline, but Home Assistant looks fine.** These are
+different faults and it is worth knowing which you have. `MQTT Connection` reports *our* link
+to Kohler; the valve can vanish from Kohler's side while that stays green, and then every valve
+entity simply freezes at its last value with nothing to say so.
+
+`Cloud Connection` on the Anthem Valve device is the answer to that. It reports what Kohler's
+cloud believes about the valve, and it is **on**, **off**, or **unknown** (not yet checked — a
+failed check leaves the previous answer alone rather than inventing an outage; look at the
+`last_error` attribute).
+
+**It is not polled.** The integration asks Kohler only when there is a reason to:
+
+* the controller reports a zone running while the valve says nothing for a minute — the
+  signature of a valve that is working at the wall but gone from the cloud; or
+* the valve has said nothing at all for three hours.
+
+At most one check every thirty minutes either way. The `checked_because` and `last_checked`
+attributes say which reason fired and when.
+
+**If it says off:** the valve is still working from its own touchscreen — this is a cloud
+problem, not a plumbing one. Nothing in Home Assistant can bring it back; the valve needs to be
+power-cycled at the outlet. It returns on its own once that happens, and the integration picks
+it up from the valve's `DEVICE_REBOOT_STS` announcement without any further action.
 
 **Home Assistant keeps asking me to sign in again.** Kohler's identity provider rotates the
 refresh token on every use. If another tool is refreshing the same grant, it invalidates the

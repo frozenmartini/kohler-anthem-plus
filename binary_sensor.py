@@ -46,6 +46,10 @@ async def async_setup_entry(
         entities += [
             ValveAtTemperatureSensor(coordinator),
             MqttConnectionSensor(coordinator),
+            # CLOUD CONNECTION WATCH. Created for every account that has a valve, including
+            # valve-only ones — the quiet-interval trigger needs no controller. On an account
+            # that also has one, the contradiction trigger wires itself up as well.
+            ValveCloudConnectionSensor(coordinator),
             ValvePresetActiveSensor(coordinator),
         ]
         # One per zone the model actually has. A single-zone valve must not get a "Zone 2"
@@ -225,6 +229,59 @@ class MqttConnectionSensor(MqttConnectionMixin, ValveDiagnosticBinarySensor):
     def __init__(self, coordinator: KohlerAnthemPlusCoordinator) -> None:
         super().__init__(coordinator)
         self._attr_unique_id = f"{self._device_id}_mqtt_connection"
+
+
+class ValveCloudConnectionSensor(KohlerValveEntity, BinarySensorEntity):
+    """Whether **Kohler's cloud** can reach the valve — not whether *we* can reach Kohler.
+
+    This is the answer to "the Konnect app says my valve is offline": the valve drops off
+    Kohler's cloud on its own and returns only when it is physically power-cycled. While it
+    is gone the controller, the account and this integration are all healthy, so
+    ``MQTT Connection`` stays on and every other entity simply freezes.
+
+    ⚠️ **This is not the sensor that was removed in favour of ``MQTT Connection``**, though it
+    reports the same REST field. That one polled, and when polling was deleted it had no push
+    source and went stale. This one is driven by two push events that decide when to read —
+    see `cloud_watch.py` for both, and for why silence alone can never be one of them.
+
+    **Enabled by default, unlike the other valve diagnostics.** They answer "is this
+    integration well"; this one answers "is the shower going to work", which is a question the
+    owner has actually had to ask.
+
+    States:
+
+    * **on** — the last successful read said ``Connected``.
+    * **off** — the last successful read said otherwise. Only ``Connected`` has ever been
+      observed on this account, so the exact negative string is surfaced in
+      ``connection_state`` rather than assumed.
+    * **unknown** — no successful read yet. ⚠️ A *failed* read does not move this: "we could
+      not reach Kohler" and "Kohler cannot reach the valve" are different faults, and the
+      error is reported in ``last_error`` instead of being rendered as an outage.
+    """
+
+    _attr_name = "Cloud Connection"
+    _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: KohlerAnthemPlusCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{self._device_id}_cloud_connection"
+
+    @property
+    def is_on(self) -> bool | None:
+        watch = self.coordinator.cloud_watch
+        return None if watch is None else watch.connected
+
+    @property
+    def extra_state_attributes(self) -> dict[str, object]:
+        """When it was last asked, why, and what came back verbatim.
+
+        ``checked_because`` matters more than it looks: a result from the contradiction
+        trigger was taken while a shower was running, which is far stronger evidence than one
+        taken because the valve had been quiet overnight.
+        """
+        watch = self.coordinator.cloud_watch
+        return {} if watch is None else watch.attributes
 
 
 class ControllerDiagnosticBinarySensor(KohlerControllerEntity, BinarySensorEntity):

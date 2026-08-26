@@ -580,3 +580,44 @@ WARMUP_CONTEXT_MAX_MESSAGES = 400
 # immediate single read therefore reports a false mismatch every time. Three attempts spanning
 # 6 s clears that with margin while keeping the service call short enough for a UI action.
 WARMUP_READBACK_DELAYS = (0.0, 2.0, 4.0)
+
+# ---------------------------------------------------------------------------
+# CLOUD CONNECTION WATCH — is the valve still reachable by Kohler's cloud?
+# ---------------------------------------------------------------------------
+# Full explanation and the measurements behind every number here: `cloud_watch.py`.
+#
+#     grep -rn "CLOUD CONNECTION WATCH" custom_components/kohler_anthem_plus/
+#
+# The problem this exists for: the GCS valve drops off Kohler's cloud on its own and only
+# returns on a power cycle. MQTT cannot report it — everything on that stream is published
+# *by* the valve, so a disconnect is silence, and silence is indistinguishable from idle.
+# Measured over a 19-day corpus: the longest silence provably benign is **12 h 02 m**, and
+# the one real outage was **12 h 22 m**. No silence threshold separates them, which is why
+# neither of the triggers below alerts on silence — they only decide when to *ask*.
+
+# How close a GCS message has to be to a HUB `SHOWER_VALVE_STS` for the pair to count as
+# confirmed. Both directions, so a valve message just before or just after the controller's
+# report pairs it.
+#
+# 60 s, not 5 s. Measured across the 19-day corpus: at ±5 s there are 23 unpaired controller
+# reports (3.9 %), nearly all ordinary controller lag; at ±60 s there are **4**, and **3 of
+# those are the 2026-08-26 outage**. The controller normally trails the valve by 0.3–2 s, but
+# a documented restore once went **176.77 s** with no valve message at all — which is why the
+# rule additionally requires a zone to be ON rather than trusting timing alone.
+CLOUD_CHECK_PAIR_WINDOW_SECONDS = 60.0
+
+# Minimum spacing between REST reads, whichever trigger asks for one.
+#
+# The point is that a shower produces a burst of `SHOWER_VALVE_STS` — 437 zone-ON reports in
+# 13 days, clustered — and an unreachable valve would make every one of them fire. One read
+# per half hour is enough to answer "is it gone", since the failure lasts hours and is only
+# cleared by a human at the wall.
+CLOUD_CHECK_COOLDOWN_SECONDS = 1800.0
+
+# How long the valve may be silent before we ask the cloud about it directly.
+#
+# ⚠️ **This is not a silence alarm and must never become one.** 3 h of quiet is completely
+# normal — the corpus holds 12 h idles that were provably fine. It is the interval after
+# which the *question* is worth one HTTP GET, and `connectionState` answers it definitively,
+# so a "false" trigger costs one request and reports Connected.
+CLOUD_CHECK_QUIET_SECONDS = 3 * 60 * 60.0
