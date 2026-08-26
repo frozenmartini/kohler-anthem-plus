@@ -23,5 +23,12 @@ jobs:
     name: Hassfest
     runs-on: ubuntu-latest
     steps:
+      # hassfest requires the integration's directory to be named exactly the domain,
+      # and this repository sets content_in_root - so a plain checkout leaves
+      # manifest.json in /github/workspace and the name it compares is "workspace".
+      # Checking out into custom_components/kohler_anthem_plus mirrors the layout HACS
+      # installs into, which is what hassfest is really asking about.
       - uses: actions/checkout@v4
+        with:
+          path: custom_components/kohler_anthem_plus
       - uses: home-assistant/actions/hassfest@master
