@@ -55,3 +55,14 @@ intro.md
 #
 # ⚠️ Like docs/handoff/, git is not backing these up.
 .claude/
+
+# HACS default-store submission checklist — working notes, deliberately NOT published.
+#
+# `docs/hacs-submission.md` is a checklist for getting this repository into the HACS default
+# store: what is already satisfied, the exact PR to open, and the queue timings measured from
+# the hacs/default API. It is process, not product — it documents *our* submission rather
+# than anything a user of the integration needs, and it carries links to specific Actions
+# runs that mean nothing to anyone else.
+#
+# ⚠️ Like docs/handoff/, git is not backing this up.
+docs/hacs-submission.md
