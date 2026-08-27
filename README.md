@@ -111,6 +111,8 @@ Plug the <b>System Controller</b> into a valve port and add an <b>Anthem Interfa
 into the other, and the Anthem Plus system gains full Anthem shower control alongside everything it
 already does. The two stay in step — start at either panel and the other follows — and Home
 Assistant shows <b>both cards</b>, valve and controller, as two devices working in tandem.
+<br><br>
+<b><a href="https://github.com/frozenmartini/kohler-anthem-plus/blob/main/docs/user_guide.md#using-both-together">How the combined system works →</a></b>
 </p></center>
 
 <hr>

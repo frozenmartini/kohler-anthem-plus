@@ -32,6 +32,7 @@
 - [How it works](#how-it-works)
 - [In Home Assistant](#in-home-assistant)
 - [Entities](#entities)
+- [Using both together](#using-both-together)
 - [Services](#services)
 - [Features in detail](#features-in-detail)
 - [Requirements](#requirements)
@@ -146,10 +147,10 @@ rename a device, its entity IDs change with it.
 
 | Entity | Type | What it does |
 |---|---|---|
-| `Shower` | switch | Turns the shower on or off, preserving whichever outlets are currently open |
+| `Shower` | switch | Turns the shower on or off. From cold it opens **the valve's own default outlets**; if outlets are already open it preserves them |
 | `Zone N Outlet M` | switch | One per outlet |
 | `Zone N Temperature` | number | Setpoint for that zone, in your account's unit |
-| `Favourite` | select | The valve's stored presets |
+| `Favourite` | select | Presets **stored on the valve**, added in the Konnect app or at the first-generation touchscreen |
 | `Warmup` | select | Off / All outlets / Selected outlets |
 | `Endless Shower` | switch | Re-open a zone the valve closed on its run-time limit |
 | `Status` | sensor | `Water Running`, `Paused`, `Warming Up`, `Idle` |
@@ -159,9 +160,9 @@ rename a device, its entity IDs change with it.
 
 | Entity | Type | What it does |
 |---|---|---|
-| `Shower` | switch | Starts or stops the shower via the controller |
+| `Shower` | switch | Starts or stops the shower via the controller, opening **the controller's own default outlets** — a separate setting from the valve's |
 | `System` | switch | The controller's overall system state |
-| `Favourite` | select | Named favourites configured in the Konnect app |
+| `Favourite` | select | Favourites **stored on the controller**, added in the Konnect app or at the Anthem+ touchscreen. A different list from the valve's |
 | `Status` | sensor | `Water Running`, `Warming Up`, `Idle` |
 | `Zone N Temperature` | sensor | Read-only; the controller offers no live temperature control |
 | `Zone N Outlet M` | binary sensor | Read-only outlet state as the controller sees it |
@@ -186,6 +187,201 @@ rename a device, its entity IDs change with it.
 | `Warmup Auto-Restore` | valve | Switch; puts warmup back when something silently disables it |
 
 </details>
+
+### Each device has its own defaults and its own favourites
+
+On a system with both products this catches people out: the valve and the controller are not
+two views of one set of settings. Each stores its own, and they can differ.
+
+**Default outlets.** Press the dial on the first-generation touchscreen and the **valve's**
+default outlets open. Press the dial on the Anthem+ screen and the **controller's** defaults
+open. These are separate settings, so the same gesture on two screens in the same room can
+start two different showers. The `Shower` switch on each Home Assistant device does exactly
+what that device's dial does.
+
+**Favourites.** Both lists can be built either in the Konnect app or at the matching
+touchscreen, but they are stored in different places — valve favourites live on the valve,
+controller favourites live on the controller. So the two screens show **different lists**,
+and so do the two `Favourite` dropdowns in Home Assistant. Only the controller's can carry
+lighting, music or steam, because only the controller knows those exist.
+
+## Using both together
+
+### What is the combined system?
+
+**First generation — Kohler Digital Anthem.** A digital valve plus a touchscreen interface.
+The valve is the whole product: it has the Wi-Fi, it talks to Kohler's cloud, and the Konnect
+app drives it from there.
+
+> ⚠️ **The first-generation touchscreen is not a smart device.** It is an HID with a screen —
+> **no Wi-Fi, no Bluetooth, no radio of any kind.** This is the single most common
+> misconception about the system. The part with Wi-Fi is the valve.
+>
+> The useful consequence: **once set up, the touchscreen is optional.** With the valve on
+> Wi-Fi and showing in Konnect, you can run a shower entirely from your phone. It is *not*
+> optional for getting there — see [Common questions](#common-questions).
+
+**Second generation — Anthem+.** Kohler added things the first-generation touchscreen had no
+room for:
+
+- **Coordinating two valve bodies** as one system — a product capability; *this integration
+  is built for a single valve*, see [Known limitations](#known-limitations)
+- **Zigbee hub for lighting** — the radio is there and Kohler lists Sengled Element bulbs as
+  supported, but **nobody has got lighting working on this hardware yet**; see
+  [Known limitations](#known-limitations)
+- **Music**, which needs a separate **Kohler amplifier, K-30319** — it is not built into the
+  controller
+- **Steam**, via Kohler's steam generator
+
+That is more than a touchscreen can host, so Anthem+ is really **a second-generation
+touchscreen attached to a Linux system controller** — a separate box that every accessory
+plugs into. The controller then plugs into *the same first-generation digital valve*, and
+gets its own page in the Konnect app.
+
+**The combined system.** Because the valve is unchanged between generations and the Anthem+
+controller is essentially a smarter interface for it, both can be attached at once — the
+valve has two ports:
+
+```
+Kohler Konnect cloud
+│
+├─ Digital valve ...................... Wi-Fi   ← the only part with a radio
+│  ├─ port 1 → 1st-gen touchscreen ............. HID only: no Wi-Fi, no Bluetooth
+│  └─ port 2 → Anthem+ system controller ──┐
+│                                          │  same box, two roles
+└─ Anthem+ system controller .......... Wi-Fi ──┘  (its own Konnect page)
+   ├─ Anthem+ touchscreen
+   ├─ amplifier (K-30319) ............. music, sold separately
+   ├─ Zigbee radio .................... lighting (never yet made to work)
+   └─ steam generator
+```
+
+The system controller appears twice on purpose: it is a **client of the valve** on port 2,
+and a **cloud device in its own right** over Wi-Fi. That is the whole explanation for why two
+things can drive one shower — and why this integration presents two Home Assistant devices.
+
+So an account with both products is almost always **one physical shower reached through two
+touchscreens**, not two showers. They stay two Home Assistant devices anyway: they behave
+differently and their state arrives on different schedules, so merging them would imply a
+consistency that does not exist.
+
+### ⚠️ Five entity names exist on both devices
+
+The most common mistake in a combined setup is grabbing the wrong one. These names appear
+twice, once per device:
+
+| Name | On the valve | On the controller |
+|---|---|---|
+| `Shower` | switch — opens **the valve's own default outlets** | switch — opens **the controller's own default outlets**, a separate setting |
+| `Favourite` | select — presets **stored on the valve** | select — favourites **stored on the controller**; a different list |
+| `Status` | sensor — `Water Running` / `Paused` / `Warming Up` / `Idle` | sensor — `Water Running` / `Warming Up` / `Idle` |
+| `Zone N Temperature` | **number** — the setpoint, writable | **sensor** — read-only |
+| `Zone N Outlet M` | **switch** — writable | **binary sensor** — read-only |
+
+The device prefix is what separates them — `switch.anthem_valve_shower` against
+`switch.anthem_plus_shower`. Note the last two rows differ in *type*, not just in device: if
+an entity you expected to set turns out to be read-only, you have the controller's copy.
+
+> The valve's `Favourite` and the controller's `Favourite` are **different lists**. Valve
+> presets are stored on the valve; controller favourites are scenes configured in the Konnect
+> app, and only the latter can carry lighting, music or steam.
+
+### Which device to reach for
+
+| You want | Use | Why |
+|---|---|---|
+| A specific outlet, temperature or flow | **valve** | It takes a raw command word — any outlet, any temperature, any time |
+| A whole scene, with lights/music/steam | **controller** | It activates named favourites only; whole scenes or nothing |
+| To know whether water is actually running | **valve** | Authoritative, always |
+
+You cannot ask the controller for "outlet 2 at 39 °C", and the valve knows nothing about
+music or lighting. That split is the whole reason both devices exist.
+
+### So which do I trigger automations on?
+
+**Use the valve for anything about water.** `Status`, `Zone N Active` and `At Temperature` on
+the Anthem Valve device are true whenever water is running, regardless of how the shower was
+started.
+
+Use the controller's entities when you specifically mean *"the controller is driving this"* —
+for example, only running an automation for showers started from a favourite, or acting on
+`Music` / `Light` / `Steam`, which have no valve equivalent.
+
+A useful rule: if the automation would still make sense with the controller unplugged, it
+belongs on the valve.
+
+### Common questions
+
+**Will running both break my shower?**
+
+No. The valve treats each port as a source of commands; nothing about having two attached
+puts it in a state it does not already handle.
+
+**But Kohler says they can't be used together.**
+
+Ask a Kohler representative or a technician and you will be told no. That is the consistent
+answer from people.
+
+The reasons for the spoken answer appear to be practical rather than technical: a combination
+Kohler describes is a combination Kohler has to support, test and keep working across
+firmware updates. Keeping the generations separate also lets the first-generation product
+keep its own place in the range rather than being positioned as something you upgrade away
+from.
+
+> ⚠️ Treat this as unsupported. It works, and it is what this integration was built against,
+> but firmware updates carry no guarantee and Kohler support is unlikely to help with a
+> system wired this way.
+
+**Can I use both touchscreens at the same time?**
+
+Yes. Each screen talks to whatever it is plugged into, and is drawn by that same thing:
+
+```
+1st-gen screen  ◄──►  valve
+Anthem+ screen  ◄──►  system controller  ◄──►  valve
+                            └── accessories
+```
+
+A touch becomes a command; the state that comes back tells the screen what to draw — which
+outlets to light up, what the interface should show. In practice the round trip is
+**effectively instant**, and neither screen is waiting on the other.
+
+**The Anthem+ screen is drawn by the system controller, not by the valve**, and that is the
+whole reason the controller exists. The valve has no idea there is lighting, music or steam
+in the room, or that there might be a second valve body beside it — it only knows water. The
+controller is what bridges the two generations: it holds the picture the valve cannot.
+
+They agree about water because the controller's view of the valve comes from the valve. The
+Anthem+ screen simply shows more on top. What the controller can't do is see round the valve
+— if the valve is driven from the first-generation screen, the controller finds out the same
+way this integration does — so the controller can legitimately show `Idle` while the valve
+is running water, and both are telling the truth about their own question.
+
+**So do I have to buy an extra first-generation touchscreen?**
+
+Only if you want the valve reachable from the Konnect app or from this integration — that
+requires the valve on Wi-Fi, and the first-generation screen is the only way to put it there
+(see below).
+
+Two cases where it costs you nothing:
+
+- **Upgrading from first generation.** Your existing screens are not scrap — keep one and it
+  becomes the combined system.
+- **Buying Anthem+ with two screens anyway.** Both screens cost the same, so making one of
+  them a first-generation unit is a like-for-like swap.
+
+**Can I get the valve onto Wi-Fi without the first-generation touchscreen?**
+
+**No — and this is the one hard requirement.** The valve only raises its Wi-Fi access point,
+the access point you join to hand it your network and register it in Konnect, **when told to
+from the first-generation touchscreen.** There is no app-side, button, or web route to it.
+
+Plugging an **Anthem+ touchscreen straight into the valve does nothing** — confirmed by
+trying it. It is not a first-generation screen and the valve does not answer it.
+
+So the first-generation screen is required *at least once*, to get the valve onto the network.
+After that it can be unplugged and the valve stays connected — but you cannot start from an
+Anthem+-only system and reach the valve over Wi-Fi.
 
 ## Services
 
@@ -499,7 +695,16 @@ Konnect app.
   the Anthem Plus touchscreen overwrites both temperature and flow, so a Home Assistant
   setpoint could not be relied on to stay put. Use `send_valve_hex` if you need it.
 * **Music, lighting and steam are read-only.** The controller exposes them as state; driving
-  them means activating a favourite that includes them.
+  them means activating a favourite that includes them. This is the limit of what **Konnect**
+  exposes, not what the hardware can do.
+* **One valve body.** Anthem+ can coordinate two; this integration was written against a
+  single-valve system and does not handle a second. The protocol side is already worked out —
+  see [`architecture.md`](architecture.md) on `parts.valve1` / `parts.valve2` — so this is
+  scope, not a wall. Open an issue if you have a two-valve system.
+* **Lighting is unproven.** Anthem+ has a Zigbee radio and Kohler lists Sengled Element bulbs
+  as supported. Sengled has wound down as a company, though the bulbs are still sold — the
+  real gap is that no Sengled bulb has ever been tried here. The one attempt used Philips Hue
+  and did not pair. See [`hub/lighting.md`](hub/lighting.md).
 * **Warmup's selected outlets can't be read** from the cloud API.
 * **One installation tested.** See below.
 * **The API is undocumented** and Kohler can change it without notice.
