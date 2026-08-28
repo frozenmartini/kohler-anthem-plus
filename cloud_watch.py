@@ -88,6 +88,7 @@ import time
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
+from homeassistant.core import callback
 from homeassistant.helpers.event import async_call_later
 
 from .anthem_plus import AuthError, KohlerError
@@ -252,6 +253,26 @@ class CloudConnectionWatch:
     # ------------------------------------------------------------------ #
     # Timers
     # ------------------------------------------------------------------ #
+    #
+    # ⚠️ **Both handlers below MUST carry `@callback`, and it is load-bearing, not style.**
+    #
+    # `async_call_later` wraps a bare callable in a `HassJob`, and `HassJob` infers its type
+    # from the callable: a coroutine function runs on the loop, a function marked `@callback`
+    # runs on the loop, and **anything else is classified `HassJobType.Executor` and dispatched
+    # to a worker thread** (`homeassistant/core.py`, `get_hassjob_callable_job_type`). Nothing
+    # warns about it — the handler simply runs on the wrong thread.
+    #
+    # That is fatal here rather than merely untidy, because `_request_check` ends in
+    # `hass.async_create_task`, which raises for a custom integration the moment it sees a
+    # foreign thread id. The raise escapes `_quiet_elapsed` **before** its closing
+    # `_arm_quiet_timer()`, so trigger B does not just miss one check — it fires once and then
+    # never re-arms for the life of the coordinator.
+    #
+    # Shipped that way in v0.2.6 and found in session 22: across 45 h and an 11 h 44 m valve
+    # silence, `checked_because` was "REST seed" in 120 of 120 recorded states. Neither trigger
+    # had ever fired. `select.py` had the decorator on its own `async_call_later` handler all
+    # along; this module was written without it.
+    @callback
     def _pair_window_elapsed(self, _now: Any) -> None:
         """The full ±window passed with no valve message. Ask the cloud."""
         self._pair_cancel = None
@@ -267,6 +288,7 @@ class CloudConnectionWatch:
             self._hass, CLOUD_CHECK_QUIET_SECONDS, self._quiet_elapsed
         )
 
+    @callback
     def _quiet_elapsed(self, _now: Any) -> None:
         """Trigger B. Ask, then keep the interval running while the quiet continues."""
         self._quiet_cancel = None
