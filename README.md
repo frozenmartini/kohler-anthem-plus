@@ -71,7 +71,8 @@ immediately. No scene to apply, no confirm step.
 <b>Stop everything at once</b> — one switch ends the shower, music, steam and light together. The
 touchscreen makes you stop each of them separately.
 <br><br>
-<b>Music, steam and light</b> — each reported as its own sensor.
+<b>Music, steam and light</b> — each reported as its own sensor. Music needs Kohler's
+K-30319 amplifier; it is not built into the controller.
 </td>
 </tr>
 
@@ -148,7 +149,8 @@ The connection stays open and waits.</li>
 no touchscreen.</li>
 <li><b>Clear the steam afterwards.</b> Run the exhaust fan for 30 minutes after the water stops,
 then shut it off.</li>
-<li><b>Music on the same switch.</b> One press starts the shower and the playlist together.</li>
+<li><b>Music on the same switch.</b> One press starts the shower and the playlist together —
+on a system fitted with Kohler's K-30319 amplifier.</li>
 <li><b>One switch ends everything.</b> No more turning off the shower, then the music, then the
 steam, then the light — one command stops all of it.</li>
 <li><b>Dim the lights when the water is ready.</b> The moment it reaches temperature, drop the

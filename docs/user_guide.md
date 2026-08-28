@@ -89,7 +89,7 @@ assuming there is one device when there are two.
 | | **Anthem** (the valve) | **Anthem+** (the controller) |
 |---|---|---|
 | What it is | The digital valve itself, Wi-Fi built in | A Linux controller sitting in front of the valve |
-| Adds | — | Music, lighting, steam |
+| Adds | — | Music (needs a K-30319 amplifier), lighting, steam, a second valve body |
 | Controlled by | A raw hex command word — temperature, flow, outlet mask | Activating named favourites |
 | Granularity | Any outlet, any temperature, any time | Whole scenes only |
 | In the code and docs | `GCS` | `HUB` |
@@ -654,6 +654,10 @@ entity simply freezes at its last value with nothing to say so.
 cloud believes about the valve, and it is **on**, **off**, or **unknown** (not yet checked — a
 failed check leaves the previous answer alone rather than inventing an outage; look at the
 `last_error` attribute).
+
+It is **hidden by default**, not disabled: it keeps running and keeps its history whether or
+not you are looking at it. To put it on a dashboard, open the Anthem Valve device, show hidden
+entities, and clear the hidden flag.
 
 **It is not polled.** The integration asks Kohler only when there is a reason to:
 
