@@ -244,9 +244,15 @@ class ValveCloudConnectionSensor(KohlerValveEntity, BinarySensorEntity):
     source and went stale. This one is driven by two push events that decide when to read —
     see `cloud_watch.py` for both, and for why silence alone can never be one of them.
 
-    **Enabled by default, unlike the other valve diagnostics.** They answer "is this
-    integration well"; this one answers "is the shower going to work", which is a question the
-    owner has actually had to ask.
+    **Created but hidden, unlike the other valve diagnostics.** They are disabled outright,
+    which costs nothing until someone wants them. This one has to keep *running* — its whole
+    value is the record it builds while nobody is looking, and a disabled entity builds none —
+    so it stays enabled and is hidden from the dashboards instead. Unhide it from the device
+    page when the question "is the shower going to work" actually comes up.
+
+    ⚠️ ``entity_registry_visible_default`` applies only when the entity is first created. An
+    installation that already has it from v0.2.6, where it was enabled *and* visible, keeps it
+    visible — hide it by hand there, or delete the entity and let it be recreated.
 
     States:
 
@@ -262,6 +268,7 @@ class ValveCloudConnectionSensor(KohlerValveEntity, BinarySensorEntity):
     _attr_name = "Cloud Connection"
     _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_visible_default = False
 
     def __init__(self, coordinator: KohlerAnthemPlusCoordinator) -> None:
         super().__init__(coordinator)
