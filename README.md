@@ -150,7 +150,7 @@ want, and the whole shower reaches the valve as one command.</p>
 <p><b>Beta:</b> <b>keep shower on after the valve's warm-up is finished.</b> Your shower will no
 longer pause and wait for you to resume.</p>
 
-<table cellpadding="6">
+<table cellpadding="6" align="center">
 <tr>
 <td align="center" width="49%" valign="top"><sub>ADD THE ACTION</sub><br><br>
 <img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/ha-custom-shower-picker-dark.png" width="300" alt="The Custom shower action in Home Assistant's Add action picker">
