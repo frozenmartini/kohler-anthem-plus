@@ -397,7 +397,7 @@ temperature: the valve cannot take two commands back to back (see
 [Known limitations](#known-limitations)), and this sends one.
 
 In the automation editor, add an action, search for **Custom shower**, turn on the outlets,
-set the temperature, and optionally turn on **Keep shower on after warm-up (beta)**. The same
+set the temperature, and optionally turn on **No pausing warm-up (beta)**. The same
 thing in YAML:
 
 ```yaml
@@ -445,13 +445,13 @@ What it does:
 * **Flow** is under *Advanced* and defaults to full flow, like every other command from Home
   Assistant. The flow you set holds only until someone presses the flow button on the
   touchscreen, which takes over from then on.
-* **Keep shower on after warm-up (beta).** Only matters when the valve's warm-up is enabled.
-  On such a valve every outlet command first runs the warm-up, and when the water is warm the valve
-  **pauses** for two minutes, just as it always does — left alone, that pause ends the
-  session. So on a warm-up-enabled valve a command from Home Assistant has never
-  produced a running shower by itself. With this on, the integration watches the
-  valve's own reports and, when that pause arrives, sends your outlets and temperature again,
-  once. It does nothing if no warm-up follows (warm-up disabled, or the water was already
+* **No pausing warm-up (beta).** Keeps the shower on after the valve's warm-up is finished.
+  Only matters when the valve's warm-up is enabled. On such a valve every outlet command first
+  runs the warm-up, and when the water is warm the valve **pauses** for two minutes, just as it
+  always does — left alone, that pause ends the session. So on a warm-up-enabled valve a command
+  from Home Assistant has never produced a running shower by itself. With this on, the
+  integration watches the valve's own reports and, when that pause arrives, sends your outlets
+  and temperature again, once. It does nothing if no warm-up follows (warm-up disabled, or the water was already
   warm), if the warm-up ends in a stop rather than a pause, if someone takes over at the wall,
   or if any other command is sent from Home Assistant in the meantime. On the reference
   system the pause is how the warm-up ends — 30 of the 31 captured — so the check is on the

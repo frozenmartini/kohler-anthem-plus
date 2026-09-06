@@ -21,7 +21,7 @@ The controller's ``showerwarmup`` flag never coincides with the valve's ``warmUp
 (0 of 30, 0 of 50 in session 24), so this reads the **GCS stream only**.
 
 **How this is used.** ``custom_shower`` fires its write ONCE, so it can never disrupt the
-warm-up. When the caller ticks "Keep shower on after warm-up", the coordinator feeds every GCS
+warm-up. When the caller ticks "No pausing warm-up", the coordinator feeds every GCS
 report to :meth:`WarmupResume.observe`. The decisions:
 
 * ``WAIT`` — nothing to do yet;

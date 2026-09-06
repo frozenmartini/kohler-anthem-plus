@@ -155,8 +155,8 @@ _CUSTOM_SHOWER_DESCRIPTION = (
     "one command. This is the reliable way to open an outlet and set its temperature from "
     "a single automation step. Outlets you leave off are closed, and leaving every outlet "
     "off stops the shower. On a valve with warm-up enabled the valve warms up first and "
-    "then pauses for two minutes, just as it always does; turn on \"Keep shower on after "
-    "warm-up\" (beta) to have it carry on with your outlets and temperature the moment "
+    "then pauses for two minutes, just as it always does; turn on \"No pausing warm-up\" "
+    "(beta) to have it carry on with your outlets and temperature the moment "
     "that pause begins. WARNING: this can start water."
 )
 # The static form shows Fahrenheit and the K-28212's outlets; the runtime override swaps in
@@ -233,11 +233,12 @@ _FIELD_OUTLETS = {
 # "(beta)" in the name and "Beta" in the description are deliberate and mirrored in the docs
 # and release notes (owner, 2026-09-06): the resume has run on one valve, so the form says so.
 _FIELD_KEEP_ON = {
-    "name": "Keep shower on after warm-up (beta)",
+    "name": "No pausing warm-up (beta)",
     "required": True,
     "description": (
-        "Beta, tested on one valve so far. Only matters when the valve's warm-up is "
-        "enabled. After warming up, the valve pauses for two minutes, just as it always "
+        "Keeps the shower on after the valve's warm-up is finished. Beta, tested on one "
+        "valve so far. Only matters when the valve's warm-up is enabled. After warming "
+        "up, the valve pauses for two minutes, just as it always "
         "does. With this on, the shower carries on with your outlets and temperature the "
         "moment that pause begins. Off, the valve's two-minute pause runs as usual."
     ),

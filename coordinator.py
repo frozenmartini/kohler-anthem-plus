@@ -307,7 +307,7 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._warmup_restore_task: asyncio.Task | None = None
         self._warmup_restores = 0
         self._warmup_restored_at: float | None = None
-        # CUSTOM SHOWER: the "keep shower on after warm-up" watcher, one at a time, and
+        # CUSTOM SHOWER: the "No pausing warm-up" watcher, one at a time, and
         # a serial that every command sent from here bumps, so the watcher can tell that
         # something else was sent after its own write. See `anthem_plus/warmup_resume.py`.
         self._custom_shower_task: asyncio.Task | None = None
