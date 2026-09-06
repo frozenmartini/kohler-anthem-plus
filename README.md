@@ -147,6 +147,9 @@ The connection stays open and waits.</li>
 <p>Create a custom shower action for your automations. Choose the outlets and the temperatures you
 want, and the whole shower reaches the valve as one command.</p>
 
+<p>In the automation editor it is <b>Kohler Anthem Plus: Custom shower</b>. In YAML, and in
+<b>Developer tools → Actions</b>, it is <code>kohler_anthem_plus.custom_shower</code>.</p>
+
 <p><b>Beta:</b> <b>keep shower on after the valve's warm-up is finished.</b> Your shower will no
 longer pause and wait for you to resume.</p>
 
