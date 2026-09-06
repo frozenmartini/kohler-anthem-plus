@@ -252,13 +252,13 @@ outlet split produces a usable model rather than an error.</li>
 (<code>K-28214-ASC</code>), with the <b>Anthem+ System Controller</b> (<code>K-27756</code>).</li>
 </ul>
 
-<b>Not supported</b>
+⚠️ <b>Not supported</b>
 <ul>
 <li><b>The older DTV systems.</b> A previous generation of Kohler digital showering, on a
 different protocol entirely. Nothing here applies to them.</li>
 <li><b>Kohler Duo Control.</b> No Wi-Fi and no Konnect connection, so there is nothing for an
 integration to talk to.</li>
-<li>⚠️ <b>The mechanical Anthem.</b> Kohler sells both under that name. Only the digital,
+<li><b>The mechanical Anthem.</b> Kohler sells both under that name. Only the digital,
 network-connected one has an API.</li>
 </ul>
 
