@@ -323,10 +323,6 @@ The per-valve fields mirror the MQTT status word exactly — `atFlow`, `atTemp`,
 `errorCode`, `pauseFlag`, per-outlet booleans, and both setpoints. This is what seeds entity
 state at startup, since MQTT says nothing until the shower next changes.
 
-Note `flowSetpoint` is on the device's **0-50** scale, not percent
-([`valve_hex.md`](valve_hex.md)). `totalVolume` moves erratically and does not behave like a
-counter — do not build statistics on it.
-
 ### `gcs-configuration` — null on a HUB-attached valve
 
 Every structural field comes back `null`: `zoneone`, `zonetwo`, `parts`, `valve1Settings`,
@@ -1083,6 +1079,88 @@ preset — see §2a. An earlier revision of this document claimed
 `controlpresetorexperience` merely "selects" a preset and that a `solowritesystem` follow-up
 was unavoidable. That was a symptom of the library sending the wrong body: with the correct
 `{preset, action}` shape, activation is a single call.
+
+### ⚠️ One valve command at a time — the echo lags the write (GitHub issue #1, 2026-09-03)
+
+A `solowritesystem` write carries the complete state of both zones, so a client changing one
+field must supply every other field from *somewhere*. The only source is the valve's own
+`GCS_SOLO_STS` report, and that arrives over MQTT **after** the REST call has already
+returned — 1.1–2.1 s on the system documented here, 0.12–0.65 s between paired reports in the
+reporter's capture. Two writes inside that gap, the second built from reported state, produce
+this (the reporter's K-28212, warm-up disabled):
+
+| HA receipt (UTC) | Δ | `primaryValve1` | decodes to |
+|---|---|---|---|
+| `20:37:54.366Z` | | `019bc80100000001` | `0x19B` (411) = 41.1 °C = 106 °F, mask `0x01` — outlet 1 opened |
+| `20:37:54.586Z` | +0.219 s | `01a6c80000000001` | `0x1A6` (422) = 42.2 °C = 108 °F, mask **`0x00`** — closed again |
+
+The automation was `switch.turn_on` on zone 1 outlet 1 followed immediately by
+`number.set_value 108`. The temperature write was built while the reported mask still read
+`0x00`, so it carried `0x00`, and the valve did what it was told: 108 °F, water off. With a 3 s
+`delay:` between the two actions it worked, because the first write's echo had landed.
+(Report log `report_20260903T203019Z`, rids 47–48.)
+
+**The rule, and why it is a rule rather than a fix in the integration.** With the valve's
+warm-up **disabled** (the reporter's case — `warmUpDisabled` in their diagnostics,
+`warmUpNotInProgress` in all 17 of their messages), space valve commands so each one's echo has
+landed before the next is built: **3 s is enough on every such system seen.** With warm-up
+**enabled, no delay makes a two-step automation work** — a command inside the warm-up hijacks
+it (below), and a command after the warm-up's pause is built from the paused word, whose
+assignment is cleared, so it writes mask `0x00` and ends the session. There the answer is one
+complete write with `send_valve_hex`, which is what the Konnect app effectively does: it builds
+every write from its own known outlets. An integration-side fix was
+built, reviewed and live-tested on 2026-09-06 (a remembered "last written" baseline for the
+next write) and **withdrawn by the owner the same day**: on a valve with warm-up enabled it
+made things worse. Opening an outlet starts the valve's warm-up on the warm-up set
+(`0x07`/`0x03` here) and the word reports *those* outlets; a second write inside the warm-up —
+however it is built — is **applied immediately and replaces the warm-up set with the written
+outlets**, so the warm-up ran on the chosen outlet alone (cold water on the user), then ended
+in the valve's normal post-warm-up pause with nobody to resume it. Gating on the warm-up flag
+is not an answer either: the flag can clear while the sequence is still running, and §3 already
+records warm-ups that never showed a flag at all. So the safe shape is the simple one — one
+command that says everything; and where two are unavoidable, warm-up off and a 3 s gap.
+
+**2026-09-06, later the same day — `custom_shower` ships the one-command rule as a form.**
+`kohler_anthem_plus.custom_shower` takes outlets, a temperature per zone and an optional flow
+as typed fields and sends **one** complete write built from those fields alone (`encode_shower` in
+`anthem_plus/valve_hex.py`): an outlet left off is closed, a zone with nothing on is
+written `0x00`, nothing is read from the report. It fires once. Its opt-in *Keep shower on
+after warm-up* (**beta** — two runs on one valve as of 2026-09-06) re-sends the same two words
+once the valve's warm-up ends in its pause, judged from the GCS stream only
+(`anthem_plus/warmup_resume.py`). The corpus behind that rule — 33
+valve warm-ups 2026-08-07 → 2026-09-06 (the two `custom_shower` runs that evening included),
+minus the two interrupted by Home Assistant writes that day, so 31 natural endings, first
+report after `warmUpInProgress` clears:
+
+| ending | count | then |
+|---|---|---|
+| `0x40` on both zones, masks cleared, atTemp set | 24 | a person picks outlets 6–175 s later, or the pause self-terminates at +120 s |
+| zone 1 `0x40`, zone 2 still on its half of the warm-up set (`0x03`) | 3 | both zones `0x40` 0.1–0.2 s later |
+| warm-up set still on (`0x07`/`0x03`) with the status already cleared | 2 | both zones `0x40` 0.1–0.2 s later |
+| zone 1 plain `0x00`, zone 2 `0x40` | 1 | the person picked zone 2 outlet 1 at +8.8 s |
+| plain `0x00`/`0x00`, no pause | 1 | a new warm-up began 14 s later — a wall restart, not a natural end |
+
+So the pause bit is present on at least one zone in **30 of 31**, and on both within 0.2 s in
+29. The watcher's rule: `warmUpInProgress` must be seen within 10 s of the write (the first
+echo lands 1.1–2.1 s after the REST call returns), else there is nothing to do; then the first
+report with the status cleared **and** a pause bit on any zone triggers one re-send; a
+status-cleared report with masks `0x00` and no pause is a stop and abandons; unpaused outlets
+other than the warm-up's own (the masks of the last `warmUpInProgress` report) mean a person
+picked them and abandon at once — sticky, so their later pause is never mistaken for the
+warm-up's; the warm-up's own outlets still running unpaused for more than 3 s abandon too;
+180 s is the hard cap; any other command sent from the integration in between cancels it. The controller's
+`showerwarmup` flag is never consulted — it never coincides with the valve's `warmUpStatus`
+(0 of 30 and 0 of 50 above). **This is not the withdrawn baseline**: it is per call, opt-in,
+re-sends only its own caller's words, and never delays, gates or rebuilds a write.
+
+**What the corpus says about the valve's own warm-up, learned the same day** (31 episodes,
+2026-08-07 → 09-06): it runs 8–69 s, **ends in `0x40` on both zones with the assignment
+cleared and atTemp set** in 24 of 30 cases, and then waits for a human to select outlets at the
+wall — or self-terminates at +120 s. It never hands off to a selection by itself (the
+*controller's* warm-up does — case study 2 §6e — two products, two behaviours). Consequence:
+**a Home Assistant outlet switch on a warm-up-enabled valve warms up, pauses, and ends;**
+it does not run the outlet unless something resumes. A stop written during warm-up (mask
+`0x00`) takes effect at once.
 
 ## 2a. Presets — read, activate, update, create
 

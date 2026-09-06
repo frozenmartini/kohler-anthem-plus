@@ -76,6 +76,10 @@ the broker replays nothing when you connect, so the state has to come from somew
 * **Warmup.** Kohler's pre-heat feature as a three-option dropdown, with an optional watchdog
   that puts it back when something silently turns it off.
 * **Endless Shower.** Optionally re-open a zone the valve closed on its own run-time limit.
+* **One-command shower.** A `custom_shower` action: choose outlets and temperatures, and it
+  goes to the valve as a single command — the form to use from an automation, because the valve
+  cannot take two commands back to back. Optionally keeps the shower on past the valve's
+  warm-up pause (beta).
 * **Raw escape hatch.** A `send_valve_hex` service for anything the normal controls cannot do.
 * **Forensics built in.** The integration writes its own MQTT capture and analysis journals,
   which is how most of `docs/` was established in the first place.
@@ -385,10 +389,89 @@ Anthem+-only system and reach the valve over Wi-Fi.
 
 ## Services
 
+### `kohler_anthem_plus.custom_shower`
+
+Starts the shower with the outlets and temperature you choose, sent to the valve as **one
+command**. This is the form to use whenever an automation opens an outlet *and* sets a
+temperature: the valve cannot take two commands back to back (see
+[Known limitations](#known-limitations)), and this sends one.
+
+In the automation editor, add an action, search for **Custom shower**, turn on the outlets,
+set the temperature, and optionally turn on **Keep shower on after warm-up (beta)**. The same
+thing in YAML:
+
+```yaml
+action: kohler_anthem_plus.custom_shower
+data:
+  zone1_temperature: 108      # in your account's unit; the slider covers 80–113 °F
+  zone1_outlet_1: true        # outlets you leave out are closed
+  keep_on_after_warmup: true  # optional and beta, see below
+```
+
+Every field the action takes, with what each one does when you leave it out:
+
+```yaml
+action: kohler_anthem_plus.custom_shower
+data:
+  # Zone 1 — the only required field is the temperature
+  zone1_temperature: 108      # required; your account's unit, 80–113 °F or 27–45 °C
+  zone1_outlet_1: true        # default false — an outlet you leave out is closed
+  zone1_outlet_2: false
+  zone1_outlet_3: false
+
+  # Zone 2 — omit the whole zone on a single-zone valve
+  zone2_temperature: 104      # default: follows zone1_temperature
+  zone2_outlet_1: false
+  zone2_outlet_2: false
+  zone2_outlet_3: false
+
+  keep_on_after_warmup: true  # default false; beta, see below
+  flow: 100                   # default 100; 8–100 % of full flow
+```
+
+Every key is flat — the **Zone 1**, **Zone 2** and **Advanced** headings you see in the editor
+are display only and never appear in the YAML. Outlets your valve does not have are hidden from
+the form, and turning one on in hand-written YAML is an error rather than a silent no-op.
+
+What it does:
+
+* **It states the whole shower.** Every outlet you leave off is closed, on both zones.
+  Leaving every outlet off stops the shower. Nothing is taken from what the valve last
+  reported, which is exactly what makes it safe to fire from a button.
+* **Temperature is per zone**, like the valve's own setpoints and the temperature entities.
+  Zone 2's is optional: left unset, it follows zone 1's.
+* **It fires once.** A second command during the valve's warm-up hijacks the warm-up onto the
+  outlets you wrote, so this action never sends a second command on its own.
+* **Flow** is under *Advanced* and defaults to full flow, like every other command from Home
+  Assistant. The flow you set holds only until someone presses the flow button on the
+  touchscreen, which takes over from then on.
+* **Keep shower on after warm-up (beta).** Only matters when the valve's warm-up is enabled.
+  On such a valve every outlet command first runs the warm-up, and when the water is warm the valve
+  **pauses** for two minutes, just as it always does — left alone, that pause ends the
+  session. So on a warm-up-enabled valve a command from Home Assistant has never
+  produced a running shower by itself. With this on, the integration watches the
+  valve's own reports and, when that pause arrives, sends your outlets and temperature again,
+  once. It does nothing if no warm-up follows (warm-up disabled, or the water was already
+  warm), if the warm-up ends in a stop rather than a pause, if someone takes over at the wall,
+  or if any other command is sent from Home Assistant in the meantime. On the reference
+  system the pause is how the warm-up ends — 30 of the 31 captured — so the check is on the
+  pause itself, never on the controller's warm-up flag. **Beta:** it has run on one valve, the
+  reference K-28212, twice on 2026-09-06 — the pause arrived 35 s and 69 s after the command
+  and the shower was back on 1.2 s and 0.8 s later. Please report how it behaves on yours.
+
+The response carries the two command words it sent, so the action doubles as a way to learn
+the word for `send_valve_hex` below.
+
+On a single-zone valve the Zone 2 outlets are hidden from the form automatically, as are
+outlets a zone does not have.
+
+> ⚠️ **This can start water.** It writes directly to the valve.
+
 ### `kohler_anthem_plus.send_valve_hex`
 
-Sends a command word straight to the valve, for anything the normal controls cannot do —
-setting a flow rate, for instance.
+Sends a command word straight to the valve, for anything the normal controls cannot do. If
+what you want is outlets plus a temperature, use `custom_shower` above; this one is for the
+rest.
 
 The workflow is copy-and-paste rather than hand-assembly. Set the shower up the way you want
 it using the outlet switches and temperature controls, read the resulting code off the
@@ -582,6 +665,63 @@ automation:
           option: Morning
 ```
 
+**Open an outlet and set its temperature, from one button**
+
+```yaml
+automation:
+  - alias: Rain head at 108
+    triggers:
+      - trigger: state
+        entity_id: input_button.rain_head
+    actions:
+      - action: kohler_anthem_plus.custom_shower
+        data:
+          zone1_temperature: 108
+          zone1_outlet_1: true
+          keep_on_after_warmup: true   # beta; only matters with the valve's warm-up on
+```
+
+One action, one command to the valve. In the UI editor this is the **Custom shower** action
+with zone 1 outlet 1 on and the zone 1 temperature set; no YAML needed.
+
+**Why not an outlet switch followed by a temperature change?** Every command carries the
+complete state of both zones, and the integration fills that in from the valve's last report,
+which arrives about a second *after* a command is accepted. Two valve commands back to back
+build the second from the state before the first landed — here, a temperature change built
+from "no outlets open", which closes the outlet you just opened
+([issue #1](https://github.com/frozenmartini/kohler-anthem-plus/issues/1)). With the valve's
+warm-up **off**, a delay makes the two-step form work:
+
+```yaml
+      - action: switch.turn_on
+        target:
+          entity_id: switch.anthem_valve_zone_1_outlet_1
+      - delay: "00:00:03"
+      - action: number.set_value
+        target:
+          entity_id: number.anthem_valve_temperature_zone_1
+        data:
+          value: 108
+```
+
+Three seconds is enough on every system seen. **With warm-up on, no delay helps:** a command
+during the warm-up replaces the warm-up outlets with the ones you wrote, and a command after
+the warm-up's pause is built from that pause, which has no outlets, so it ends the session.
+Use `custom_shower`.
+
+The raw equivalent is `send_valve_hex` with a hand-built word:
+
+```yaml
+      - action: kohler_anthem_plus.send_valve_hex
+        data:
+          zone1_hex: "01A6C801"   # 0x1A6 (422) = 42.2 °C = 108 °F, flow 100%, outlet 1
+```
+
+Zone 2 is re-sent as it stands when `zone2_hex` is omitted. Build the word from the *Zone N Hex*
+diagnostic sensor: change the last byte for outlets (`01`, `02`, `04`, and sums), and the
+temperature per the [hex reference](gcs/valve_hex.md) — or read it off `custom_shower`'s
+response.
+
 **Pre-heat when you leave work**
 
 ```yaml
@@ -697,7 +837,8 @@ Konnect app.
   can read configuration but cannot actuate anything.
 * **No flow entity.** The codec handles flow correctly and the valve honours a flow byte, but
   the Anthem Plus touchscreen overwrites both temperature and flow, so a Home Assistant
-  setpoint could not be relied on to stay put. Use `send_valve_hex` if you need it.
+  setpoint could not be relied on to stay put. Use `custom_shower`'s *Advanced → Flow*
+  field, or `send_valve_hex`, if you need it.
 * **Music, lighting and steam are read-only.** The controller exposes them as state; driving
   them means activating a favourite that includes them. This is the limit of what **Konnect**
   exposes, not what the hardware can do.
@@ -710,6 +851,14 @@ Konnect app.
   real gap is that no Sengled bulb has ever been tried here. The one attempt used Philips Hue
   and did not pair. See [`hub/lighting.md`](hub/lighting.md).
 * **Warmup's selected outlets can't be read** from the cloud API.
+* **One valve command at a time.** The valve reports a command back about a second after
+  accepting it, and the next command is built from that report. Two valve commands inside that
+  second undo each other — the second one closes what the first opened. With the valve's warm-up
+  off, a `delay:` of about 3 s between valve actions (outlet switches, temperature, the Shower
+  switch, favourites) is enough. With warm-up on, no delay makes a two-step automation work — a
+  command during the warm-up hijacks it onto the outlets you wrote, and one after the warm-up's
+  pause ends the session — so send everything in one command: the `custom_shower` action, or a
+  single `send_valve_hex` word. The failure mode is water off, never water on.
 * **One installation tested.** See below.
 * **The API is undocumented** and Kohler can change it without notice.
 

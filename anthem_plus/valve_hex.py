@@ -26,6 +26,7 @@ HUB's ``SHOWER_VALVE_STS``. See ``docs/gcs/valve_hex.md`` for the evidence, and 
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 
 from .models import ValveModel
@@ -472,6 +473,50 @@ def encode_pair(
     return valve1, encode_word(
         VALVE2_PREFIX, temperature_celsius, flow_percent, outlet_mask(*valve2_flags)
     )
+
+
+def encode_shower(
+    model: ValveModel,
+    temperatures_celsius: Mapping[int, float],
+    flow_percent: float,
+    zone_flags: Mapping[int, Sequence[bool]],
+) -> tuple[str, str]:
+    """Build both words for a whole-shower command from per-zone flags and temperatures.
+
+    The stateless sibling of `encode_pair`, written for the ``custom_shower`` action: the
+    words say everything, and nothing in them comes from what the valve last reported. A
+    zone missing from ``zone_flags``, or with no flag set, is written **closed** (mask
+    ``0x00``) — never "left as it was", because "as it was" is exactly the report that lags
+    a write (GitHub issue #1, 2026-09-03). ``temperatures_celsius`` is per zone, like the
+    valve's own setpoints; zone 2 falls back to zone 1's when not given.
+
+    Flags are ZONE-LOCAL — index 0 is that zone's outlet 1 — unlike `encode_pair`'s flat
+    list, because the global numbering is model-dependent (`ValveModel.outlet_location`)
+    and a per-zone form cannot get it wrong. A flag set beyond the outlets the zone has
+    raises `ValveHexError` rather than being dropped or shifted onto another outlet; on a
+    single-zone model that includes any zone 2 flag at all.
+    """
+
+    def mask_for(zone: int) -> int:
+        flags = list(zone_flags.get(zone, ()))
+        capacity = model.outlets_in_zone(zone)
+        if any(flags[capacity:]):
+            raise ValveHexError(
+                f"{model.name} has {capacity} outlet(s) in zone {zone}; "
+                f"outlet {capacity + 1} or beyond was requested"
+            )
+        return outlet_mask(*flags[:capacity])
+
+    # Both masks are checked before anything is built, so a zone 2 flag on a single-zone
+    # model is an error rather than something silently swallowed by the sentinel below.
+    mask1 = mask_for(1)
+    mask2 = mask_for(2)
+    celsius1 = temperatures_celsius[1]
+    celsius2 = temperatures_celsius.get(2, celsius1)
+    valve1 = encode_word(VALVE1_PREFIX, celsius1, flow_percent, mask1)
+    if not model.uses_valve2:
+        return valve1, UNUSED_VALVE_WORD
+    return valve1, encode_word(VALVE2_PREFIX, celsius2, flow_percent, mask2)
 
 
 def _mask_pair(

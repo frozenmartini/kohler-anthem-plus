@@ -28,3 +28,118 @@ send_valve_hex:
       example: "1184C801"
       selector:
         text:
+
+# Same arrangement for `custom_shower`: the runtime override in `services.py` sets the
+# temperature range and unit for the account and hides the zones and outlets the valve does
+# not have. Keep the wording in step with the `_FIELD_*` constants and
+# `_CUSTOM_SHOWER_DESCRIPTION` there.
+#
+# The booleans are `required: true` on purpose. The automation editor puts an "include this
+# field" checkbox in front of every optional field, which next to a toggle is two switches for
+# one thing; a required boolean is shown as the toggle alone, pre-filled off (frontend
+# `ha-service-control`, `showOptionalToggle`). The schema still defaults them to off, so a
+# YAML call may leave them out.
+custom_shower:
+  name: Custom shower
+  description: >-
+    Start the shower with the outlets and temperature you choose, sent to the valve as one
+    command. This is the reliable way to open an outlet and set its temperature from a single
+    automation step. Outlets you leave off are closed, and leaving every outlet off stops the
+    shower. On a valve with warm-up enabled the valve warms up first and then pauses for two
+    minutes, just as it always does; turn on "Keep shower on after warm-up" (beta) to have it
+    carry on with your outlets and temperature the moment that pause begins. WARNING: this can
+    start water.
+  fields:
+    zone_1:
+      name: Zone 1
+      collapsed: false
+      fields:
+        zone1_temperature:
+          name: Zone 1 temperature
+          required: true
+          description: >-
+            Target temperature for zone 1, in the unit your account uses.
+          example: 104
+          selector:
+            number:
+              min: 80
+              max: 113
+              step: 1
+              unit_of_measurement: "°F"
+              mode: slider
+        zone1_outlet_1:
+          name: Zone 1 outlet 1
+          required: true
+          selector:
+            boolean:
+        zone1_outlet_2:
+          name: Zone 1 outlet 2
+          required: true
+          selector:
+            boolean:
+        zone1_outlet_3:
+          name: Zone 1 outlet 3
+          required: true
+          selector:
+            boolean:
+    zone_2:
+      name: Zone 2
+      collapsed: false
+      fields:
+        zone2_temperature:
+          name: Zone 2 temperature
+          required: false
+          description: >-
+            Target temperature for zone 2. Leave it unset to use the zone 1 temperature.
+          example: 104
+          selector:
+            number:
+              min: 80
+              max: 113
+              step: 1
+              unit_of_measurement: "°F"
+              mode: slider
+        zone2_outlet_1:
+          name: Zone 2 outlet 1
+          required: true
+          selector:
+            boolean:
+        zone2_outlet_2:
+          name: Zone 2 outlet 2
+          required: true
+          selector:
+            boolean:
+        zone2_outlet_3:
+          name: Zone 2 outlet 3
+          required: true
+          selector:
+            boolean:
+    keep_on_after_warmup:
+      name: Keep shower on after warm-up (beta)
+      required: true
+      description: >-
+        Beta, tested on one valve so far. Only matters when the valve's warm-up is enabled.
+        After warming up, the valve pauses for two minutes, just as it always does. With this
+        on, the shower carries on with your outlets and temperature the moment that pause
+        begins. Off, the valve's two-minute pause runs as usual.
+      selector:
+        boolean:
+    advanced_fields:
+      name: Advanced
+      collapsed: true
+      fields:
+        flow:
+          name: Flow
+          required: false
+          description: >-
+            Percentage of full flow, from 8 to 100. Leave it unset for full flow. The flow set
+            here holds only until someone presses the flow button on the touchscreen, which
+            takes over from then on.
+          example: 100
+          selector:
+            number:
+              min: 8
+              max: 100
+              step: 1
+              unit_of_measurement: "%"
+              mode: box

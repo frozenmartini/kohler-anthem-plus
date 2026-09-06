@@ -73,6 +73,7 @@ from .anthem_plus import (
 )
 from .anthem_plus.entry_reload import reload_signature
 from .anthem_plus.state import outlet_limits_from_settings
+from .anthem_plus.warmup_resume import Decision, WarmupResume
 from .anthem_plus.valve_hex import (
     UNUSED_VALVE_WORD,
     VALVE1_PREFIX,
@@ -306,6 +307,11 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._warmup_restore_task: asyncio.Task | None = None
         self._warmup_restores = 0
         self._warmup_restored_at: float | None = None
+        # CUSTOM SHOWER: the "keep shower on after warm-up" watcher, one at a time, and
+        # a serial that every command sent from here bumps, so the watcher can tell that
+        # something else was sent after its own write. See `anthem_plus/warmup_resume.py`.
+        self._custom_shower_task: asyncio.Task | None = None
+        self._local_write_serial = 0
         self.hub_state: HubState | None = None
         self.hub_capabilities = HubCapabilities()
         self.favorites: list[dict[str, Any]] = []
@@ -683,6 +689,7 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def async_shutdown_stream(self) -> None:
         """Stop the MQTT stream on unload."""
+        self._cancel_custom_shower("the integration is shutting down")
         if self.cloud_watch is not None:
             # Before the stream, so a timer cannot fire into a half-torn-down coordinator.
             self.cloud_watch.async_stop()
@@ -1455,6 +1462,7 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         #
         # `paused=True` counts as closing whatever it touches, since the water stops either
         # way and the valve reports the mask cleared.
+        self._note_local_write()
         self._cutoff.note_local_write(
             {zone: (0 if paused else mask) for zone, mask in masks.items()}
         )
@@ -1563,10 +1571,13 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if word == UNUSED_VALVE_WORD:
                 continue
             try:
-                decoded = decode_word(word)
+                parsed = decode_word(word)
             except ValveHexError:  # pragma: no cover - already validated above
                 continue
-            closing[zone] = 0 if decoded.paused else decoded.outlet_mask
+            # Not `decoded`: that name is the response built above, and reusing it here
+            # returned the last zone's raw `ValveWord` instead (v0.2.7 and earlier).
+            closing[zone] = 0 if parsed.paused else parsed.outlet_mask
+        self._note_local_write()
         self._cutoff.note_local_write(closing)
         try:
             await self.gcs.async_write_valves(word1, word2)
@@ -1579,6 +1590,130 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raise HomeAssistantError(f"Kohler command failed: {err}") from err
 
         return {"zone1_hex": word1, "zone2_hex": word2, "decoded": decoded}
+
+    # ------------------------------------------------------------------ #
+    # Custom shower
+    # ------------------------------------------------------------------ #
+    def _note_local_write(self) -> None:
+        """Count a command sent from this integration, whichever device it went to.
+
+        Read by the custom-shower watcher: if the serial has moved since its own write,
+        something else was sent in the meantime and the watcher must not resume on top
+        of it. Every command path calls this — valve words, presets, controller
+        favourites and the controller's own shower on/off and stop-all.
+        """
+        self._local_write_serial += 1
+
+    async def async_custom_shower(
+        self, zone1_hex: str, zone2_hex: str, *, keep_on_after_warmup: bool
+    ) -> dict[str, Any]:
+        """Send one complete shower command, optionally resuming it after the warm-up pause.
+
+        The form-driven sibling of `async_send_valve_hex`: `services.py` builds the words
+        from typed fields with `encode_shower`, so both are always supplied and nothing here
+        is read from the valve's last report. It writes **once**. A second write during a
+        warm-up hijacks it onto the written outlets (2026-09-06 live test, session 24 §2c),
+        so nothing is ever held back, delayed or re-sent on its own — except the one case the
+        caller opts into:
+
+        ``keep_on_after_warmup`` — on a valve with warm-up enabled, the valve warms up and
+        then **pauses** for two minutes, just as it always does; left alone, that pause
+        ends the session (`anthem_plus/warmup_resume.py` has the corpus). With this
+        set, a background watcher follows the GCS reports and, when that pause arrives,
+        re-sends the same two words once. It does nothing if no warm-up follows the write, if
+        the warm-up ends in a plain stop, if someone takes over at the wall, if any other
+        command is sent from here in the meantime, or if a new custom shower replaces it.
+        """
+        self._cancel_custom_shower("a new custom shower was sent")
+        result = await self.async_send_valve_hex(zone1_hex, zone2_hex)
+        if keep_on_after_warmup:
+            task = self.hass.async_create_task(
+                self._async_keep_on_after_warmup(
+                    result["zone1_hex"], result["zone2_hex"], self._local_write_serial
+                )
+            )
+            task.add_done_callback(self._custom_shower_done)
+            self._custom_shower_task = task
+        return result
+
+    @callback
+    def _custom_shower_done(self, task: asyncio.Task) -> None:
+        """Drop the finished watcher, and log anything it died of that it did not expect."""
+        if self._custom_shower_task is task:
+            self._custom_shower_task = None
+        if task.cancelled():
+            return
+        if (err := task.exception()) is not None:
+            _LOGGER.error("custom_shower: keep-on watcher failed: %r", err)
+
+    @callback
+    def _cancel_custom_shower(self, reason: str) -> None:
+        """Drop a pending keep-on watcher, saying why."""
+        task = self._custom_shower_task
+        self._custom_shower_task = None
+        if task is not None and not task.done():
+            _LOGGER.info("custom_shower: keep-on watcher cancelled, %s", reason)
+            task.cancel()
+
+    async def _async_keep_on_after_warmup(
+        self, word1: str, word2: str, serial: int
+    ) -> None:
+        """Re-send a custom shower once the valve's warm-up ends in its pause.
+
+        Woken by every coordinator update and once a second regardless, so the deadlines in
+        `WarmupResume` are honoured even if the valve goes quiet. Reads only the valve's own
+        state — `warmUpStatus`, the pause flag and the masks — never the controller's.
+        """
+        poke = asyncio.Event()
+
+        @callback
+        def _on_update() -> None:
+            poke.set()
+
+        remove = self.async_add_listener(_on_update)
+        watch = WarmupResume(time.monotonic())
+        try:
+            while True:
+                try:
+                    await asyncio.wait_for(poke.wait(), timeout=1.0)
+                except asyncio.TimeoutError:
+                    pass
+                poke.clear()
+                if self._local_write_serial != serial:
+                    _LOGGER.info(
+                        "custom_shower: another command was sent since; not resuming "
+                        "after the warm-up"
+                    )
+                    return
+                state = self.gcs_state
+                if state is None:
+                    return
+                words = [state.valve1]
+                if self.model.uses_valve2:
+                    words.append(state.valve2)
+                outcome = watch.observe(
+                    time.monotonic(),
+                    state.warmup_in_progress,
+                    [bool(word and word.paused) for word in words],
+                    [word.outlet_mask if word else 0 for word in words],
+                )
+                if outcome.decision is Decision.WAIT:
+                    continue
+                if outcome.decision is Decision.RESUME:
+                    _LOGGER.info(
+                        "custom_shower: %s; resuming zone1=%s zone2=%s",
+                        outcome.reason,
+                        word1,
+                        word2,
+                    )
+                    await self.async_send_valve_hex(word1, word2)
+                else:
+                    _LOGGER.info("custom_shower: %s", outcome.reason)
+                return
+        except HomeAssistantError as err:
+            _LOGGER.warning("custom_shower: could not resume after the warm-up: %s", err)
+        finally:
+            remove()
 
     async def async_set_zone_outlet(self, zone: int, outlet: int, on: bool) -> None:
         """Open or close one outlet within a zone.
@@ -1606,6 +1741,7 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         if self.gcs is None:
             raise HomeAssistantError("No Anthem valve on this account")
+        self._note_local_write()
         try:
             await self.gcs.async_activate_preset(preset_id, True)
         except DeviceOffline as err:
@@ -2162,6 +2298,7 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         if self.hub is None:
             raise HomeAssistantError("No Anthem Plus controller on this account")
+        self._note_local_write()
         try:
             await self.hub.async_activate_favorite(favorite_id, name, True)
         except DeviceOffline as err:
@@ -2221,6 +2358,7 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         if self.hub is None:
             raise HomeAssistantError("No Anthem Plus controller on this account")
+        self._note_local_write()
         try:
             await self.hub.async_set_shower(on)
         except DeviceOffline as err:
@@ -2240,6 +2378,7 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         if self.hub is None:
             raise HomeAssistantError("No Anthem Plus controller on this account")
+        self._note_local_write()
         try:
             await self.hub.async_stop_all()
         except DeviceOffline as err:

@@ -53,6 +53,7 @@ from .report_log import ReportLog
 from .runtime_cutoff import ZoneCutoff, ZoneCutoffDetector, ZoneReading
 from .state import GcsPreset, GcsState, HubState, HubZone
 from .warmup import journal_event, restore_target, should_restore_warmup
+from .warmup_resume import Decision, Outcome, WarmupResume
 from .topology import (
     describe as describe_topology,
     topology_from_hub_configuration,
@@ -75,6 +76,7 @@ from .valve_hex import (
     decode_valve_state,
     decode_word,
     encode_pair,
+    encode_shower,
     encode_word,
     outlet_mask,
     pause_pair,
@@ -96,6 +98,9 @@ __all__ = [
     "journal_event",
     "restore_target",
     "should_restore_warmup",
+    "Decision",
+    "Outcome",
+    "WarmupResume",
     "AuthUnavailable",
     "Customer",
     "Device",
@@ -143,6 +148,7 @@ __all__ = [
     "decode_valve_state",
     "decode_word",
     "encode_pair",
+    "encode_shower",
     "encode_word",
     "outlet_mask",
     "pause_pair",

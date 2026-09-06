@@ -448,6 +448,10 @@ WARMUP_LABELS = {
 # reads is a claim that something exists; these claimed five services that did not.
 # `tests/test_warmup_select.py` fails if the warmup pair reappears.
 SERVICE_SEND_VALVE_HEX = "send_valve_hex"
+# The form-driven sibling: outlets, temperature and an optional flow as typed fields, sent as
+# ONE complete write. Added 2026-09-06 after GitHub issue #1 showed that every UI-built
+# automation ends up as two valve commands back to back, which the valve cannot take.
+SERVICE_CUSTOM_SHOWER = "custom_shower"
 
 # ---------------------------------------------------------------------------
 # Warmup auto-restore

@@ -142,6 +142,28 @@ The connection stays open and waits.</li>
 
 <hr>
 
+<h3 id="custom-shower">Custom shower service</h3>
+
+<p>Create a custom shower action for your automations. Choose the outlets and the temperatures you
+want, and the whole shower reaches the valve as one command.</p>
+
+<p><b>Beta:</b> <b>keep shower on after the valve's warm-up is finished.</b> Your shower will no
+longer pause and wait for you to resume.</p>
+
+<table cellpadding="6">
+<tr>
+<td align="center" width="49%" valign="top"><sub>ADD THE ACTION</sub><br><br>
+<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/ha-custom-shower-picker-dark.png" width="300" alt="The Custom shower action in Home Assistant's Add action picker">
+</td>
+<td width="2%" align="center"><img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/vline-grey-465.svg" width="1" height="465" alt=""></td>
+<td align="center" width="49%" valign="top"><sub>CHOOSE OUTLETS AND TEMPERATURE</sub><br><br>
+<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/ha-custom-shower-form-dark.png" width="300" alt="The Custom shower form, with a temperature slider and one toggle per outlet">
+</td>
+</tr>
+</table>
+
+<hr>
+
 <h3 id="automation-examples">Automation examples</h3>
 
 <ul>
@@ -280,7 +302,7 @@ can run water deserves that caution.</p>
 <h3 id="documentation">Documentation</h3>
 
 <p><b><a href="https://github.com/frozenmartini/kohler-anthem-plus/blob/main/docs/user_guide.md">The full guide</a></b> covers every entity, the
-<code>send_valve_hex</code> service, each feature in detail, automation examples and
+<code>custom_shower</code> and <code>send_valve_hex</code> actions, each feature in detail, automation examples and
 troubleshooting.</p>
 
 <p><b><a href="https://github.com/frozenmartini/kohler-anthem-plus/tree/main/docs">docs/</a></b> is a complete protocol reference, not just integration notes —
