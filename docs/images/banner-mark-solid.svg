@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="316" height="316" viewBox="-0.5 -22 79 79" fill="none" role="img" aria-label="Kohler Anthem Plus">
+  <!-- Fallback kept 2026-09-07 when banner-mark.svg switched back to a real knock-out
+       mask (see that file). This is the earlier white-line repaint: fixed rather than
+       theme-adaptive, but immune to any masking/rasterisation quirk by construction,
+       since it has no mask at all. If the masked banner ever shows banding on some
+       renderer, point the root README and user_guide.md's <img> back at this file
+       instead of re-deriving it. -->
+  <rect x="-0.5" y="-22" width="79" height="79" rx="16" fill="#A35CD6"/>
+  <g transform="translate(5.6265306,-5.0714286) scale(1.2897959)" stroke="#FFFFFF" stroke-width="3.5">
+    <rect x="0.5" y="6.3" width="57.75" height="22.4" rx="4.53579" fill="#9253DB"/>
+    <ellipse cx="22.25" cy="17.5" rx="15.75" ry="15.3" fill="#6A3DE8"/>
+  </g>
+</svg>
