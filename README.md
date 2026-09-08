@@ -60,6 +60,9 @@ shuts off, it goes back on automatically — same outlets, same temperature.
 <br><br>
 <b>Live outlet and temperature</b> — move a setpoint or flip an outlet and the water follows
 immediately. No scene to apply, no confirm step.
+<br><br>
+<b>Every valve on the account</b> — one device per Anthem valve and per controller, each with
+its own entities and settings. New in 0.4.0, beta.
 </td>
 <td width="2%" align="center"><img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/vline-grey-340.svg" width="1" height="340" alt=""></td>
 <td valign="top" width="49%">
