@@ -1,6 +1,7 @@
 """The Kohler Anthem Plus integration.
 
-Supports both products in the Anthem line, and works with either or both on an account:
+Supports both products in the Anthem line, and works with either or both on an account —
+any number of each, every valve and every controller as its own device:
 
 * **Anthem** (SKU ``GCS``) — the digital valve with built-in Wi-Fi. Full outlet,
   temperature, and flow control.
@@ -112,6 +113,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Services are global, not per entry — `async_register_services` is idempotent so this
     # is safe on every entry and every reload. It registers nothing for a HUB-only account:
     # `send_valve_hex` writes to a valve endpoint that such an account does not have.
+    # With several valves the actions take a `device_id` to say which one.
     async_register_services(hass, coordinator)
 
     # Deliberately no "GCS"/"HUB" here: those strings exist only inside Kohler's API and
@@ -120,21 +122,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         filter(
             None,
             (
-                f"Anthem Valve ({coordinator.gcs_device.device_id})"
-                if coordinator.gcs_device
-                else None,
-                f"Anthem Plus ({coordinator.hub_device.device_id})"
-                if coordinator.hub_device
-                else None,
+                # Every device, each by the name its device page will carry — and, for a
+                # valve, the layout it decodes with, which is its own rather than the entry's.
+                *(
+                    f"{v.name} ({v.device_id}, {v.model.sku}, {v.model.total_outlets} outlets)"
+                    for v in coordinator.valves
+                ),
+                *(f"{c.name} ({c.device_id})" for c in coordinator.controllers),
             ),
         )
     )
-    _LOGGER.info(
-        "Kohler Anthem Plus ready (%s), valve model %s with %d outlets",
-        found or "no devices",
-        coordinator.model.sku,
-        coordinator.model.total_outlets,
-    )
+    _LOGGER.info("Kohler Anthem Plus ready (%s)", found or "no devices")
     return True
 
 
@@ -148,8 +146,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # card pointing at an integration that is no longer installed. Deleting a missing
         # issue is a no-op, so this is safe on a plain reload too — setup re-raises it if the
         # condition still holds.
-        ir.async_delete_issue(hass, DOMAIN, f"{ISSUE_NOT_SET_UP}_{entry.entry_id}")
         coordinator: KohlerAnthemPlusCoordinator = hass.data[DOMAIN].pop(entry.entry_id)
+        # The per-valve ids, plus the entry-only id an install from before 2026-09-08 may
+        # still be carrying.
+        ir.async_delete_issue(hass, DOMAIN, f"{ISSUE_NOT_SET_UP}_{entry.entry_id}")
+        for valve in coordinator.valves:
+            ir.async_delete_issue(hass, DOMAIN, valve.issue_id)
         await coordinator.async_shutdown_stream()
         if not hass.data[DOMAIN]:
             hass.data.pop(DOMAIN)

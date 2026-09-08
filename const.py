@@ -8,6 +8,16 @@ from __future__ import annotations
 
 DOMAIN = "kohler_anthem_plus"
 
+# Device display names. These also decide entity_id prefixes, because Home Assistant builds
+# entity ids from the device name plus the entity name — so "Anthem Valve" + "Outlet 1"
+# yields `binary_sensor.anthem_valve_outlet_1`.
+#
+# A second Anthem Plus controller on the account cannot also be called "Anthem Plus" — two
+# devices with one name would hand the second one `_2` entity ids — so with several, each is
+# suffixed with its Konnect name. See `coordinator.controller_names`.
+DEVICE_NAME_VALVE = "Anthem Valve"
+DEVICE_NAME_CONTROLLER = "Anthem Plus"
+
 # ---------------------------------------------------------------------------
 # Config-entry keys
 # ---------------------------------------------------------------------------
@@ -29,6 +39,13 @@ CONF_WATER_UNITS = "water_units"
 # Stored per config entry, never global: two Home Assistant instances on one account must
 # not share an identity or they would fight over the same MQTT client id.
 CONF_MOBILE_DEVICE_ID = "mobile_device_id"
+# Per-valve settings, keyed by the valve's device id, in both `entry.data` and
+# `entry.options` — an account can carry several valves since 2026-09-08, and each has
+# its own learned run times (data) and its own Endless Shower, Warmup Auto-Restore and
+# remembered warm-up mode (options). The flat keys those used to be are migrated under
+# here once, at setup, by `KohlerAnthemPlusCoordinator._migrate_valve_settings`.
+# Reload-ignored in both lists for the same reason every one of those keys was.
+CONF_VALVES = "valves"
 
 # ---------------------------------------------------------------------------
 # Polling — deliberately none
@@ -83,12 +100,12 @@ PRESET_HIDDEN_IDS: frozenset[int] = frozenset({1})
 # controller know about it" — and the second decides whether the controller's `stopall`,
 # `valvecontrol OFF`, and 60-minute session ceiling apply at all. So the `ControllerOutlet`
 # sensors are now the Anthem Plus device's reference for water, and
-# `coordinator.hub_water_is_running` — which backs both controller switches — is defined to
+# `Controller.water_is_running` — which backs both controller switches — is defined to
 # agree with them exactly.
 #
 # Turning this off would delete the rows the owner reads the controller's view from. The
-# switches keep working (they read `hub_state`, not the entities), but the evidence behind
-# them becomes invisible.
+# switches keep working (they read the controller's state, not the entities), but the
+# evidence behind them becomes invisible.
 EXPOSE_CONTROLLER_WATER_STATE = True
 
 # ---------------------------------------------------------------------------
@@ -350,7 +367,7 @@ DEFAULT_PRESET_TIMER_SECONDS = 3600
 #   exclusion matters more than the comparison it is part of.
 # * `CONF_MOBILE_DEVICE_ID` — generated once on first connect, then reused forever.
 RELOAD_IGNORED_DATA_KEYS = frozenset(
-    {CONF_REFRESH_TOKEN, CONF_OUTLET_RUN_TIMES, CONF_MOBILE_DEVICE_ID}
+    {CONF_REFRESH_TOKEN, CONF_OUTLET_RUN_TIMES, CONF_MOBILE_DEVICE_ID, CONF_VALVES}
 )
 
 # `RELOAD_IGNORED_OPTION_KEYS` is defined further down, after the warmup constants it
@@ -501,6 +518,7 @@ RELOAD_IGNORED_OPTION_KEYS = frozenset(
         CONF_WARMUP_AUTO_RESTORE,
         CONF_LAST_WARMUP_MODE,
         CONF_REPORT_LOG_FILE,
+        CONF_VALVES,
     }
 )
 

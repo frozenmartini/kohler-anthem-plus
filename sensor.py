@@ -30,7 +30,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .anthem_plus.models import OutletStateSource, resolve_outlet_source
 from .anthem_plus.valve_hex import encode_word
 from .const import DOMAIN, EXPOSE_CONTROLLER_WATER_STATE
-from .coordinator import KohlerAnthemPlusCoordinator
+from .coordinator import Controller, KohlerAnthemPlusCoordinator, Valve
 from .entity import KohlerControllerEntity, KohlerValveEntity
 
 # The four states the valve can be in, in priority order. "Warming Up" outranks "Water
@@ -57,40 +57,44 @@ async def async_setup_entry(
     coordinator: KohlerAnthemPlusCoordinator = hass.data[DOMAIN][entry.entry_id]
     entities: list[SensorEntity] = []
 
-    if coordinator.gcs_device is not None:
+    # One set per valve — each is its own device with its own state and layout.
+    for valve in coordinator.valves:
         entities += [
-            ValveStatusSensor(coordinator),
-            ValveLastUpdateSensor(coordinator),
-            ValveHexSensor(coordinator, 1),
-            OutletMaxRunTimeSensor(coordinator, 1),
+            ValveStatusSensor(coordinator, valve),
+            ValveLastUpdateSensor(coordinator, valve),
+            ValveHexSensor(coordinator, valve, 1),
+            OutletMaxRunTimeSensor(coordinator, valve, 1),
         ]
-        if coordinator.model.uses_valve2:
-            entities.append(ValveHexSensor(coordinator, 2))
+        if valve.model.uses_valve2:
+            entities.append(ValveHexSensor(coordinator, valve, 2))
 
     # Controller-only accounts get the zone temperature from SHOWER_VALVE_STS. Not created
     # where a valve exists: the valve reports its own setpoint per zone, and the controller
     # goes stale the moment the valve is driven directly.
     source = resolve_outlet_source(
-        coordinator.gcs_device is not None, coordinator.hub_device is not None
+        bool(coordinator.valves), bool(coordinator.controllers)
     )
     controller_water = source is OutletStateSource.HUB_MQTT or (
-        coordinator.hub_device is not None and EXPOSE_CONTROLLER_WATER_STATE
+        bool(coordinator.controllers) and EXPOSE_CONTROLLER_WATER_STATE
     )
-    if coordinator.hub_device is not None:
+    # One set per controller: each is its own device with its own state and — since a
+    # second bathroom need not have the same valve — its own outlet layout.
+    for controller in coordinator.controllers:
         # Diagnostic, and about the controller's *reporting* rather than the water, so it is
-        # created on every account that has a controller — unlike everything gated below.
-        entities.append(ControllerLastUpdateSensor(coordinator))
+        # created for every controller — unlike everything gated below.
+        entities.append(ControllerLastUpdateSensor(coordinator, controller))
 
-    if controller_water:
-        entities += [
-            ControllerZoneTemperatureSensor(coordinator, zone)
-            for zone in coordinator.model.zones
-        ]
-        # Same gate as the outlet sensors, and for the same reason: this reports water state
-        # from the controller, which contradicts the valve during a valve-driven session
-        # (`status: OFF` with an all-zero outlet array while water runs). On a controller-only
-        # account it is the authoritative answer; alongside a valve it is a comparison tool.
-        entities.append(ControllerStatusSensor(coordinator))
+        if controller_water:
+            entities += [
+                ControllerZoneTemperatureSensor(coordinator, controller, zone)
+                for zone in controller.model.zones
+            ]
+            # Same gate as the outlet sensors, and for the same reason: this reports water
+            # state from the controller, which contradicts the valve during a valve-driven
+            # session (`status: OFF` with an all-zero outlet array while water runs). On a
+            # controller-only account it is the authoritative answer; alongside a valve it
+            # is a comparison tool.
+            entities.append(ControllerStatusSensor(coordinator, controller))
 
     async_add_entities(entities)
 
@@ -115,8 +119,8 @@ class ValveStatusSensor(KohlerValveEntity, SensorEntity):
     _attr_device_class = SensorDeviceClass.ENUM
     _attr_options = VALVE_STATES
 
-    def __init__(self, coordinator: KohlerAnthemPlusCoordinator) -> None:
-        super().__init__(coordinator)
+    def __init__(self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve) -> None:
+        super().__init__(coordinator, valve)
         self._attr_unique_id = f"{self._device_id}_status"
 
     @property
@@ -124,10 +128,21 @@ class ValveStatusSensor(KohlerValveEntity, SensorEntity):
         """Whether the controller reports a warm-up of its own.
 
         From `data.showerwarmup` on the controller's `SHOWER_VALVE_STS`. False on a
-        valve-only account, where there is no controller to ask.
+        valve-only account, where there is no controller to ask — and False on an account
+        with **several** controllers or several valves, where there is no way to tell
+        which controller fronts this valve: `hub-configuration` names no valve, so merging
+        a controller's warm-up would report the guest bathroom's as this shower's. There
+        the valve is read alone, and `controller_warmup` below says so with a None.
         """
-        hub = self.coordinator.hub_state
-        return bool(hub is not None and hub.shower_warmup)
+        if not self._paired:
+            return False
+        return bool(self.coordinator.controllers[0].state.shower_warmup)
+
+    @property
+    def _paired(self) -> bool:
+        """Whether the account has exactly one valve and one controller — the only case in
+        which the two can be assumed to be the same shower."""
+        return len(self.coordinator.controllers) == 1 and len(self.coordinator.valves) == 1
 
     @property
     def native_value(self) -> str | None:
@@ -155,7 +170,13 @@ class ValveStatusSensor(KohlerValveEntity, SensorEntity):
         state = self._state
         return {
             "valve_warmup": bool(state and state.warmup_in_progress),
-            "controller_warmup": self._hub_warmup,
+            # None — "not asked", not "no" — when the pairing is ambiguous; see
+            # `_hub_warmup`. False on a valve-only account, as it always was.
+            "controller_warmup": (
+                self._hub_warmup
+                if self._paired or not self.coordinator.controllers
+                else None
+            ),
         }
 
 
@@ -178,8 +199,8 @@ class ValveLastUpdateSensor(ValveDiagnosticSensor):
     _attr_icon = "mdi:clock-check-outline"
     _attr_device_class = SensorDeviceClass.TIMESTAMP
 
-    def __init__(self, coordinator: KohlerAnthemPlusCoordinator) -> None:
-        super().__init__(coordinator)
+    def __init__(self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve) -> None:
+        super().__init__(coordinator, valve)
         self._attr_unique_id = f"{self._device_id}_last_update"
 
     @property
@@ -219,8 +240,10 @@ class ValveHexSensor(ValveDiagnosticSensor):
 
     _attr_icon = "mdi:hexadecimal"
 
-    def __init__(self, coordinator: KohlerAnthemPlusCoordinator, zone: int) -> None:
-        super().__init__(coordinator)
+    def __init__(
+        self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve, zone: int
+    ) -> None:
+        super().__init__(coordinator, valve)
         self._zone = zone
         self._attr_name = f"Zone {zone} Hex"
         self._attr_unique_id = f"{self._device_id}_zone_{zone}_hex"
@@ -287,7 +310,7 @@ class OutletMaxRunTimeSensor(ValveDiagnosticSensor):
     Learned two ways: read over REST from `gcsadvancestate` at setup and on every MQTT
     reconnect (the 2026-08-17 correction — this was long believed unreadable on demand),
     and absorbed from the valve's unprompted one-outlet-at-a-time MQTT announcements.
-    Both funnel through `coordinator._learn_run_times`. This sensor exists so a
+    Both funnel through `Valve._learn_run_times`. This sensor exists so a
     shower-time-limit change made on the panel or the app shows up in Home Assistant
     without waiting for a shower: watch this value after changing the limit, rather than
     guessing whether it took.
@@ -295,12 +318,12 @@ class OutletMaxRunTimeSensor(ValveDiagnosticSensor):
     **Reads `unknown` until this specific outlet has been learned at least once** —
     normally within seconds of Home Assistant starting, via the REST read, but genuinely
     unknown before that, not zero. It is also the same figure the run-time cutoff feature arms itself from
-    (`coordinator.outlet_run_times`), so a value showing up here means that outlet is now
+    (`Valve.outlet_run_times`), so a value showing up here means that outlet is now
     protected by the cutoff, too.
 
     One outlet only, deliberately — every outlet observed on this install has agreed (all six
     at the same `maximumRunTime`), so a second one would just repeat this value. If a future
-    install disagrees per outlet, `coordinator.outlet_run_times` already has the full map;
+    install disagrees per outlet, `Valve.outlet_run_times` already has the full map;
     only the entity is limited to one.
     """
 
@@ -309,10 +332,12 @@ class OutletMaxRunTimeSensor(ValveDiagnosticSensor):
     _attr_native_unit_of_measurement = UnitOfTime.SECONDS
     _attr_entity_registry_enabled_default = True
 
-    def __init__(self, coordinator: KohlerAnthemPlusCoordinator, outlet: int) -> None:
-        super().__init__(coordinator)
+    def __init__(
+        self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve, outlet: int
+    ) -> None:
+        super().__init__(coordinator, valve)
         self._outlet = outlet
-        zone, _ = coordinator.model.outlet_location(outlet)
+        zone, _ = valve.model.outlet_location(outlet)
         self._attr_name = f"Zone {zone} Outlet {outlet} Max Run Time"
         self._attr_unique_id = f"{self._device_id}_outlet_{outlet}_max_run_time"
 
@@ -323,7 +348,7 @@ class OutletMaxRunTimeSensor(ValveDiagnosticSensor):
 
     @property
     def native_value(self) -> int | None:
-        return self.coordinator.outlet_run_times.get(self._outlet)
+        return self._valve.outlet_run_times.get(self._outlet)
 
 
 class ControllerDiagnosticSensor(KohlerControllerEntity, SensorEntity):
@@ -351,8 +376,10 @@ class ControllerLastUpdateSensor(ControllerDiagnosticSensor):
     _attr_icon = "mdi:clock-check-outline"
     _attr_device_class = SensorDeviceClass.TIMESTAMP
 
-    def __init__(self, coordinator: KohlerAnthemPlusCoordinator) -> None:
-        super().__init__(coordinator)
+    def __init__(
+        self, coordinator: KohlerAnthemPlusCoordinator, controller: Controller
+    ) -> None:
+        super().__init__(coordinator, controller)
         self._attr_unique_id = f"{self._device_id}_last_update"
 
     @property
@@ -394,8 +421,10 @@ class ControllerStatusSensor(KohlerControllerEntity, SensorEntity):
     _attr_device_class = SensorDeviceClass.ENUM
     _attr_options = CONTROLLER_STATES
 
-    def __init__(self, coordinator: KohlerAnthemPlusCoordinator) -> None:
-        super().__init__(coordinator)
+    def __init__(
+        self, coordinator: KohlerAnthemPlusCoordinator, controller: Controller
+    ) -> None:
+        super().__init__(coordinator, controller)
         self._attr_unique_id = f"{self._device_id}_status"
 
     @property
@@ -444,8 +473,10 @@ class ControllerZoneTemperatureSensor(KohlerControllerEntity, SensorEntity):
 
     _attr_device_class = SensorDeviceClass.TEMPERATURE
 
-    def __init__(self, coordinator: KohlerAnthemPlusCoordinator, zone: int) -> None:
-        super().__init__(coordinator)
+    def __init__(
+        self, coordinator: KohlerAnthemPlusCoordinator, controller: Controller, zone: int
+    ) -> None:
+        super().__init__(coordinator, controller)
         self._zone = zone
         self._attr_name = f"Zone {zone} Temperature"
         self._attr_unique_id = f"{self._device_id}_zone_{zone}_temperature"

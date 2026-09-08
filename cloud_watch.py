@@ -101,7 +101,7 @@ from .const import (
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from .anthem_plus.mqtt import Envelope
-    from .coordinator import KohlerAnthemPlusCoordinator
+    from .coordinator import KohlerAnthemPlusCoordinator, Valve
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -121,16 +121,20 @@ def _utc_iso(stamp: float | None) -> str | None:
 class CloudConnectionWatch:
     """Decides when to ask Kohler whether the valve is still reachable, and remembers.
 
-    One instance per config entry, owned by the coordinator, created only when the account
-    has a valve. Trigger A is wired only when it also has a controller.
+    One instance per valve, owned by its :class:`~.coordinator.Valve` — it is that valve's
+    reachability it reports. Trigger A is wired only when the account also has a
+    controller.
 
     **Nothing here ever changes valve state.** The only network call is a GET of
     ``gcs-state``, and its payload is deliberately *not* fed to :class:`GcsState` — see
     :meth:`_async_check`.
     """
 
-    def __init__(self, coordinator: KohlerAnthemPlusCoordinator) -> None:
+    def __init__(
+        self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve
+    ) -> None:
         self._coordinator = coordinator
+        self._valve = valve
         self._hass = coordinator.hass
 
         # Answer state. `_connected` is None until the first successful read: "we have not
@@ -182,7 +186,7 @@ class CloudConnectionWatch:
             "last_error": self._last_error,
             "cloud_last_connected": self._last_connected_epoch,
             "seconds_since_valve_message": quiet_for,
-            "contradiction_watch": self._coordinator.hub_device is not None,
+            "contradiction_watch": bool(self._coordinator.controllers),
         }
 
     # ------------------------------------------------------------------ #
@@ -304,7 +308,7 @@ class CloudConnectionWatch:
     # ------------------------------------------------------------------ #
     def _request_check(self, trigger: str) -> None:
         """Apply the guards, then spawn the read. Never blocks the caller."""
-        if self._stopped or self._coordinator.gcs_device is None:
+        if self._stopped:
             return
 
         stream = self._coordinator.stream
@@ -342,9 +346,7 @@ class CloudConnectionWatch:
         must not be able to start a warmup restore as a side effect. The reseed paths that
         *are* meant to apply state still do.
         """
-        device = self._coordinator.gcs_device
-        if device is None:
-            return
+        device = self._valve.gcs_device
         try:
             payload = await self._coordinator.client.async_get_gcs_state(device.device_id)
         except (AuthError, KohlerError) as err:

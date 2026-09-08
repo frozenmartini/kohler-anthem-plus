@@ -140,12 +140,27 @@ and cannot actuate anything. Establishing that cost real debugging time; see
 
 ## In Home Assistant
 
-Two devices, one per product, each with its own entities.
+One device per product, each with its own entities: an **Anthem Valve** for each valve on
+the account, and an **Anthem Plus** for each controller.
+
+**Several of either.** An account with more than one valve or controller — one per
+bathroom, say — gets one device per unit, each with the full set of entities, its own
+favourites and settings (Endless Shower, Warmup Auto-Restore and the learned run-time
+limits are per valve), and each decoding outlets with the layout its own hardware reports,
+so a 6-outlet valve and a 3-outlet valve on one account each get the right rows. To keep
+their entity IDs apart, the devices are named after the unit's name in the Konnect app:
+**Anthem Valve Master Bath**, **Anthem Plus Guest Bath**, and so on. With a single valve
+or controller the device is plainly **Anthem Valve** or **Anthem Plus**, as it always was.
+The `custom_shower` and `send_valve_hex` actions gain a **Valve** field to say which valve
+they are for — required only when there is more than one.
 
 ## Entities
 
 Entity IDs below assume the default device names **Anthem Valve** and **Anthem Plus**. If you
-rename a device, its entity IDs change with it.
+rename a device, its entity IDs change with it — and on an account with several valves or
+controllers the default name already carries the Konnect name, so `switch.anthem_plus_shower`
+becomes `switch.anthem_plus_master_bath_shower` and `switch.anthem_valve_shower` becomes
+`switch.anthem_valve_master_bath_shower`.
 
 ### Anthem valve
 
@@ -403,6 +418,7 @@ thing in YAML:
 ```yaml
 action: kohler_anthem_plus.custom_shower
 data:
+  device_id: 1a2b3c…          # only with more than one valve: the valve device's id
   zone1_temperature: 108      # in your account's unit; the slider covers 80–113 °F
   zone1_outlet_1: true        # outlets you leave out are closed
   keep_on_after_warmup: true  # optional and beta, see below
@@ -481,6 +497,7 @@ state.
 ```yaml
 action: kohler_anthem_plus.send_valve_hex
 data:
+  device_id: 1a2b3c…         # only with more than one valve: the valve device's id
   zone1_hex: "0184C801"      # zone 1, 38.8 °C, flow 0xC8 (200) = 100 %, outlet 1
   zone2_hex: "1184C801"      # optional; omitted entirely on a single-zone valve
 ```
@@ -842,6 +859,11 @@ Konnect app.
 * **Music, lighting and steam are read-only.** The controller exposes them as state; driving
   them means activating a favourite that includes them. This is the limit of what **Konnect**
   exposes, not what the hardware can do.
+* **Which controller fronts which valve is not knowable.** Nothing on the cloud side says
+  it, so on an account with more than one valve or more than one controller the valve's
+  `Status` no longer folds in a controller-initiated warm-up — it reads the valve alone and
+  reports `controller_warmup: null`. With exactly one of each they are assumed to be the
+  same shower, as before.
 * **One valve body.** Anthem+ can coordinate two; this integration was written against a
   single-valve system and does not handle a second. The protocol side is already worked out —
   see [`architecture.md`](architecture.md) on `parts.valve1` / `parts.valve2` — so this is

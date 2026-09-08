@@ -20,7 +20,7 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
-from .coordinator import KohlerAnthemPlusCoordinator
+from .coordinator import Controller, KohlerAnthemPlusCoordinator, Valve
 from .entity import KohlerControllerEntity, KohlerValveEntity
 
 _LOGGER = logging.getLogger(__name__)
@@ -35,12 +35,16 @@ async def async_setup_entry(
     coordinator: KohlerAnthemPlusCoordinator = hass.data[DOMAIN][entry.entry_id]
 
     # The capture covers the whole account rather than one device, so it only needs to live
-    # somewhere findable. The valve is the primary device where one exists; a controller-only
-    # account gets it on the controller instead.
-    if coordinator.gcs_device is not None:
-        async_add_entities([ValveNewCaptureButton(coordinator)])
-    elif coordinator.hub_device is not None:
-        async_add_entities([ControllerNewCaptureButton(coordinator)])
+    # somewhere findable. The first valve the cloud lists is the primary device where one
+    # exists; a controller-only account gets it on the first controller — one button,
+    # because it is one capture, and a copy per device would be several rows for the
+    # same action.
+    if coordinator.valves:
+        async_add_entities([ValveNewCaptureButton(coordinator, coordinator.valves[0])])
+    elif coordinator.controllers:
+        async_add_entities(
+            [ControllerNewCaptureButton(coordinator, coordinator.controllers[0])]
+        )
 
 
 class _NewCaptureMixin:
@@ -99,8 +103,8 @@ class _NewCaptureMixin:
 class ValveNewCaptureButton(_NewCaptureMixin, KohlerValveEntity, ButtonEntity):
     """Capture button on the Anthem Valve device."""
 
-    def __init__(self, coordinator: KohlerAnthemPlusCoordinator) -> None:
-        super().__init__(coordinator)
+    def __init__(self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve) -> None:
+        super().__init__(coordinator, valve)
         self._attr_unique_id = f"{self._device_id}_new_mqtt_capture"
 
     @property
@@ -112,8 +116,10 @@ class ValveNewCaptureButton(_NewCaptureMixin, KohlerValveEntity, ButtonEntity):
 class ControllerNewCaptureButton(_NewCaptureMixin, KohlerControllerEntity, ButtonEntity):
     """Capture button on a controller-only account. See :class:`ValveNewCaptureButton`."""
 
-    def __init__(self, coordinator: KohlerAnthemPlusCoordinator) -> None:
-        super().__init__(coordinator)
+    def __init__(
+        self, coordinator: KohlerAnthemPlusCoordinator, controller: Controller
+    ) -> None:
+        super().__init__(coordinator, controller)
         self._attr_unique_id = f"{self._device_id}_new_mqtt_capture"
 
     @property

@@ -553,7 +553,9 @@ At most one read per thirty minutes either way. See §"Reachability" below.
 | `POST /platform/api/v1/mobile/settings` | IoT Hub host, device id and SAS credentials. Not state: this is what brings the stream up, and it runs on **every connect attempt** because the password is short-lived |
 
 **A cold start is 14 calls; a reconnect is 6** — the mobile-settings POST plus the five reseed
-GETs, with `hub-configuration` skipped once known.
+GETs, with `hub-configuration` skipped once known. That is for one valve and one controller;
+every further valve or controller on the account adds its own reads (since 2026-09-08 each
+is set up as its own device).
 
 ### Reachability — the one fact neither transport volunteers
 

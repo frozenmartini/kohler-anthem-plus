@@ -44,7 +44,12 @@ from .const import (
     WARMUP_AUTO_RESTORE_NO_TARGET,
     WARMUP_AUTO_RESTORE_ON,
 )
-from .coordinator import KohlerAnthemPlusCoordinator, describe_duration
+from .coordinator import (
+    Controller,
+    KohlerAnthemPlusCoordinator,
+    Valve,
+    describe_duration,
+)
 from .entity import KohlerControllerEntity, KohlerValveEntity
 
 _LOGGER = logging.getLogger(__name__)
@@ -59,24 +64,26 @@ async def async_setup_entry(
     coordinator: KohlerAnthemPlusCoordinator = hass.data[DOMAIN][entry.entry_id]
     entities: list[SwitchEntity] = []
 
-    if coordinator.gcs_device is not None:
-        # An Anthem Plus controller has no per-outlet command: outlets are chosen by
-        # activating a favourite, so a controller-only account gets no outlet switches.
-        model = coordinator.model
-        entities.append(ShowerSwitch(coordinator))
-        entities.append(EndlessShowerSwitch(coordinator))
-        entities.append(WarmupAutoRestoreSwitch(coordinator))
-        entities.append(ValveReportLogSwitch(coordinator))
+    # One set per valve. An Anthem Plus controller has no per-outlet command: outlets are
+    # chosen by activating a favourite, so a controller-only account gets no outlet
+    # switches.
+    for valve in coordinator.valves:
+        model = valve.model
+        entities.append(ShowerSwitch(coordinator, valve))
+        entities.append(EndlessShowerSwitch(coordinator, valve))
+        entities.append(WarmupAutoRestoreSwitch(coordinator, valve))
+        entities.append(ValveReportLogSwitch(coordinator, valve))
         entities.extend(
-            ZoneOutletSwitch(coordinator, zone, outlet)
+            ZoneOutletSwitch(coordinator, valve, zone, outlet)
             for zone in model.zones
             for outlet in range(1, model.outlets_in_zone(zone) + 1)
         )
-    if coordinator.hub_device is not None:
+    # One set per controller — each is its own device with its own command surface.
+    for controller in coordinator.controllers:
         entities += [
-            HubShowerSwitch(coordinator),
-            HubSystemSwitch(coordinator),
-            ControllerReportLogSwitch(coordinator),
+            HubShowerSwitch(coordinator, controller),
+            HubSystemSwitch(coordinator, controller),
+            ControllerReportLogSwitch(coordinator, controller),
         ]
 
     async_add_entities(entities)
@@ -107,8 +114,8 @@ class ShowerSwitch(KohlerValveEntity, SwitchEntity):
     _attr_icon = "mdi:shower"
     _attr_name = "Shower"
 
-    def __init__(self, coordinator: KohlerAnthemPlusCoordinator) -> None:
-        super().__init__(coordinator)
+    def __init__(self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve) -> None:
+        super().__init__(coordinator, valve)
         self._attr_unique_id = f"{self._device_id}_shower"
         self._optimistic: bool | None = None
 
@@ -146,9 +153,9 @@ class ShowerSwitch(KohlerValveEntity, SwitchEntity):
         self.async_write_ha_state()
         try:
             if target:
-                await self.coordinator.async_activate_preset(SHOWER_ON_PRESET_ID)
+                await self._valve.async_activate_preset(SHOWER_ON_PRESET_ID)
             else:
-                await self.coordinator.async_stop_shower()
+                await self._valve.async_stop_shower()
         except Exception:
             # The command failed, so stop showing a position the valve never reached.
             self._optimistic = None
@@ -187,7 +194,8 @@ class EndlessShowerSwitch(KohlerValveEntity, SwitchEntity):
     not nagged unconditionally at toggle or startup: the hub's number is not readable from
     the cloud, so the integration cannot know whether the durations differ until one fires.
 
-    State lives in the config entry's **options**, so the setting survives a restart.
+    State lives in the config entry's **options**, per valve under `CONF_VALVES`, so the
+    setting survives a restart.
     Writing options does not trigger a reload — the key is in `RELOAD_IGNORED_OPTION_KEYS`
     and `_async_update_listener` sees no reloadable difference — and the coordinator reads
     the flag live, so a toggle takes effect on the next message rather than needing a
@@ -198,8 +206,8 @@ class EndlessShowerSwitch(KohlerValveEntity, SwitchEntity):
     _attr_icon = "mdi:timer-refresh-outline"
     _attr_entity_category = EntityCategory.CONFIG
 
-    def __init__(self, coordinator: KohlerAnthemPlusCoordinator) -> None:
-        super().__init__(coordinator)
+    def __init__(self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve) -> None:
+        super().__init__(coordinator, valve)
         self._attr_unique_id = f"{self._device_id}_keep_water_running"
 
     @property
@@ -209,7 +217,7 @@ class EndlessShowerSwitch(KohlerValveEntity, SwitchEntity):
 
     @property
     def is_on(self) -> bool:
-        return self.coordinator.restart_on_runtime_cutoff
+        return self._valve.restart_on_runtime_cutoff
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         await self._async_set(True)
@@ -218,17 +226,14 @@ class EndlessShowerSwitch(KohlerValveEntity, SwitchEntity):
         await self._async_set(False)
 
     async def _async_set(self, value: bool) -> None:
-        entry = self.coordinator.entry
-        self.hass.config_entries.async_update_entry(
-            entry, options={**entry.options, CONF_RESTART_ON_RUNTIME_CUTOFF: value}
-        )
+        self._valve.set_option(CONF_RESTART_ON_RUNTIME_CUTOFF, value)
         if value:
             self._log_enabled_state()
         else:
             _LOGGER.info("Endless Shower disabled")
         # Turning it off clears the Repairs card as well as raising it — an unusable feature
         # nobody has switched on is not a problem worth a card.
-        self.coordinator.async_refresh_setup_issue()
+        self._valve.async_refresh_setup_issue()
         self.async_write_ha_state()
 
     def _log_enabled_state(self) -> None:
@@ -243,8 +248,8 @@ class EndlessShowerSwitch(KohlerValveEntity, SwitchEntity):
         Reported by zone, because that is what the valve times, with the outlet detail kept
         alongside since that is the form the valve announces it in.
         """
-        waiting = self.coordinator.zones_awaiting_run_time
-        known = self.coordinator.outlet_run_times
+        waiting = self._valve.zones_awaiting_run_time
+        known = self._valve.outlet_run_times
 
         if not known:
             _LOGGER.warning(ENDLESS_SHOWER_NOT_SET_UP)
@@ -270,13 +275,13 @@ class EndlessShowerSwitch(KohlerValveEntity, SwitchEntity):
         `armed_zones` empty while the switch is on means the feature is on but inert — the
         zone is the unit that matters, since the valve's timer is per zone.
         """
-        known = self.coordinator.outlet_run_times
+        known = self._valve.outlet_run_times
         return {
-            "armed_zones": self.coordinator.armed_zones,
-            "awaiting_run_time_limit_zones": self.coordinator.zones_awaiting_run_time,
+            "armed_zones": self._valve.armed_zones,
+            "awaiting_run_time_limit_zones": self._valve.zones_awaiting_run_time,
             "armed_outlets": sorted(known),
             "run_time_limits_seconds": {str(k): v for k, v in sorted(known.items())},
-            "awaiting_run_time_limit": self.coordinator.outlets_awaiting_run_time,
+            "awaiting_run_time_limit": self._valve.outlets_awaiting_run_time,
         }
 
 
@@ -324,8 +329,8 @@ class WarmupAutoRestoreSwitch(KohlerValveEntity, SwitchEntity):
     # feature of the shower, and an owner who has never seen the mode revert does not need it.
     _attr_entity_registry_enabled_default = False
 
-    def __init__(self, coordinator: KohlerAnthemPlusCoordinator) -> None:
-        super().__init__(coordinator)
+    def __init__(self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve) -> None:
+        super().__init__(coordinator, valve)
         self._attr_unique_id = f"{self._device_id}_warmup_auto_restore"
 
     @property
@@ -335,13 +340,13 @@ class WarmupAutoRestoreSwitch(KohlerValveEntity, SwitchEntity):
 
     @property
     def is_on(self) -> bool:
-        return self.coordinator.warmup_auto_restore
+        return self._valve.warmup_auto_restore
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """What it would restore to, and how long it waits."""
         return {
-            "restores_to": self.coordinator.last_warmup_mode,
+            "restores_to": self._valve.last_warmup_mode,
             "delay_seconds": WARMUP_AUTO_RESTORE_DELAY_SECONDS,
         }
 
@@ -352,20 +357,17 @@ class WarmupAutoRestoreSwitch(KohlerValveEntity, SwitchEntity):
         await self._async_set(False)
 
     async def _async_set(self, value: bool) -> None:
-        entry = self.coordinator.entry
-        self.hass.config_entries.async_update_entry(
-            entry, options={**entry.options, CONF_WARMUP_AUTO_RESTORE: value}
-        )
+        self._valve.set_option(CONF_WARMUP_AUTO_RESTORE, value)
         if not value:
             _LOGGER.info("Warmup Auto-Restore disabled")
-        elif self.coordinator.last_warmup_mode is None:
+        elif self._valve.last_warmup_mode is None:
             # On but inert, which is indistinguishable from broken unless it says so — the
             # same failure mode Endless Shower's readiness logging exists to prevent.
             _LOGGER.warning(WARMUP_AUTO_RESTORE_NO_TARGET)
         else:
             _LOGGER.warning(
                 WARMUP_AUTO_RESTORE_ON,
-                self.coordinator.last_warmup_mode,
+                self._valve.last_warmup_mode,
                 WARMUP_AUTO_RESTORE_DELAY_SECONDS,
             )
         self.async_write_ha_state()
@@ -381,9 +383,13 @@ class ZoneOutletSwitch(KohlerValveEntity, SwitchEntity):
     _attr_icon = "mdi:shower-head"
 
     def __init__(
-        self, coordinator: KohlerAnthemPlusCoordinator, zone: int, outlet: int
+        self,
+        coordinator: KohlerAnthemPlusCoordinator,
+        valve: Valve,
+        zone: int,
+        outlet: int,
     ) -> None:
-        super().__init__(coordinator)
+        super().__init__(coordinator, valve)
         self._zone = zone
         self._outlet = outlet
         self._attr_name = f"Zone {zone} Outlet {outlet}"
@@ -430,7 +436,7 @@ class ZoneOutletSwitch(KohlerValveEntity, SwitchEntity):
         self._optimistic = target
         self.async_write_ha_state()
         try:
-            await self.coordinator.async_set_zone_outlet(
+            await self._valve.async_set_zone_outlet(
                 self._zone, self._outlet, target
             )
         except Exception:
@@ -463,15 +469,17 @@ class HubShowerSwitch(KohlerControllerEntity, SwitchEntity):
     water is physically running, read the **Anthem Valve** device's Shower switch and outlet
     sensors, which are authoritative.
 
-    See ``coordinator.hub_water_is_running`` for the 2026-08-18 measurement that made this
+    See ``Controller.water_is_running`` for the 2026-08-18 measurement that made this
     the rule.
     """
 
     _attr_name = "Shower"
     _attr_icon = "mdi:shower"
 
-    def __init__(self, coordinator: KohlerAnthemPlusCoordinator) -> None:
-        super().__init__(coordinator)
+    def __init__(
+        self, coordinator: KohlerAnthemPlusCoordinator, controller: Controller
+    ) -> None:
+        super().__init__(coordinator, controller)
         self._attr_unique_id = f"{self._device_id}_shower"
         self._optimistic: bool | None = None
 
@@ -479,7 +487,7 @@ class HubShowerSwitch(KohlerControllerEntity, SwitchEntity):
     def is_on(self) -> bool | None:
         if self._optimistic is not None:
             return self._optimistic
-        return self.coordinator.hub_water_is_running
+        return self._controller.water_is_running
 
     @callback
     def _handle_coordinator_update(self) -> None:
@@ -496,7 +504,7 @@ class HubShowerSwitch(KohlerControllerEntity, SwitchEntity):
         self._optimistic = target
         self.async_write_ha_state()
         try:
-            await self.coordinator.async_set_hub_shower(target)
+            await self.coordinator.async_set_hub_shower(self._controller, target)
         except Exception:
             self._optimistic = None
             self.async_write_ha_state()
@@ -531,8 +539,10 @@ class HubSystemSwitch(KohlerControllerEntity, SwitchEntity):
     _attr_name = "System"
     _attr_icon = "mdi:power"
 
-    def __init__(self, coordinator: KohlerAnthemPlusCoordinator) -> None:
-        super().__init__(coordinator)
+    def __init__(
+        self, coordinator: KohlerAnthemPlusCoordinator, controller: Controller
+    ) -> None:
+        super().__init__(coordinator, controller)
         self._attr_unique_id = f"{self._device_id}_system"
         self._optimistic: bool | None = None
 
@@ -544,8 +554,8 @@ class HubSystemSwitch(KohlerControllerEntity, SwitchEntity):
         return {
             # The controller's own outlet arrays, deliberately — not the valve's. Reading
             # the valve here made this switch report sessions the controller had never been
-            # told about; see `coordinator.hub_water_is_running`.
-            "water": self.coordinator.hub_water_is_running,
+            # told about; see `Controller.water_is_running`.
+            "water": self._controller.water_is_running,
             "music": state.music_on,
             "steam": state.steam_on,
             "light": state.light_on,
@@ -577,10 +587,12 @@ class HubSystemSwitch(KohlerControllerEntity, SwitchEntity):
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         # Water only — see the class docstring on why "on" cannot mean everything.
-        await self._async_set(True, self.coordinator.async_set_hub_shower(True))
+        await self._async_set(
+            True, self.coordinator.async_set_hub_shower(self._controller, True)
+        )
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        await self._async_set(False, self.coordinator.async_stop_hub())
+        await self._async_set(False, self.coordinator.async_stop_hub(self._controller))
 
     async def _async_set(self, target: bool, action) -> None:
         self._optimistic = target
@@ -650,14 +662,16 @@ class _ReportLogSwitch(SwitchEntity):
 class ValveReportLogSwitch(_ReportLogSwitch, KohlerValveEntity):
     """The Report Log switch on the Anthem Valve device page."""
 
-    def __init__(self, coordinator: KohlerAnthemPlusCoordinator) -> None:
-        super().__init__(coordinator)
+    def __init__(self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve) -> None:
+        super().__init__(coordinator, valve)
         self._attr_unique_id = f"{self._device_id}_report_log"
 
 
 class ControllerReportLogSwitch(_ReportLogSwitch, KohlerControllerEntity):
     """The Report Log switch on the Anthem Plus device page."""
 
-    def __init__(self, coordinator: KohlerAnthemPlusCoordinator) -> None:
-        super().__init__(coordinator)
+    def __init__(
+        self, coordinator: KohlerAnthemPlusCoordinator, controller: Controller
+    ) -> None:
+        super().__init__(coordinator, controller)
         self._attr_unique_id = f"{self._device_id}_report_log"
