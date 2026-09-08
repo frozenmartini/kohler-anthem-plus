@@ -13,9 +13,7 @@ send_valve_hex:
     device_id:
       name: Valve
       required: false
-      description: >-
-        Which Anthem valve, when the account has more than one. Leave it empty with a
-        single valve.
+      description: Which Anthem valve, when the account has more than one.
       selector:
         device:
           filter:
@@ -63,9 +61,7 @@ custom_shower:
     device_id:
       name: Valve
       required: false
-      description: >-
-        Which Anthem valve, when the account has more than one. Leave it empty with a
-        single valve.
+      description: Which Anthem valve, when the account has more than one.
       selector:
         device:
           filter:
