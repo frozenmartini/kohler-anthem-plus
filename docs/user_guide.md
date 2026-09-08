@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="images/banner-mark.svg" width="150" alt="Kohler Anthem Plus">
+  <img src="images/banner-mark.png" width="150" alt="Kohler Anthem Plus">
 </p>
 
 <h1 align="center">Kohler Anthem Plus</h1>
