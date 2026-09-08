@@ -169,31 +169,46 @@ class KohlerAnthemPlusConfigFlow(ConfigFlow, domain=DOMAIN):
 
         The valve is preferred: ``gcsadvancestate`` is its own account of its hardware and
         needs no controller. A HUB-only account has no valve id to query, so it falls back
-        to the controller's zone configuration.
+        to a controller's zone configuration — the first of them that answers.
         """
-        valve = next(iter(customer.gcs_devices), None)
-        if valve is not None:
+        # The first valve that answers. As with the controllers below, this only decides
+        # the entry's model; at setup each valve reads its own layout from the same
+        # endpoint, so a second valve of a different model is not held to this answer.
+        for valve in customer.gcs_devices:
             try:
                 setting = await client.async_get_gcs_settings(valve.device_id)
                 detected = topology_from_valve_settings(setting)
                 if detected:
-                    _LOGGER.debug("Topology from valve: %s", detected)
+                    _LOGGER.debug(
+                        "Topology from valve %s: %s", valve.device_id, detected
+                    )
                     return detected
             except (AuthError, KohlerError) as err:
-                _LOGGER.debug("Could not read valve settings: %s", err)
+                _LOGGER.debug(
+                    "Could not read valve settings for %s: %s", valve.device_id, err
+                )
 
-        controller = next(iter(customer.hub_devices), None)
-        if controller is not None:
+        # The first controller that answers. This only decides the entry's model — the
+        # valve's layout, and the fallback for a controller whose own read fails. At setup
+        # the coordinator reads every controller's configuration for itself, so a second
+        # bathroom with a different valve is not held to this answer.
+        for controller in customer.hub_devices:
             try:
                 config = await client.async_get_hub_configuration(controller.device_id)
                 detected = topology_from_hub_configuration(
                     config.get("configuration") or {}
                 )
                 if detected:
-                    _LOGGER.debug("Topology from controller: %s", detected)
+                    _LOGGER.debug(
+                        "Topology from controller %s: %s", controller.device_id, detected
+                    )
                     return detected
             except (AuthError, KohlerError) as err:
-                _LOGGER.debug("Could not read controller configuration: %s", err)
+                _LOGGER.debug(
+                    "Could not read controller configuration for %s: %s",
+                    controller.device_id,
+                    err,
+                )
 
         _LOGGER.debug("Outlet topology could not be detected; asking the user")
         return None

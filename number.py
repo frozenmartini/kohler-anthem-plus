@@ -28,7 +28,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .anthem_plus.valve_hex import celsius_to_unit, unit_to_celsius
 from .const import DOMAIN, UI_TEMPERATURE_MAX_F, UI_TEMPERATURE_MIN_F
-from .coordinator import KohlerAnthemPlusCoordinator
+from .coordinator import KohlerAnthemPlusCoordinator, Valve
 from .entity import KohlerValveEntity
 
 
@@ -42,14 +42,13 @@ async def async_setup_entry(
     No flow number, deliberately — see the module docstring.
     """
     coordinator: KohlerAnthemPlusCoordinator = hass.data[DOMAIN][entry.entry_id]
-    if coordinator.gcs_device is None:
-        # The controller offers no live temperature or flow control — only favourites.
-        return
-
-    zones = [1, 2] if coordinator.model.uses_valve2 else [1]
+    # The controller offers no live temperature or flow control — only favourites — so a
+    # controller-only account gets nothing here. One set per valve otherwise, each with
+    # the zones its own layout has.
     entities: list[NumberEntity] = []
-    for zone in zones:
-        entities.append(ZoneTemperatureNumber(coordinator, zone))
+    for valve in coordinator.valves:
+        for zone in valve.model.zones:
+            entities.append(ZoneTemperatureNumber(coordinator, valve, zone))
     async_add_entities(entities)
 
 
@@ -60,8 +59,10 @@ class ZoneNumberBase(KohlerValveEntity, NumberEntity):
     # quicker than typing, which was not true of the old 32-119 °F span.
     _attr_mode = NumberMode.SLIDER
 
-    def __init__(self, coordinator: KohlerAnthemPlusCoordinator, zone: int) -> None:
-        super().__init__(coordinator)
+    def __init__(
+        self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve, zone: int
+    ) -> None:
+        super().__init__(coordinator, valve)
         self._zone = zone
 
     @property
@@ -87,8 +88,10 @@ class ZoneTemperatureNumber(ZoneNumberBase):
     _attr_device_class = NumberDeviceClass.TEMPERATURE
     _attr_native_step = 1
 
-    def __init__(self, coordinator: KohlerAnthemPlusCoordinator, zone: int) -> None:
-        super().__init__(coordinator, zone)
+    def __init__(
+        self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve, zone: int
+    ) -> None:
+        super().__init__(coordinator, valve, zone)
         # "Zone N <thing>", matching the outlet switches. Home Assistant sorts a device
         # page alphabetically within each category, so leading with the zone keeps a zone's
         # controls together instead of scattering Flow/Temperature away from its outlets.
@@ -128,5 +131,5 @@ class ZoneTemperatureNumber(ZoneNumberBase):
 
     async def async_set_native_value(self, value: float) -> None:
         key = "zone1_temperature" if self._zone == 1 else "zone2_temperature"
-        await self.coordinator.async_apply_valve(**{key: value})
+        await self._valve.async_apply_valve(**{key: value})
 
