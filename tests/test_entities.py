@@ -1358,3 +1358,23 @@ def test_rest_and_mqtt_agree_on_the_scald_limit():
         }
     )
     assert decimal[1].maximum_temperature_tenths == 478
+
+
+def test_cloud_connection_is_visible_and_enabled(valve_model):
+    """0.11.2 unhid it.
+
+    It has to keep *running* whether or not anyone is looking — its value is the record it
+    builds while nobody is watching — so it was enabled but hidden. Hiding put "(Hidden)"
+    beside the name everywhere it appeared, which reads as a broken entity, and the moment it
+    matters is the moment every other entity has silently frozen. Both defaults are asserted
+    because enabling without visibility is the state this test exists to prevent recurring.
+    """
+    coordinator = make_coordinator([make_valve(valve_model, [31, 11, 1])])
+    sensor = next(
+        e
+        for e in collect("binary_sensor", coordinator)
+        if e.unique_id.endswith("_cloud_connection")
+    )
+    assert sensor.entity_registry_visible_default is True
+    assert sensor.entity_registry_enabled_default is True
+    assert sensor.name == "Cloud Connection"

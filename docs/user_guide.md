@@ -241,7 +241,7 @@ the valve's own byte is authoritative, including a change made at the panel mid-
 | `Music` / `Light` / `Steam` | binary sensor | Read-only accessory state |
 
 <details>
-<summary><b>Diagnostic entities</b> — disabled or hidden by default, for protocol work rather than daily use</summary>
+<summary><b>Diagnostic entities</b> — mostly disabled by default, for protocol work rather than daily use</summary>
 
 <br>
 
@@ -903,8 +903,10 @@ cloud believes about the valve, and it is **on**, **off**, or **unknown** (not y
 failed check leaves the previous answer alone rather than inventing an outage; look at the
 `last_error` attribute).
 
-It is **hidden by default**, not disabled: it keeps running and keeps its history whether or
-not you are looking at it. To put it on a dashboard, open the Anthem Valve device, show hidden
+It is **enabled and visible** — the one diagnostic entity that is, because the moment it
+matters is the moment every other entity has silently frozen, and that is not a good time to
+go looking for something to unhide. It was hidden by default until 0.11.2; an installation
+that already has it hidden stays hidden, so open the Anthem Valve device, show hidden
 entities, and clear the hidden flag.
 
 **It is not polled.** The integration asks Kohler only when there is a reason to:

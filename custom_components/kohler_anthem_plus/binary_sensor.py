@@ -303,15 +303,21 @@ class ValveCloudConnectionSensor(KohlerValveEntity, BinarySensorEntity):
     source and went stale. This one is driven by two push events that decide when to read —
     see `cloud_watch.py` for both, and for why silence alone can never be one of them.
 
-    **Created but hidden, unlike the other valve diagnostics.** They are disabled outright,
+    **Enabled and visible, unlike the other valve diagnostics.** They are disabled outright,
     which costs nothing until someone wants them. This one has to keep *running* — its whole
-    value is the record it builds while nobody is looking, and a disabled entity builds none —
-    so it stays enabled and is hidden from the dashboards instead. Unhide it from the device
-    page when the question "is the shower going to work" actually comes up.
+    value is the record it builds while nobody is looking, and a disabled entity builds none.
 
-    ⚠️ ``entity_registry_visible_default`` applies only when the entity is first created. An
-    installation that already has it from v0.2.6, where it was enabled *and* visible, keeps it
-    visible — hide it by hand there, or delete the entity and let it be recreated.
+    It was created hidden from 0.2.7 until 0.11.2, on the reasoning that a healthy connection
+    is not worth dashboard space. That was the wrong trade: hiding it put "(Hidden)" beside
+    the name everywhere the entity appeared, which reads as a broken entity rather than a
+    deliberate default, and the one moment it matters — the valve has dropped off Kohler's
+    cloud and every other entity has silently frozen — is exactly when nobody wants to go
+    unhide something first. It is a connectivity sensor, so it shows as a plain
+    Connected/Disconnected row and costs nothing while it says Connected.
+
+    ⚠️ **Visibility applies only when the entity is first created**, so an installation that
+    already has it hidden stays hidden — unhide it from the device page, or delete the entity
+    and let it be recreated.
 
     States:
 
@@ -327,7 +333,6 @@ class ValveCloudConnectionSensor(KohlerValveEntity, BinarySensorEntity):
     _attr_name = "Cloud Connection"
     _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
     _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _attr_entity_registry_visible_default = False
 
     def __init__(self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve) -> None:
         super().__init__(coordinator, valve)
