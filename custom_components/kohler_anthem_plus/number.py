@@ -220,9 +220,17 @@ class ZoneFlowNumber(ZoneNumberBase):
 
     _attr_icon = "mdi:water-percent"
     _attr_native_unit_of_measurement = PERCENTAGE
-    # The byte is 2 units per percent, so 0.5 % is the finest step the wire can carry.
-    # Whole percents keep the slider usable and every value exactly representable.
-    _attr_native_step = 1
+    # The byte is 2 units per percent, so 0.5 % is exactly the wire's own resolution — 185
+    # positions over [8, 100], one per legal byte.
+    #
+    # This was 1 % until 0.7.4, on the reasoning that whole percents are all exactly
+    # representable and keep the slider usable. True for writes, but it made the entity
+    # unable to sit still: both of the owner's valves report half values (24.5 % and
+    # 26.5 %), and a step of 1 puts those off-grid, so touching the slider at all snapped
+    # the flow by up to 0.5 % nobody asked for. Matching the hardware's own resolution costs
+    # nothing — a Home Assistant number still accepts any typed value — and lets the control
+    # represent every state the valve can actually be in.
+    _attr_native_step = 0.5
 
     def __init__(
         self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve, zone: int

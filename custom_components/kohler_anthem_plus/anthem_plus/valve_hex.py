@@ -200,6 +200,20 @@ TEMPERATURE_BYTE_MAX = 0xE8
 #
 # The HUB has no independent flow of its own — its favourite `flowrate` is just read and
 # written through to the GCS valve, so the valve is always the real source.
+# **Confirmed 2026-09-10 against the owner's two valves**: every one of their six outlets
+# reports `maximumFlowRate: 200`, so `byte / 2` is exactly right on this hardware, and the
+# live words decode to the percentages the diagnostics show (byte 49 -> 24.5 %, byte 53 ->
+# 26.5 %). The reference integration hardcodes the same 2 and additionally truncates with
+# `byte // 2`, losing the half-percent on the odd bytes both of these valves actually carry.
+#
+# **Still an assumption for other installs.** The app derives percent as a ratio against the
+# reported `maximumFlowRate`, so a valve with a lower ceiling would need `byte / (max / 100)`
+# — writing "100 %" here would send double the intended flow on such a device. `OutletLimits`
+# already reads the real ceiling and `zone_flow_limits()` already bounds the slider with it;
+# finishing the job means threading that ceiling into `encode_word`/`decode_word`, which have
+# no per-valve context today. Deliberately not done blind: the change is a no-op on every
+# device in the corpus (200/100 == 2), so it cannot be verified here, and it writes to
+# hardware that runs water.
 FLOW_PER_PERCENT = 2
 FLOW_PER_SETPOINT = 4
 

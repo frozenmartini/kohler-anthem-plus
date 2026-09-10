@@ -277,3 +277,58 @@ def test_total_flow_is_scaled_from_quarter_gallon_ticks(raw, expected):
 
     holder = SimpleNamespace(total_flow_filtered=raw)
     assert GcsState.total_flow_gallons.fget(holder) == expected
+
+
+# --------------------------------------------------------------------------- #
+# Flow percentage: the byte is 2 units per percent
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        # The owner's two valves, verbatim from diagnostics captured 2026-09-10. Both carry
+        # ODD flow bytes, which is the case an integer-truncating decode gets wrong.
+        ("0195310000000001", 24.5),
+        ("0189350000000001", 26.5),
+    ],
+)
+def test_flow_decodes_from_real_hardware_words(raw, expected):
+    from custom_components.kohler_anthem_plus.anthem_plus.valve_hex import decode_word
+
+    assert decode_word(raw).flow_percent == expected
+
+
+def test_every_legal_flow_byte_round_trips():
+    """All 185 bytes in [16, 200] must survive decode -> encode unchanged.
+
+    Half-percent values are ordinary on this hardware, so a decode that truncated or an
+    encode that rounded to whole percents would quietly move the valve.
+    """
+    from custom_components.kohler_anthem_plus.anthem_plus.valve_hex import (
+        FLOW_BYTE_MAX,
+        FLOW_BYTE_MIN,
+        FLOW_PER_PERCENT,
+        decode_word,
+    )
+
+    for byte in range(FLOW_BYTE_MIN, FLOW_BYTE_MAX + 1):
+        percent = decode_word(f"0195{byte:02x}0000000001").flow_percent
+        assert round(percent * FLOW_PER_PERCENT) == byte, (byte, percent)
+
+
+def test_flow_slider_step_matches_the_wire_resolution():
+    """A step coarser than the hardware puts real reported values off-grid.
+
+    Both of the owner's valves report half-percent values; with a step of 1 the slider could
+    not sit on either, so touching it snapped the flow by up to 0.5 % unasked.
+    """
+    from custom_components.kohler_anthem_plus.anthem_plus.models import get_valve_model
+    from custom_components.kohler_anthem_plus.anthem_plus.valve_hex import (
+        FLOW_PER_PERCENT,
+    )
+
+    coordinator = make_coordinator(
+        [make_valve(get_valve_model("K-28210"), [31, 11, 1])]
+    )
+    flows = [e for e in collect("number", coordinator) if e.name == "Flow"]
+    assert len(flows) == 1
+    assert flows[0].native_step == 1 / FLOW_PER_PERCENT
