@@ -49,7 +49,7 @@ from .const import (
     UI_TEMPERATURE_MIN_F,
 )
 from .coordinator import KohlerAnthemPlusCoordinator, Valve
-from .entity import KohlerValveEntity
+from .entity import KohlerValveEntity, zone_label
 
 
 async def async_setup_entry(
@@ -73,24 +73,6 @@ async def async_setup_entry(
 class ZoneNumberBase(KohlerValveEntity, NumberEntity):
     """Shared plumbing for the per-zone numbers."""
 
-    # SLIDER rather than BOX: the range is now narrow enough (80-113 °F) that dragging is
-    # quicker than typing, which was not true of the old 32-119 °F span.
-    _attr_mode = NumberMode.SLIDER
-
-    def __init__(
-        self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve, zone: int
-    ) -> None:
-        super().__init__(coordinator, valve)
-        self._zone = zone
-
-    @property
-    def _word(self):
-        state = self._state
-        if state is None:
-            return None
-        return state.valve1 if self._zone == 1 else state.valve2
-
-
 class ZoneTemperatureNumber(ZoneNumberBase):
     """Temperature setpoint for one zone.
 
@@ -113,7 +95,7 @@ class ZoneTemperatureNumber(ZoneNumberBase):
         # "Zone N <thing>", matching the outlet switches. Home Assistant sorts a device
         # page alphabetically within each category, so leading with the zone keeps a zone's
         # controls together instead of scattering Flow/Temperature away from its outlets.
-        self._attr_name = f"Zone {zone} Temperature"
+        self._attr_name = zone_label(valve, zone, "Temperature")
         self._attr_unique_id = f"{self._device_id}_temperature_zone_{zone}"
         unit = coordinator.temperature_unit
         fahrenheit = unit.lower().startswith("f")
@@ -197,7 +179,7 @@ class ZoneFlowNumber(ZoneNumberBase):
         self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve, zone: int
     ) -> None:
         super().__init__(coordinator, valve, zone)
-        self._attr_name = f"Zone {zone} Flow"
+        self._attr_name = zone_label(valve, zone, "Flow")
         self._attr_unique_id = f"{self._device_id}_flow_zone_{zone}"
         # The chosen flow lives on the valve rather than on this entity, because the outlet
         # switches need it too: toggling an outlet rewrites the whole word, and without a

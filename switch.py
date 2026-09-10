@@ -51,7 +51,12 @@ from .coordinator import (
     Valve,
     describe_duration,
 )
-from .entity import KohlerControllerEntity, KohlerValveEntity
+from .entity import (
+    KohlerControllerEntity,
+    KohlerValveEntity,
+    outlet_name,
+    slug,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -390,11 +395,6 @@ class WarmupAutoRestoreSwitch(KohlerValveEntity, SwitchEntity):
         self.async_write_ha_state()
 
 
-def _slug(name: str) -> str:
-    """`Zone 2 Rainhead` -> `zone_2_rainhead`, for building a unique id from a name."""
-    return "_".join(part.lower() for part in name.split())
-
-
 class ZoneOutletSwitch(KohlerValveEntity, SwitchEntity):
     """One outlet within one zone, readable and controllable.
 
@@ -414,76 +414,18 @@ class ZoneOutletSwitch(KohlerValveEntity, SwitchEntity):
         super().__init__(coordinator, valve)
         self._zone = zone
         self._outlet = outlet
-        self._attr_name = self._compose_name(coordinator, valve, zone, outlet)
+        self._attr_name = outlet_name(valve, zone, outlet)
         # **The unique id follows the name**, so an outlet whose fixture is known gets
         # `..._rainhead` rather than `..._zone_1_outlet_1`. That is a deliberate break: an
         # entity id naming the fixture is worth more than one naming a position, and Home
-        # Assistant keeps the registry entry keyed on this string. See `_compose_name` for
-        # what happens when the fixture is not known.
+        # Assistant keeps the registry entry keyed on this string. See `entity.outlet_name`
+        # for what happens when the fixture is not known.
         self._attr_unique_id = (
-            f"{self._device_id}_{_slug(self._attr_name)}"
+            f"{self._device_id}_{slug(self._attr_name)}"
         )
         # Holds the requested position until the valve reports back. None means "no
         # pending command — show what the valve says".
         self._optimistic: bool | None = None
-
-    @staticmethod
-    def _compose_name(
-        coordinator: KohlerAnthemPlusCoordinator, valve: Valve, zone: int, outlet: int
-    ) -> str:
-        """`Rainhead`, `Zone 2 Rainhead`, or `Zone 1 Outlet 1` when the fixture is unknown.
-
-        Three rules, in order:
-
-        * **The fixture name wins** where the valve's `outLetType` maps to a confirmed one
-          — `Rainhead` says what the switch does in a way `Outlet 1` never can.
-        * **The zone prefix is dropped on a single-zone valve.** With one zone there is
-          nothing to disambiguate, and `Zone 1` on every entity of a 3-outlet valve is
-          noise. A two-zone valve keeps it, because `Rainhead` alone would be ambiguous
-          across zones.
-        * **An unknown code falls back to the position** — `Zone 1 Outlet 3`. Naming an
-          outlet after a code nobody has confirmed would be inventing a fixture; the number
-          is honest.
-
-        Read **once, at construction**. Per-outlet types arrive gradually over MQTT and via
-        the REST seed, so a valve that has not announced yet names its outlets by position
-        and picks up fixture names on the next restart. Renaming entities live would change
-        their ids underneath running automations, which is worse than waiting.
-        """
-        multi_zone = len(valve.model.zones) > 1
-        prefix = f"Zone {zone} " if multi_zone else ""
-
-        def fixture_at(position: int) -> str | None:
-            """The confirmed fixture name for a 1-based outlet in this zone, or None."""
-            flat = (
-                (position - 1)
-                if zone == 1
-                else valve.model.outlets_valve1 + position - 1
-            )
-            limits = valve.gcs_state.outlet_limits.get(flat)
-            code = None if limits is None else limits.outlet_type
-            return None if code is None else OUTLET_TYPE_NAMES.get(code)
-
-        fixture = fixture_at(outlet)
-        if fixture is None:
-            # No confirmed fixture: keep the position, and keep the zone even on a
-            # single-zone valve so the fallback reads the way it always has.
-            return f"Zone {zone} Outlet {outlet}"
-
-        # **Two outlets of the same fixture type in one zone is legal** — a pair of body
-        # sprays, or the two showerheads a K-28212 can carry. Naming both `Showerhead`
-        # would build the same unique id twice, and Home Assistant drops the second
-        # silently: one outlet would simply not exist, with no error to explain it. So a
-        # repeated fixture keeps its position as a suffix, and only a repeated one does —
-        # an outlet whose type is unique in its zone stays plainly `Rainhead`.
-        same = [
-            position
-            for position in range(1, valve.model.outlets_in_zone(zone) + 1)
-            if fixture_at(position) == fixture
-        ]
-        if len(same) > 1:
-            return f"{prefix}{fixture} {same.index(outlet) + 1}"
-        return f"{prefix}{fixture}"
 
     @property
     def is_on(self) -> bool | None:

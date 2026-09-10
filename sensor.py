@@ -36,7 +36,12 @@ from .anthem_plus.models import OutletStateSource, resolve_outlet_source
 from .anthem_plus.valve_hex import encode_word
 from .const import DOMAIN, EXPOSE_CONTROLLER_WATER_STATE
 from .coordinator import Controller, KohlerAnthemPlusCoordinator, Valve
-from .entity import KohlerControllerEntity, KohlerValveEntity
+from .entity import (
+    KohlerControllerEntity,
+    KohlerValveEntity,
+    outlet_name,
+    zone_label,
+)
 
 # US liquid gallons to litres. `totalFlow` is reported in US gallons; a `Liters` account
 # is converted for display only — the filter and the stored total stay in gallons.
@@ -456,7 +461,9 @@ class ValveHexSensor(ValveDiagnosticSensor):
     ) -> None:
         super().__init__(coordinator, valve)
         self._zone = zone
-        self._attr_name = f"Zone {zone} Hex"
+        # Same rule as the temperature and flow numbers: no prefix where there is only one
+        # zone to name. See `entity.zone_label`.
+        self._attr_name = zone_label(valve, zone, "Hex")
         self._attr_unique_id = f"{self._device_id}_zone_{zone}_hex"
 
     @property
@@ -548,8 +555,11 @@ class OutletMaxRunTimeSensor(ValveDiagnosticSensor):
     ) -> None:
         super().__init__(coordinator, valve)
         self._outlet = outlet
-        zone, _ = valve.model.outlet_location(outlet)
-        self._attr_name = f"Zone {zone} Outlet {outlet} Max Run Time"
+        zone, index = valve.model.outlet_location(outlet)
+        # Named after the same fixture its switch is, so the two line up on the device page
+        # — `Rainhead Max Run Time` beside `Rainhead`. Falls back to the position exactly
+        # as the switch does when the type code is not one this integration can name.
+        self._attr_name = f"{outlet_name(valve, zone, index + 1)} Max Run Time"
         self._attr_unique_id = f"{self._device_id}_outlet_{outlet}_max_run_time"
 
     @property
