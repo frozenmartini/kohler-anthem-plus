@@ -375,12 +375,20 @@ def test_usage_probe_candidates_all_render():
     substitutions = {
         "from": start.date().isoformat(),
         "to": now.date().isoformat(),
-        "from_epoch": str(int(start.timestamp())),
-        "to_epoch": str(int(now.timestamp())),
-        "year": str(now.year),
-        "month": str(now.month),
+        "from_z": start.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "to_z": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "from_us": start.strftime("%m-%d-%Y"),
+        "to_us": now.strftime("%m-%d-%Y"),
     }
     assert _USAGE_ATTEMPTS
+    # The decompiled contract is PascalCase. camelCase is what made the first fifteen
+    # candidates fail, so a regression to it is worth catching here.
+    parameterised = [query for _, query in _USAGE_ATTEMPTS if query]
+    assert parameterised
+    for query in parameterised:
+        assert "FromDate=" in query and "ToDate=" in query and "Interval=" in query, (
+            query
+        )
     labels = [label for label, _ in _USAGE_ATTEMPTS]
     assert len(labels) == len(set(labels)), labels
     for _label, query in _USAGE_ATTEMPTS:

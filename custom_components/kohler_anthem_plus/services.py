@@ -508,30 +508,32 @@ async def _async_custom_shower(call: ServiceCall) -> ServiceResponse:
     return {**result, ATTR_KEEP_ON: keep_on}
 
 
-#: Candidate query strings for `gcs-usage`, tried in order.
+#: `gcs-usage` query strings — **the real contract, plus a date-format fallback.**
 #:
-#: The endpoint answers 400 to a bare call, so it wants *something*; nothing records what.
-#: These cover the shapes a monthly-chart endpoint plausibly takes, cheapest and most likely
-#: first — Kohler's other endpoints use camelCase, so those spellings lead.
+#: Recovered from the Konnect APK's Retrofit annotations, not guessed:
+#: `getAnthemWaterUsageData` on `com/kohler/hermoth/data/network/DeviceApiCall` declares
+#: `@GET /devices/api/{version}/device-management/gcs-usage/{deviceId}` with exactly three
+#: `@Query` parameters — **`FromDate`, `ToDate`, `Interval`** — and no headers or body.
+#: `Interval` takes `WEEK`, `MONTH` or `YEAR`, uppercase, from the const-strings in
+#: `WaterUsageViewModel`.
 #:
-#: Dates are filled in at call time: `{from}` and `{to}` span the last 400 days, wide enough
-#: to cover the owner's 2025-2026 chart, and `{year}`/`{month}` are the current ones.
+#: **They are PascalCase, and that is why the first fifteen candidates all failed.** Every
+#: one used camelCase, lowercase or a wrong name, so none was ever recognised as a parameter
+#: at all — which is exactly why a bare call and a fully-formed date range returned the same
+#: generic 400.
+#:
+#: The one element the decompile did not pin is the date format, so three are tried. The
+#: rest is verified, and a failure here is informative rather than another guess.
 _USAGE_ATTEMPTS: tuple[tuple[str, str], ...] = (
-    ("bare", ""),
-    ("startDate/endDate", "startDate={from}&endDate={to}"),
-    ("fromDate/toDate", "fromDate={from}&toDate={to}"),
-    ("startdate/enddate", "startdate={from}&enddate={to}"),
-    ("from/to", "from={from}&to={to}"),
-    ("start/end", "start={from}&end={to}"),
-    ("period=monthly", "period=monthly"),
-    ("type=monthly", "type=monthly"),
-    ("frequency=monthly", "frequency=monthly"),
-    ("interval=month", "interval=month"),
-    ("groupBy=month", "groupBy=month"),
-    ("year/month", "year={year}&month={month}"),
-    ("monthly+range", "period=monthly&startDate={from}&endDate={to}"),
-    ("type+range", "type=monthly&fromDate={from}&toDate={to}"),
-    ("epoch range", "startTime={from_epoch}&endTime={to_epoch}"),
+    ("MONTH iso", "FromDate={from}&ToDate={to}&Interval=MONTH"),
+    ("YEAR iso", "FromDate={from}&ToDate={to}&Interval=YEAR"),
+    ("WEEK iso", "FromDate={from}&ToDate={to}&Interval=WEEK"),
+    # Same contract, other date formats from the app's string pool.
+    ("MONTH iso8601-Z", "FromDate={from_z}&ToDate={to_z}&Interval=MONTH"),
+    ("MONTH us", "FromDate={from_us}&ToDate={to_us}&Interval=MONTH"),
+    # A bare call, kept as the control: it should still be the generic 400, and having it
+    # beside a working call is what proves the parameters were the difference.
+    ("bare (control)", ""),
 )
 
 
@@ -550,10 +552,10 @@ async def _async_probe_usage(call: ServiceCall) -> ServiceResponse:
     substitutions = {
         "from": start.date().isoformat(),
         "to": now.date().isoformat(),
-        "from_epoch": str(int(start.timestamp())),
-        "to_epoch": str(int(now.timestamp())),
-        "year": str(now.year),
-        "month": str(now.month),
+        "from_z": start.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "to_z": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "from_us": start.strftime("%m-%d-%Y"),
+        "to_us": now.strftime("%m-%d-%Y"),
     }
     attempts = [
         (label, query.format(**substitutions)) for label, query in _USAGE_ATTEMPTS

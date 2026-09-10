@@ -80,7 +80,7 @@ Legend: **[LIVE]** = exercised live this session; **[STATIC]** = derived from th
 | **Hub configuration** | `/devices/api/v1/device-management/hub-configuration/{deviceId}` | **[LIVE]** zones/outlets/parts, see §5.3 (also `…/{version}/…`) |
 | Hub diagnostics | `/devices/api/{version}/device-management/hub-diagnostics/{deviceId}` | [STATIC] |
 | Hub diagnostics (active errors) | `/devices/api/v1/device-management/hub-diagnostics/{deviceId}/active` | [STATIC] |
-| Hub water usage | `/devices/api/{version}/device-management/hub-usage/{deviceId}` | [STATIC] `AnthemHubWaterUsageModel` |
+| Hub water usage | `/devices/api/{version}/device-management/hub-usage/{deviceId}?FromDate=&ToDate=&Interval=` | [STATIC] `AnthemHubWaterUsageModel` — same three PascalCase queries as `gcs-usage`, see [`../gcs/api.md`](../gcs/api.md) |
 | Hub firmware version | `/platform/api/v1/firmware/hub/{deviceId}?releasetarget=Public` | [STATIC] |
 
 ### 2.2 Commands — `/platform/api/v1/commands/hub/…`

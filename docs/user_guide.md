@@ -1039,6 +1039,11 @@ has a `gcs-usage` endpoint — it answers HTTP 400 to a bare call while every ne
 guess answers 404, so the route is real — but nothing records what parameters it wants, and
 no integration has ever called it successfully.
 
+**Update — the contract is now known.** The parameters are `FromDate`, `ToDate` and
+`Interval` (`WEEK`/`MONTH`/`YEAR`), in PascalCase, recovered from the Konnect app itself. A
+first probe of fifteen camelCase guesses failed uniformly, which is what pointed at the
+casing. The remaining unknown is the date format, so the action tries three.
+
 This runs a list of candidate query strings against it and writes what each returns to
 `custom_components/kohler_anthem_plus/reports/usage_probe_<timestamp>.json`. It is read-only:
 every call is a GET, and nothing on the valve changes. Most candidates are expected to fail —

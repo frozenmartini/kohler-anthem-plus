@@ -297,12 +297,48 @@ Probed live 2026-08-12 against a HUB-attached GCS. Base `/devices/api/v1/device-
 | **Live valve state** | `gcs-state/{deviceId}` | ✅ the useful one — see below |
 | **Presets / experiences** | `gcs-preset/{deviceId}` | ✅ `gcsPresetExperienceDetails[]` |
 | Device configuration | `gcs-configuration/{deviceId}` | ⚠️ exists, mostly **null** here — see below |
-| Water usage | `gcs-usage/{deviceId}` | ❓ exists (HTTP 400 bare, so it wants parameters) |
+| **Water usage history** | `gcs-usage/{deviceId}?FromDate=&ToDate=&Interval=` | ✅ contract recovered — see below |
 
 Returning **404**, so they do not exist under these names: `gcs-outlet-config`,
 `gcs-outletconfig`, `gcs-outlet-configuration`, `gcs-valve-config`,
 `gcs-valve-configuration`, `gcs-diagnostics`, `gcs-about`, `gcs-settings`, `gcs-ui-config`,
 `gcs-experience`, and `gcs-configuration` under `/v2/`.
+
+### `gcs-usage` — per-period water usage, the app's chart
+
+**The parameters are PascalCase**, which is the whole reason this sat unsolved. Recovered
+from the Konnect APK's Retrofit annotations — `getAnthemWaterUsageData` on
+`com/kohler/hermoth/data/network/DeviceApiCall`:
+
+```
+GET /devices/api/{version}/device-management/gcs-usage/{deviceId}
+    ?FromDate=<date>&ToDate=<date>&Interval=<WEEK|MONTH|YEAR>
+```
+
+Three `@Query` parameters, no headers, no body. `hub-usage` and `numi-usage` take the same
+set. `Interval` is uppercase, from the const-strings in `WaterUsageViewModel` (beside
+`tab_week`/`tab_month`/`tab_year`).
+
+**Every other endpoint in this API is camelCase.** This family is the outlier, and a probe of
+fifteen camelCase and lowercase candidates on 2026-09-10 returned an identical generic 400 to
+all of them — including a bare call with no query string at all. That uniformity was the
+clue: none of the names was ever recognised as a parameter, so nothing distinguished a
+fully-formed request from an empty one.
+
+Response — `AnthemWaterUsageModel`, from its Gson `@SerializedName` annotations:
+
+| Field | Meaning |
+|---|---|
+| `deviceId`, `interval` | echoed back |
+| `gcsUsageDataDetailsList[]` | the series — one entry per period |
+| `min`/`max`/`avg` × `Volume`, `OnDuration`, `AverageBlendTemperature`, `NumberOfTimesValveSwitchedOn` | rollups across the range |
+
+Each series entry: `timestamp` (long), `volume` (double), `onDuration`,
+`averageBlendTemperature`, `numberOfTimesValveSwitchedOn`, `intervalKey`.
+
+**Not yet live-verified.** The date *format* is the one element the decompile did not pin;
+`kohler_anthem_plus.probe_usage` tries `yyyy-MM-dd` first, then ISO-8601 with a `Z`, then
+`MM-dd-yyyy`, all three of which appear in the app's string pool.
 
 ### `gcs-state` — the valve's own view
 
