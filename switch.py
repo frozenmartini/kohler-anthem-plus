@@ -418,7 +418,32 @@ class ZoneOutletSwitch(KohlerValveEntity, SwitchEntity):
         if state is None or state.zone_word(self._zone) is None:
             return {}
         assigned = state.zone_outlets(self._zone, flowing=False)
-        return {"assigned": assigned[self._outlet - 1]}
+        attributes: dict[str, Any] = {"assigned": assigned[self._outlet - 1]}
+        # The valve's own type code for this outlet — 62, 52, 1, 11, 39, 21 and so on. It
+        # is the only per-outlet identity the hardware reports, and it is what tells a
+        # handshower from a tub filler on an install whose outlets are otherwise just
+        # numbers. Published raw and unmapped: only three codes are documented and the
+        # rest are install-specific, so naming them here would be invention. Absent until
+        # the valve announces this outlet — the messages arrive one at a time, unprompted.
+        outlet_type = self._outlet_type(state)
+        if outlet_type is not None:
+            attributes["outlet_type"] = outlet_type
+        return attributes
+
+    def _outlet_type(self, state: Any) -> int | None:
+        """This outlet's type code, looked up by the valve's own flat 0-based `outLetId`.
+
+        `outlet_limits` is keyed by that flat id, while this entity is addressed per zone —
+        the deliberate split described in `ValveModel.outlet_location`. Zone 2's first
+        outlet is flat id `outlets_valve1`, so the conversion has to go through the model
+        rather than assuming the two numbering schemes line up.
+        """
+        model = self._valve.model
+        flat = (self._outlet - 1) if self._zone == 1 else (
+            model.outlets_valve1 + self._outlet - 1
+        )
+        limits = state.outlet_limits.get(flat)
+        return None if limits is None else limits.outlet_type
 
     @callback
     def _handle_coordinator_update(self) -> None:

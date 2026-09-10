@@ -135,6 +135,11 @@ def _valve_report(valve: Valve) -> dict[str, Any]:
                 "maximum_flow_byte": lim.maximum_flow_byte,
                 "maximum_run_time": lim.maximum_run_time,
                 "default_flow_byte": lim.default_flow_byte,
+                # The valve's own type code for this outlet, unmapped. Recorded so the
+                # codes seen across real installs can be compared with what the Konnect
+                # app shows for the same fixture — only three of them are documented, and
+                # a name map has to be built from evidence rather than guessed.
+                "outlet_type": lim.outlet_type,
             }
             for outlet_id, lim in sorted(gcs.outlet_limits.items())
         },

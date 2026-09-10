@@ -141,8 +141,12 @@ def outlet_limits_from_settings(payload: Any) -> dict[int, OutletLimits]:
             low, high = _flow("minimumFlowrate"), _flow("maximumFlowrate")
             if low is None or high is None:
                 continue
+            try:
+                outlet_type: int | None = int(str(entry.get("outLetType")))
+            except (TypeError, ValueError):
+                outlet_type = None
             limits[outlet_id] = OutletLimits(
-                outlet_id, low, high, run_time, _flow("defaultFlowrate")
+                outlet_id, low, high, run_time, _flow("defaultFlowrate"), outlet_type
             )
     return limits
 
@@ -177,6 +181,25 @@ class OutletLimits:
     # a flow entity would have to be bounded by. Cheap to record now, impossible to
     # reconstruct retroactively.
     default_flow_byte: int | None = None
+    # The valve's own outlet **type code** — 62, 52, 1, 11, 39, 21 and so on, standing for
+    # handshower, rainshower, tub filler and the rest.
+    #
+    # **A label on this device, not a behaviour.** The controller derives an outlet's flow
+    # envelope from its type; the valve does not, and honours whatever flow byte it is
+    # given within its calibrated range. So this changes nothing about how the valve runs —
+    # it is recorded because it is the only per-outlet identity the hardware reports, and
+    # `docs/architecture.md` documents the two devices holding *different* codes for the
+    # same physical fixture on purpose (id 4 is 39 to the valve, 38 to the controller).
+    #
+    # Deliberately **not** translated to a name here. Only three codes are documented
+    # (1=handshower, 11=showerhead, 21=tub filler) and `docs/hub/cloud_api.md` says the
+    # others are install-specific, so a lookup table would be inventing names for codes
+    # nobody has confirmed. The raw code is published instead, and a map can follow once
+    # real installs have been compared against what the Konnect app shows.
+    #
+    # None when the valve has not announced this outlet yet — the same "not learned"
+    # meaning the run time carries, never a real type.
+    outlet_type: int | None = None
 
 
 @dataclass(frozen=True)
@@ -605,7 +628,15 @@ class GcsState:
                 default_flow: int | None = int(str(attribute.get("defaultFlowRate")))
             except (TypeError, ValueError):
                 default_flow = None
-            limits = OutletLimits(outlet_id, low, high, run_time, default_flow)
+            # `outLetType` is spelled identically on both surfaces — it is one of the three
+            # keys the read/write spelling trap does *not* touch (docs/gcs/api.md).
+            try:
+                outlet_type: int | None = int(str(attribute.get("outLetType")))
+            except (TypeError, ValueError):
+                outlet_type = None
+            limits = OutletLimits(
+                outlet_id, low, high, run_time, default_flow, outlet_type
+            )
             if self.outlet_limits.get(outlet_id) != limits:
                 self.outlet_limits[outlet_id] = limits
                 changed = True
