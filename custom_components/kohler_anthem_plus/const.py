@@ -407,9 +407,24 @@ RELOAD_IGNORED_DATA_KEYS = frozenset(
 # or `send_valve_hex` can still put the valve outside these bounds.
 #
 # Narrowed to the range people actually shower in, because a slider spanning 32-119 °F makes
-# every useful degree a pixel wide. 113 °F is also exactly the `maximumOutletTemperature` the
-# valve reports for every outlet (450 tenths °C), so the top of the slider matches the
-# hardware's own ceiling.
+# every useful degree a pixel wide.
+#
+# ⚠️ **The ceiling was 113 °F until 0.12.0, on a premise that turned out to be false.** The
+# note here read "113 °F is also exactly the `maximumOutletTemperature` the valve reports for
+# every outlet (450 tenths °C)" — true of the reference valve, and generalised from it. It is
+# not universal: the owner's two valves report **450 tenths (113 °F) and 477 tenths
+# (117.9 °F)**, confirmed 2026-09-10. So the old ceiling silently withheld five degrees the
+# hardware would have accepted, on any valve set higher than the one this was written from.
+#
+# **92-118 °F is exactly what the Konnect app's own slider offers** (owner-confirmed
+# 2026-09-10), and matching the app is the point: those are the numbers on the panel and in
+# the app, and a Home Assistant control with a different range reads as broken rather than
+# cautious.
+#
+# The bounds were 80-113 before 0.12.0 — both ends invented here rather than taken from the
+# app. The valve's own `maximumOutletTemperature` remains the real ceiling and is enforced by
+# the hardware whatever this says; see the `Max Temperature` sensor, which reports it per
+# valve (450 tenths on one of the owner's valves, 477 on the other).
 #
 # Stated in Fahrenheit and converted for a Celsius account — the reverse would make these
 # unrecognisable to anyone checking them against the shower.
@@ -454,8 +469,8 @@ OUTLET_TYPE_NAMES: dict[int, str] = {
     31: "Rainhead",
 }
 
-UI_TEMPERATURE_MIN_F = 80
-UI_TEMPERATURE_MAX_F = 113
+UI_TEMPERATURE_MIN_F = 92
+UI_TEMPERATURE_MAX_F = 118
 
 # ---------------------------------------------------------------------------
 # Flow

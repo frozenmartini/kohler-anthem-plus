@@ -195,8 +195,8 @@ _FIELD_ZONE1_TEMPERATURE = {
     "example": 104,
     "selector": {
         "number": {
-            "min": 80,
-            "max": 113,
+            "min": 92,
+            "max": 118,
             "step": 1,
             "unit_of_measurement": "°F",
             "mode": "slider",
@@ -210,8 +210,8 @@ _FIELD_ZONE2_TEMPERATURE = {
     "example": 104,
     "selector": {
         "number": {
-            "min": 80,
-            "max": 113,
+            "min": 92,
+            "max": 118,
             "step": 1,
             "unit_of_measurement": "°F",
             "mode": "slider",

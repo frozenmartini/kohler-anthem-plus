@@ -478,7 +478,7 @@ thing in YAML:
 action: kohler_anthem_plus.custom_shower
 data:
   device_id: 1a2b3c…          # only with more than one valve: the valve device's id
-  zone1_temperature: 108      # in your account's unit; the slider covers 80–113 °F
+  zone1_temperature: 108      # in your account's unit; the slider covers 92–118 °F
   zone1_outlet_1: true        # outlets you leave out are closed
   keep_on_after_warmup: true  # optional and beta, see below
 ```
@@ -489,7 +489,7 @@ Every field the action takes, with what each one does when you leave it out:
 action: kohler_anthem_plus.custom_shower
 data:
   # Zone 1 — the only required field is the temperature
-  zone1_temperature: 108      # required; your account's unit, 80–113 °F or 27–45 °C
+  zone1_temperature: 108      # required; your account's unit, 92–118 °F or 33–48 °C
   zone1_outlet_1: true        # default false — an outlet you leave out is closed
   zone1_outlet_2: false
   zone1_outlet_3: false

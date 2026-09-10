@@ -78,7 +78,7 @@ async def async_setup_entry(
 class ZoneNumberBase(KohlerValveEntity, NumberEntity):
     """Shared plumbing for the per-zone numbers."""
 
-    # SLIDER rather than BOX: the range is now narrow enough (80-113 °F) that dragging is
+    # SLIDER rather than BOX: the range is now narrow enough (92-118 °F) that dragging is
     # quicker than typing, which was not true of the old 32-119 °F span.
     _attr_mode = NumberMode.SLIDER
 

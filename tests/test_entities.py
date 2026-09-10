@@ -1431,3 +1431,87 @@ def test_a_longer_first_outlet_does_not_hide_a_shorter_one(valve_model):
     """
     sensor = _duration_sensor(valve_model, {0: 3600, 1: 1800, 2: 1800})
     assert sensor.native_value == 30
+
+
+# --------------------------------------------------------------------------- #
+# The temperature slider's ceiling (0.12.0)
+# --------------------------------------------------------------------------- #
+
+
+def _temperature_number(valve_model, unit):
+    valve = make_valve(valve_model, [31, 11, 1])
+    coordinator = make_coordinator([valve])
+    coordinator.temperature_unit = unit
+    return next(
+        e for e in collect("number", coordinator) if "temperature" in e.unique_id
+    )
+
+
+def test_the_temperature_slider_matches_the_app():
+    """92-118 °F — exactly the Konnect app's own slider, owner-confirmed 2026-09-10.
+
+    It was 80-113 before 0.12.0, both ends invented rather than taken from the app. The
+    ceiling was justified as "exactly the `maximumOutletTemperature` the valve reports for
+    every outlet" — generalised from the reference valve, and false: the owner's two valves
+    report 450 tenths (113 °F) and 477 tenths (117.9 °F). A control whose range differs from
+    the app reads as broken rather than cautious.
+    """
+    from homeassistant.const import UnitOfTemperature
+
+    from custom_components.kohler_anthem_plus.anthem_plus.models import get_valve_model
+
+    number = _temperature_number(get_valve_model("K-28210"), "Fahrenheit")
+    assert number.native_min_value == 92
+    assert number.native_max_value == 118
+    assert number.native_unit_of_measurement == UnitOfTemperature.FAHRENHEIT
+
+
+def test_the_celsius_slider_stays_inside_the_codec_ceiling():
+    """33-48 °C, and 48 must not exceed what `encode_word` will accept (48.8 °C)."""
+    from custom_components.kohler_anthem_plus.anthem_plus.models import get_valve_model
+    from custom_components.kohler_anthem_plus.anthem_plus.valve_hex import (
+        TEMPERATURE_MAX_TENTHS,
+        TEMPERATURE_TENTHS_PER_DEGREE,
+    )
+
+    number = _temperature_number(get_valve_model("K-28210"), "Celsius")
+    assert number.native_min_value == 33
+    assert number.native_max_value == 48
+    ceiling = TEMPERATURE_MAX_TENTHS / TEMPERATURE_TENTHS_PER_DEGREE
+    assert number.native_max_value <= ceiling, (
+        "the slider must not offer a refused value"
+    )
+
+
+def test_the_service_schema_matches_the_slider():
+    """The `custom_shower` form and the number entity must not disagree on the range.
+
+    They are two ways to set the same thing, and a form that accepts what the slider refuses
+    (or the reverse) is the kind of inconsistency nobody finds until it bites.
+    """
+    from custom_components.kohler_anthem_plus.const import (
+        UI_TEMPERATURE_MAX_F,
+        UI_TEMPERATURE_MIN_F,
+    )
+    from custom_components.kohler_anthem_plus.services import (
+        _FIELD_ZONE1_TEMPERATURE,
+        _FIELD_ZONE2_TEMPERATURE,
+    )
+
+    for field in (_FIELD_ZONE1_TEMPERATURE, _FIELD_ZONE2_TEMPERATURE):
+        selector = field["selector"]["number"]
+        assert selector["max"] == UI_TEMPERATURE_MAX_F, field["name"]
+        assert selector["min"] == UI_TEMPERATURE_MIN_F, field["name"]
+
+
+def test_118f_encodes_to_the_valve_without_being_clamped():
+    """The whole point of raising the ceiling: 118 °F must survive the codec intact."""
+    from custom_components.kohler_anthem_plus.anthem_plus.valve_hex import (
+        decode_word,
+        encode_word,
+        unit_to_celsius,
+    )
+
+    celsius = unit_to_celsius(118, "Fahrenheit")
+    word = encode_word(1, celsius, 50.0, 0b001)
+    assert decode_word(word).temperature_celsius == pytest.approx(celsius, abs=0.05)
