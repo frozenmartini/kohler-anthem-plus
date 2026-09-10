@@ -9,24 +9,39 @@ preserving whichever outlets are currently open and the current flow. That mirro
 Konnect app, which POSTs a fresh command on every adjustment, and it means changing the
 temperature mid-shower takes effect immediately rather than at the next start.
 
-**There is deliberately no flow entity.** The codec encodes and decodes flow correctly and
-the valve honours a flow byte we write — but the Anthem Plus touchscreen overwrites both
-zones with its own linked scaling and a calibration-derived ceiling the moment anyone touches its
-flow control, so a Home Assistant setpoint could not be relied on to stay put. Removed
-rather than shipped as something that silently disagrees with the wall panel. The evidence
-and the full findings are in ``docs/gcs/api.md``; re-adding it is a UI change only, since
-nothing was removed from the protocol layer.
+**Flow is a per-zone control here, restored 2026-09-10.** It was removed on 2026-08-13
+because a first-gen Anthem touchscreen was observed rewriting both zones' flow the instant
+its flow panel was opened, making a Home Assistant setpoint impossible to rely on. That
+finding stands — the capture is in ``docs/gcs/api.md`` — but the conclusion drawn from it
+was too broad: it came from **one** install, and it was applied to every valve
+unconditionally, so owners whose valve honours a written flow byte had no control either.
+
+Restored as a valve entity because flow is the valve's own capability: the codec encodes
+and decodes byte 2 in full, ``async_apply_valve`` has always accepted ``zone1_flow`` /
+``zone2_flow``, and the valve honours what it is given within its calibrated range. On an
+install whose panel does fight it, the entity can be disabled; that is a better failure than
+withholding the control from everyone.
+
+The bounds are the valve's **own** reported limits, not a constant — ``zone_flow_limits``
+reads the per-outlet minimum and maximum the hardware announces, so a valve with flow
+control disabled reports a narrow range rather than being offered one it will not honour.
 """
 
 from __future__ import annotations
 
 from homeassistant.components.number import NumberDeviceClass, NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfTemperature
+from homeassistant.const import PERCENTAGE, UnitOfTemperature
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .anthem_plus.valve_hex import celsius_to_unit, unit_to_celsius
+from .anthem_plus.valve_hex import (
+    FLOW_BYTE_MAX,
+    FLOW_BYTE_MIN,
+    FLOW_PER_PERCENT,
+    celsius_to_unit,
+    unit_to_celsius,
+)
 from .const import DOMAIN, UI_TEMPERATURE_MAX_F, UI_TEMPERATURE_MIN_F
 from .coordinator import KohlerAnthemPlusCoordinator, Valve
 from .entity import KohlerValveEntity
@@ -37,10 +52,7 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up a temperature number for each zone the valve has.
-
-    No flow number, deliberately — see the module docstring.
-    """
+    """Set up a temperature and a flow number for each zone the valve has."""
     coordinator: KohlerAnthemPlusCoordinator = hass.data[DOMAIN][entry.entry_id]
     # The controller offers no live temperature or flow control — only favourites — so a
     # controller-only account gets nothing here. One set per valve otherwise, each with
@@ -49,6 +61,7 @@ async def async_setup_entry(
     for valve in coordinator.valves:
         for zone in valve.model.zones:
             entities.append(ZoneTemperatureNumber(coordinator, valve, zone))
+            entities.append(ZoneFlowNumber(coordinator, valve, zone))
     async_add_entities(entities)
 
 
@@ -132,4 +145,85 @@ class ZoneTemperatureNumber(ZoneNumberBase):
     async def async_set_native_value(self, value: float) -> None:
         key = "zone1_temperature" if self._zone == 1 else "zone2_temperature"
         await self._valve.async_apply_valve(**{key: value})
+
+
+class ZoneFlowNumber(ZoneNumberBase):
+    """Flow setpoint for one zone, as a percentage.
+
+    Writes byte 2 of that zone's valve word through the same ``async_apply_valve`` path the
+    temperature uses, so the outlets currently open are preserved and a change mid-shower
+    takes effect immediately.
+
+    **The range is the valve's own.** ``zone_flow_limits`` returns the minimum and maximum
+    flow bytes this zone's first outlet reports — the same pair the Konnect app bounds its
+    slider with — falling back to the protocol limits (8-100 %) only when the valve has not
+    announced them yet. A valve with flow control disabled therefore offers the narrow range
+    it will actually honour rather than a full sweep it will ignore.
+
+    > ⚠️ **A first-gen Anthem touchscreen may overwrite this.** Opening that panel's flow
+    > control was captured rewriting *both* zones before any adjustment was made, applying
+    > its own linked scaling and a calibration-derived ceiling. On such an install a
+    > setpoint written here can change on its own, which is why this entity was withdrawn
+    > between 2026-08-13 and 2026-09-10. If yours behaves that way, disable this entity —
+    > the protocol layer is unaffected either way.
+
+    Reading is honest about the same caveat the Flow sensor documented: the flow byte is
+    only meaningful while an outlet is open. Unlike a sensor, though, a number must always
+    return a value — a control that reads `unknown` cannot be dragged — so it reports the
+    byte the valve is holding and flags whether that is live in `flow_is_live`.
+    """
+
+    _attr_icon = "mdi:water-percent"
+    _attr_native_unit_of_measurement = PERCENTAGE
+    # The byte is 2 units per percent, so 0.5 % is the finest step the wire can carry.
+    # Whole percents keep the slider usable and every value exactly representable.
+    _attr_native_step = 1
+
+    def __init__(
+        self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve, zone: int
+    ) -> None:
+        super().__init__(coordinator, valve, zone)
+        self._attr_name = f"Zone {zone} Flow"
+        self._attr_unique_id = f"{self._device_id}_flow_zone_{zone}"
+
+    @property
+    def native_min_value(self) -> float:
+        """The valve's own minimum for this zone, read live rather than fixed at setup.
+
+        Per-outlet limits arrive gradually over MQTT, so a bound captured in ``__init__``
+        would be the fallback for as long as the valve stayed quiet.
+        """
+        state = self._state
+        if state is None:
+            return FLOW_BYTE_MIN / FLOW_PER_PERCENT
+        low, _ = state.zone_flow_limits(self._zone)
+        return low / FLOW_PER_PERCENT
+
+    @property
+    def native_max_value(self) -> float:
+        state = self._state
+        if state is None:
+            return FLOW_BYTE_MAX / FLOW_PER_PERCENT
+        _, high = state.zone_flow_limits(self._zone)
+        return high / FLOW_PER_PERCENT
+
+    @property
+    def native_value(self) -> float | None:
+        word = self._word
+        return None if word is None else word.flow_percent
+
+    @property
+    def extra_state_attributes(self) -> dict[str, object]:
+        """Whether the reading is the flow somebody actually chose.
+
+        On an idle valve the byte is not the commanded flow — 296 words in the capture
+        corpus carry a flow nobody selected with no outlet open. The sensor this replaced
+        hid the value in that case; a control cannot, so it is flagged instead.
+        """
+        state = self._state
+        return {"flow_is_live": bool(state and state.flow_is_live)}
+
+    async def async_set_native_value(self, value: float) -> None:
+        key = "zone1_flow" if self._zone == 1 else "zone2_flow"
+        await self._valve.async_apply_valve(**{key: float(value)})
 

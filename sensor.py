@@ -24,7 +24,6 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
-    PERCENTAGE,
     UnitOfTemperature,
     UnitOfTime,
     UnitOfVolume,
@@ -72,7 +71,6 @@ async def async_setup_entry(
         entities += [
             ValveStatusSensor(coordinator, valve),
             ValveSystemStateSensor(coordinator, valve),
-            ValveFlowSensor(coordinator, valve),
             ValveTotalWaterSensor(coordinator, valve),
             ValveLastUpdateSensor(coordinator, valve),
             ValveFirmwareSensor(coordinator, valve),
@@ -242,49 +240,6 @@ class ValveSystemStateSensor(KohlerValveEntity, SensorEntity):
             # yet know about.
             "reported": reported,
             "recognised": reported in self._attr_options if reported else None,
-        }
-
-
-class ValveFlowSensor(KohlerValveEntity, SensorEntity):
-    """Commanded flow, as a percentage — **only while water is actually moving.**
-
-    Reads `unknown` on an idle or paused valve, and that is deliberate. The flow byte is
-    not the commanded flow unless an outlet is open: the corpus holds 296 idle words
-    carrying a flow nobody selected, in recurring pairs like 34.5 %/82.5 %, with the same
-    message collapsing `totalFlow` to 2 and everything back to normal seconds later. See
-    `docs/gcs/valve_hex.md`.
-
-    Publishing that number would put a flow percentage on a dashboard for a shower that is
-    not running, which is worse than showing nothing. The raw byte is still available
-    unconditionally on the Zone 1 Hex diagnostic sensor's `flow_percent` attribute, beside
-    the `flow_is_live` flag that governs this entity.
-    """
-
-    _attr_name = "Flow"
-    _attr_icon = "mdi:water-percent"
-    _attr_native_unit_of_measurement = PERCENTAGE
-    _attr_state_class = SensorStateClass.MEASUREMENT
-
-    def __init__(self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve) -> None:
-        super().__init__(coordinator, valve)
-        self._attr_unique_id = f"{self._device_id}_flow"
-
-    @property
-    def native_value(self) -> float | None:
-        state = self._state
-        if state is None or not state.flow_is_live:
-            return None
-        return state.flow_percent
-
-    @property
-    def extra_state_attributes(self) -> dict[str, object]:
-        """Why the value is missing, so `unknown` is never a mystery."""
-        state = self._state
-        return {
-            "flow_is_live": bool(state and state.flow_is_live),
-            # The byte as the word carries it, live or not — the number this entity is
-            # declining to publish, so the decision can be checked rather than trusted.
-            "reported_flow_percent": None if state is None else state.flow_percent,
         }
 
 
