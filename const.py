@@ -109,45 +109,18 @@ PRESET_HIDDEN_IDS: frozenset[int] = frozenset({1})
 EXPOSE_CONTROLLER_WATER_STATE = True
 
 # ---------------------------------------------------------------------------
-# RAW MQTT LOG — diagnostic capture of every payload, before decoding
+# REPORT LOG — the user's capture, keyed to the "Report Log" switch
 # ---------------------------------------------------------------------------
-# Full explanation, file format, and the runtime switch: `anthem_plus/raw_log.py`.
-# Find every piece of this feature with:
+# The one capture this integration ships: a switch on both device pages, one file per
+# switch-on holding every raw MQTT message and both decision trails (cutoff, warm-up) on one
+# clock, and a Home Assistant restart appends to the SAME file rather than starting a new
+# one. See `anthem_plus/report_log.py` for the full semantics.
 #
-#     grep -rn "RAW MQTT LOG" custom_components/kohler_anthem_plus/
-#
-# Prefer the runtime switch over this constant — it needs no restart and no file edit.
-# Developer Tools -> Actions -> `logger.set_level`:
-#
-#     custom_components.kohler_anthem_plus.anthem_plus.raw_log: debug
-#
-# This constant pins capture on across restarts instead.
-#
-# **Currently ON, deliberately** — switched on 2026-08-13 (session 5) at the user's request
-# for a stretch of work involving frequent restarts, where a UI toggle that resets on every
-# restart would be useless. Set back to False when that debugging is done; the capture is
-# bounded (8 MB x 6 files) so leaving it on is untidy rather than dangerous.
-ENABLE_RAW_MQTT_LOG = True
-
-# Written under the Home Assistant config directory, so it is reachable from the File editor
-# and Samba add-ons rather than buried in the container.
-RAW_MQTT_LOG_DIR = "kohler_anthem_plus_raw"
-RAW_MQTT_LOG_MAX_BYTES = 8 * 1024 * 1024
-# None = no limit on the number of files; every capture is kept forever. Set at the user's
-# request on 2026-08-14 — this directory is meant to be a permanent record, not a rotating
-# buffer, and deleting old captures automatically risks losing the ones a future session
-# needs. Each file is still capped at RAW_MQTT_LOG_MAX_BYTES, so growth is in file count, not
-# a single unbounded file.
-RAW_MQTT_LOG_KEEP_FILES = None
-
-# ---------------------------------------------------------------------------
-# REPORT LOG — the consumer-side capture, keyed to the "Report Log" switch
-# ---------------------------------------------------------------------------
-# A second raw MQTT capture, deliberately separate from the one above: that one is the
-# development evidence machine (pinned on here, per-run files, `/config/kohler_anthem_plus_raw/`),
-# this one is a user's bug-report tool — a switch on both device pages, one file per
-# switch-on, and a Home Assistant restart appends to the SAME file rather than starting a
-# new one. See `anthem_plus/report_log.py` for the full semantics.
+# Until 0.4.1 three always-on development captures shipped beside it, pinned on by
+# constants here (ENABLE_RAW_MQTT_LOG, ENABLE_CUTOFF_DEBUG_LOG, ENABLE_WARMUP_DEBUG_LOG),
+# writing to /config/kohler_anthem_plus_raw/ on every install. They were the author's own
+# tooling and never belonged in a release; they now live in the author's gitignored `_dev/`
+# package, and the trails they carried go into the Report Log instead (2026-09-10).
 #
 # The options key stores the active episode's name — its presence IS the switch state, so
 # an episode survives restarts. It is in `RELOAD_IGNORED_OPTION_KEYS` for the same reason
@@ -162,33 +135,6 @@ CONF_REPORT_LOG_FILE = "report_log_file"
 # development install the directory is gitignored.
 REPORT_LOG_DIR_NAME = "reports"
 REPORT_LOG_MAX_BYTES = 8 * 1024 * 1024
-
-# ---------------------------------------------------------------------------
-# CUTOFF DEBUG LOG — why the run-time cutoff fired, or didn't
-# ---------------------------------------------------------------------------
-# Full explanation and how to read it against the raw capture: `anthem_plus/cutoff_log.py`.
-# Find every piece of this feature with:
-#
-#     grep -rn "CUTOFF DEBUG LOG" custom_components/kohler_anthem_plus/
-#
-# Runtime switch, no restart needed — Developer Tools -> Actions -> `logger.set_level`:
-#
-#     custom_components.kohler_anthem_plus.anthem_plus.cutoff_log: debug
-#
-# **Currently ON, deliberately** — switched on 2026-08-14 (session 6) after the detector was
-# found to be timing the wrong thing. A cutoff that fails to fire writes nothing to
-# `home-assistant.log`, so the only way to tell "no cutoff happened" from "a cutoff was
-# missed" is this log. Written into the same directory as the raw capture and stamped from
-# the same clock, so the two interleave by sorting on `ts`.
-#
-# Volume is a handful of lines per shower. Set back to False once the zone-based detector has
-# been trusted for a while.
-ENABLE_CUTOFF_DEBUG_LOG = True
-
-# None = no limit on the number of files; every log is kept forever, matching
-# RAW_MQTT_LOG_KEEP_FILES. Deliberately the same directory as the raw capture: these two logs
-# are read together, and splitting them across directories only makes the join harder.
-CUTOFF_DEBUG_LOG_KEEP_FILES = None
 
 # ---------------------------------------------------------------------------
 # Run-time cutoff restart (option, default off)
@@ -302,6 +248,14 @@ ENDLESS_SHOWER_RESTARTED = "Max Shower Duration reached at %s. Restarted the sho
 #
 # Doubles as the `translation_key`, so the text lives in `strings.json` under `issues`.
 ISSUE_NOT_SET_UP = "endless_shower_not_set_up"
+
+# Repairs card offering to delete the folder the always-on development capture wrote on
+# every install before 0.4.1. Raised at setup when the folder exists and this integration
+# no longer writes it; fixable — the flow deletes it, and only if every file in it is one
+# of ours. Never raised where the author's `_dev/` package is installed, since that is the
+# one place the folder is still live. Doubles as the `translation_key`.
+ISSUE_OLD_CAPTURE_FOLDER = "old_capture_folder"
+OLD_CAPTURE_DIR = "kohler_anthem_plus_raw"
 
 ENDLESS_SHOWER_NOTHING_TO_RESTORE = (
     "Endless Shower could not restart the shower, because Home Assistant has no record of "
@@ -558,19 +512,14 @@ WARMUP_AUTO_RESTORE_GIVING_UP = (
 )
 
 # ---------------------------------------------------------------------------
-# Warmup diagnostic journal
+# Warmup journal — the windows a disable record carries
 # ---------------------------------------------------------------------------
-# Forced on, like the cutoff journal. Built to catch what kept disabling warmup; that
-# question is solved (`docs/gcs/api.md` §3h — the hub's web UI), and the journal stays on
-# as the watchdog: it verifies every auto-restore end to end and would be the first thing
-# to notice a different writer. Volume is a handful of records a day, against a raw capture
-# that already writes every message.
-ENABLE_WARMUP_DEBUG_LOG = True
-
-# Unlimited, matching the cutoff journal: this is evidence for an open question, and the
-# whole point is comparing an event to ones weeks earlier.
-WARMUP_DEBUG_LOG_KEEP_FILES = None
-
+# The journal itself is a decision trail: it goes into the Report Log while that switch is
+# on, and into the author's development capture on one machine (see the REPORT LOG section).
+# Built to catch what kept disabling warmup; that question is solved (`docs/gcs/api.md` §3h
+# — the hub's web UI), and the trail stays as the watchdog: it verifies every auto-restore
+# end to end and would be the first thing to notice a different writer.
+#
 # How much wire traffic to carry in a disable record, either side of the event.
 #
 # 120 s back and 45 s forward, chosen from what the four known disables actually look like:

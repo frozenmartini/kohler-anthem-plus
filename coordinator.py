@@ -53,9 +53,6 @@ from .anthem_plus import (
     KohlerAuth,
     KohlerClient,
     KohlerError,
-    CutoffDebugLog,
-    WARMUP_README,
-    RawMqttLog,
     ReportLog,
     ZoneCutoff,
     ZoneCutoffDetector,
@@ -76,6 +73,7 @@ from .anthem_plus import (
     unit_to_celsius,
 )
 from .anthem_plus.entry_reload import reload_signature
+from .anthem_plus.journal import Journals
 from .anthem_plus.state import outlet_limits_from_settings
 from .anthem_plus.warmup_resume import Decision, WarmupResume
 from .anthem_plus.valve_hex import (
@@ -89,6 +87,20 @@ from .anthem_plus.valve_hex import (
     normalize_word,
 )
 from .cloud_watch import CloudConnectionWatch
+
+# DEV CAPTURE SEAM. The author's own always-on capture — raw MQTT plus the cutoff and
+# warm-up trails, one file each in <config>/kohler_anthem_plus_raw/ — lives in a gitignored
+# `_dev/` package that exists on one machine and is never in a release. Until 0.4.1 those
+# writers shipped inside `anthem_plus/`, pinned on, so every install in the world ran them.
+# Now `async_setup` calls `_dev.async_install(self)` when the package is present and does
+# nothing when it is not; a release always takes the second path.
+try:
+    from . import _dev
+except ModuleNotFoundError:  # every install but the author's
+    _dev = None
+# For `__init__.py`: the old-capture-folder repair must never be offered on the one install
+# where that folder is still being written.
+DEV_CAPTURE_INSTALLED = _dev is not None
 from .const import (
     CONF_MOBILE_DEVICE_ID,
     CONF_OUTLET_RUN_TIMES,
@@ -99,26 +111,18 @@ from .const import (
     CONF_VALVES,
     CONF_VALVE_MODEL,
     CONF_ZONE_OUTLETS,
-    CUTOFF_DEBUG_LOG_KEEP_FILES,
-    ENABLE_WARMUP_DEBUG_LOG,
     WARMUP_CONTEXT_AFTER_SECONDS,
     WARMUP_CONTEXT_BEFORE_SECONDS,
     WARMUP_CONTEXT_MAX_MESSAGES,
-    WARMUP_DEBUG_LOG_KEEP_FILES,
     DEFAULT_FLOW_PERCENT,
     DEFAULT_PRESET_ID,
     DEFAULT_PRESET_TIMER_SECONDS,
     DEVICE_NAME_CONTROLLER,
     DEVICE_NAME_VALVE,
     DOMAIN,
-    ENABLE_CUTOFF_DEBUG_LOG,
-    ENABLE_RAW_MQTT_LOG,
-    RAW_MQTT_LOG_DIR,
     CONF_REPORT_LOG_FILE,
     REPORT_LOG_DIR_NAME,
     REPORT_LOG_MAX_BYTES,
-    RAW_MQTT_LOG_KEEP_FILES,
-    RAW_MQTT_LOG_MAX_BYTES,
     RELOAD_IGNORED_DATA_KEYS,
     ENDLESS_SHOWER_NOT_SET_UP,
     ENDLESS_SHOWER_NOTHING_TO_RESTORE,
@@ -385,23 +389,25 @@ def _device_names(devices: list[Device], base: str) -> dict[str, str]:
 
 
 class _TaggedJournal:
-    """A journal that stamps every record with which valve it is about.
+    """The cutoff detector's journal: names the trail, and the valve when there are several.
 
-    The cutoff detector writes its own records straight to the journal, without knowing
-    which valve it belongs to. With two valves sharing one file, an untagged `flow_end`
-    would be unattributable. Passthrough when there is no tag, so a single-valve journal is
-    byte-for-byte what it always was and the tools that read it need no change.
+    The detector satisfies `runtime_cutoff.Journal` — `note(event, **fields)` — without
+    knowing which valve it belongs to or where records go. This adapter says both: every
+    record is a `cutoff` trail record for the coordinator's journal fan-out, and on an
+    account with several valves it is stamped `valve=<tag>`, since an untagged `flow_end`
+    in a shared file would be unattributable. Passthrough with one valve, so a single-valve
+    trail is byte-for-byte what it always was and the tools that read it need no change.
     """
 
-    def __init__(self, journal: Any, tag: str | None) -> None:
-        self._journal = journal
+    def __init__(self, journals: Journals, tag: str | None) -> None:
+        self._journals = journals
         self._tag = tag
 
     def note(self, event: str, **fields: Any) -> None:
         if self._tag is None:
-            self._journal.note(event, **fields)
+            self._journals.note("cutoff", event, **fields)
         else:
-            self._journal.note(event, valve=self._tag, **fields)
+            self._journals.note("cutoff", event, valve=self._tag, **fields)
 
 
 class Valve:
@@ -513,14 +519,6 @@ class Valve:
         return self.coordinator.temperature_unit
 
     @property
-    def cutoff_log(self) -> CutoffDebugLog | None:
-        return self.coordinator.cutoff_log
-
-    @property
-    def warmup_log(self) -> CutoffDebugLog | None:
-        return self.coordinator.warmup_log
-
-    @property
     def stream(self) -> AnthemMqttStream | None:
         return self.coordinator.stream
 
@@ -592,10 +590,9 @@ class Valve:
     # ------------------------------------------------------------------ #
     # Lifecycle, driven by the coordinator
     # ------------------------------------------------------------------ #
-    def attach_journal(self, journal: CutoffDebugLog | None) -> None:
-        """Point the cutoff detector at the (shared) debug log, once it exists."""
-        if journal is not None:
-            self._cutoff.journal = _TaggedJournal(journal, self.tag)
+    def attach_journals(self, journals: Journals) -> None:
+        """Point the cutoff detector at the coordinator's journal fan-out, once it exists."""
+        self._cutoff.journal = _TaggedJournal(journals, self.tag)
 
     def _note_local_write(self) -> None:
         """Count a command sent from this integration to this valve.
@@ -1169,17 +1166,16 @@ class Valve:
 
     @callback
     def _journal(self, event: str, **fields: Any) -> None:
-        """Write to the cutoff debug log if it exists. No-op before setup finishes.
+        """A cutoff-trail record from the valve's own logic (arm, restore). Event loop.
 
-        This runs on the event loop, so the log deliberately refuses to open a file itself —
-        see `CutoffDebugLog.wants_open`. When it asks for one, the open happens in an
-        executor and the next record lands.
+        No-op before setup has built the fan-out. Where the record goes — the Report Log
+        while its switch is on, plus the author's development capture on one machine — is
+        the fan-out's business; so is getting a sink its executor open when it asks.
         """
-        if self.cutoff_log is None:
+        journals = self.coordinator.journals
+        if journals is None:
             return
-        self.cutoff_log.note(event, **self._tagged(fields))
-        if self.cutoff_log.wants_open:
-            self.hass.async_add_executor_job(self.cutoff_log.prepare)
+        journals.note("cutoff", event, **self._tagged(fields))
 
     async def _async_restart_after_cutoff(
         self, fired: list[ZoneCutoff], cut_at: Any
@@ -1870,12 +1866,11 @@ class Valve:
 
     @callback
     def _warmup_journal(self, event: str, **fields: Any) -> None:
-        """Append to the warmup journal. Mirrors `_journal`, including the deferred open."""
-        if self.warmup_log is None:
+        """A warm-up-trail record. Mirrors `_journal`."""
+        journals = self.coordinator.journals
+        if journals is None:
             return
-        self.warmup_log.note(event, **self._tagged(fields))
-        if self.warmup_log.wants_open:
-            self.hass.async_add_executor_job(self.warmup_log.prepare)
+        journals.note("warmup", event, **self._tagged(fields))
 
     async def _async_journal_warmup_context(self, at: float) -> None:
         """Record what arrived *after* a disable.
@@ -2213,17 +2208,21 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.controllers: list[Controller] = []
         self._controllers_by_id: dict[str, Controller] = {}
         self.stream: AnthemMqttStream | None = None
-        self.raw_log: RawMqttLog | None = None
-        # REPORT LOG: the consumer-side capture behind the "Report Log" switch — one file
-        # per switch-on, appended across restarts. See `anthem_plus/report_log.py`.
+        # REPORT LOG: the user's capture behind the "Report Log" switch — one file per
+        # switch-on, appended across restarts, carrying raw MQTT and both decision trails.
+        # See `anthem_plus/report_log.py`.
         self.report_log: ReportLog | None = None
+        # Everything that takes each raw MQTT message (`write`), handed to the stream at
+        # construction; and everything that takes each trail record (`note`), reached
+        # through `Valve._journal` / `_warmup_journal`. Both hold the Report Log; the
+        # author's development capture adds itself to both on one machine. Built in
+        # `async_setup`, once `hass.config.path` is usable.
+        self.raw_sinks: list[Any] = []
+        self.journals: Journals | None = None
         # One-shot: `async_setup` seeds, then `async_config_entry_first_refresh()` runs
         # milliseconds later and would seed the identical state all over again. See
         # `_async_update_data`.
         self._seeded_during_setup = False
-        # CUTOFF DEBUG LOG: built in `async_setup`, once `hass.config.path` is usable.
-        self.cutoff_log: CutoffDebugLog | None = None
-        self.warmup_log: CutoffDebugLog | None = None
         # Rolling record of recent messages, so a warmup disable can be journalled
         # with what surrounded it. Bounded by count and trimmed by age on read.
         self._recent_messages: deque = deque(maxlen=WARMUP_CONTEXT_MAX_MESSAGES)
@@ -2329,25 +2328,11 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 data={**self.entry.data, CONF_MOBILE_DEVICE_ID: mobile_device_id},
             )
 
-        # RAW MQTT LOG: constructed unconditionally and switched on at runtime, so capture
-        # can be started from the UI mid-session without a reload. Nothing touches the disk
-        # until a message arrives while it is on. See `anthem_plus/raw_log.py`.
-        self.raw_log = RawMqttLog(
-            self.hass.config.path(RAW_MQTT_LOG_DIR),
-            forced=ENABLE_RAW_MQTT_LOG,
-            max_bytes=RAW_MQTT_LOG_MAX_BYTES,
-            keep_files=RAW_MQTT_LOG_KEEP_FILES,
-        )
-        # Open the file up front when capture is already on, so it is findable immediately
-        # rather than after the next push — which can be hours away. Executor, not the loop:
-        # this creates a directory and opens a file.
-        await self.hass.async_add_executor_job(self.raw_log.prepare)
-
-        # REPORT LOG: the consumer capture, in the integration's own folder (owner's
-        # choice — see the const.py section). The options key holds the active episode's
-        # name; its presence here means the switch was on when Home Assistant stopped, so
-        # re-attach to the SAME file — a capture of "it breaks when I restart" must not
-        # lose the interesting part to the restart itself.
+        # REPORT LOG: the user's capture, in the integration's own folder (owner's choice —
+        # see the const.py section). The options key holds the active episode's name; its
+        # presence here means the switch was on when Home Assistant stopped, so re-attach to
+        # the SAME file — a capture of "it breaks when I restart" must not lose the
+        # interesting part to the restart itself.
         self.report_log = ReportLog(
             os.path.join(os.path.dirname(__file__), REPORT_LOG_DIR_NAME),
             max_bytes=REPORT_LOG_MAX_BYTES,
@@ -2356,35 +2341,21 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if episode:
             await self.hass.async_add_executor_job(self.report_log.resume, episode)
 
-        # CUTOFF DEBUG LOG: same directory as the raw capture on purpose — the two are read
-        # together, joined on `ts`. See `anthem_plus/cutoff_log.py`.
-        self.cutoff_log = CutoffDebugLog(
-            self.hass.config.path(RAW_MQTT_LOG_DIR),
-            forced=ENABLE_CUTOFF_DEBUG_LOG,
-            keep_files=CUTOFF_DEBUG_LOG_KEEP_FILES,
+        # The sinks, in the order that matters: the Report Log takes both kinds of record;
+        # the valves' detectors are pointed at the fan-out; the development capture, where
+        # it exists, adds its writers to both lists; and only then does anything journal —
+        # `journal_baseline()` below writes the warm-up trail's first record, and a sink
+        # registered after it would miss the one line that says what the file started from.
+        # The stream is built last so it takes a complete `raw_sinks`.
+        self.raw_sinks = [self.report_log]
+        self.journals = Journals(
+            schedule_prepare=lambda prepare: self.hass.async_add_executor_job(prepare)
         )
+        self.journals.add(self.report_log)
         for valve in self.valves:
-            valve.attach_journal(self.cutoff_log)
-        await self.hass.async_add_executor_job(self.cutoff_log.prepare)
-
-        # WARMUP JOURNAL: a second journal in the same directory, on the same clock, for a
-        # different open question — see `WARMUP_README`. Separate from the cutoff log because
-        # the two are read for different reasons and `pause_resolution.py` and friends glob
-        # `cutoff_*.jsonl`; mixing warmup records into that corpus would silently change what
-        # those tools count.
-        self.warmup_log = CutoffDebugLog(
-            self.hass.config.path(RAW_MQTT_LOG_DIR),
-            forced=ENABLE_WARMUP_DEBUG_LOG,
-            keep_files=WARMUP_DEBUG_LOG_KEEP_FILES,
-            prefix="warmup",
-            readme=WARMUP_README,
-            readme_fields={
-                "before": int(WARMUP_CONTEXT_BEFORE_SECONDS),
-                "after": int(WARMUP_CONTEXT_AFTER_SECONDS),
-            },
-            label="Warmup journal",
-        )
-        await self.hass.async_add_executor_job(self.warmup_log.prepare)
+            valve.attach_journals(self.journals)
+        if _dev is not None:
+            await _dev.async_install(self)
         for valve in self.valves:
             valve.journal_baseline()
 
@@ -2394,8 +2365,7 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             on_connect=self._handle_connected,
             on_auth_error=self._handle_auth_error,
             mobile_device_id=mobile_device_id,
-            raw_log=self.raw_log,
-            report_log=self.report_log,
+            raw_sinks=self.raw_sinks,
             # Only a brand-new identity can plausibly need provisioning time. A reused one
             # has connected before, so silence from it is real silence.
             expect_warmup=first_registration,
@@ -2523,12 +2493,11 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self.stream is not None:
             await self.stream.async_stop()
             self.stream = None
-        # The raw capture is closed by the stream's own teardown; this one has no stream to
-        # ride on, so it is released here. Blocking close — off the loop.
-        if self.cutoff_log is not None:
-            await self.hass.async_add_executor_job(self.cutoff_log.close)
-        if self.warmup_log is not None:
-            await self.hass.async_add_executor_job(self.warmup_log.close)
+        # The raw sinks are closed by the stream's own teardown; the journal sinks have no
+        # stream to ride on, so they are released here. The Report Log is in both lists and
+        # is closed twice by design — its `close()` is idempotent. Blocking — off the loop.
+        if self.journals is not None:
+            await self.hass.async_add_executor_job(self.journals.close)
 
     # ------------------------------------------------------------------ #
     # Push
@@ -2778,6 +2747,9 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         restart resumes the same file; the key is in `RELOAD_IGNORED_OPTION_KEYS`, so this
         write does not reload the entry and drop the stream being captured.
         """
+        # Always reached by instance lookup (`self.coordinator.async_start_report_log()`):
+        # the development capture, where installed, wraps this method on the instance so a
+        # switch-on also rolls its own files. Calling the class attribute would skip that.
         if self.report_log is None or self.report_log_active:
             return
         episode = await self.hass.async_add_executor_job(self.report_log.start)

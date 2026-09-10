@@ -4,127 +4,75 @@ Use this procedure to recreate an event-driven MQTT bridge for the Kohler
 account. It forwards raw MQTT envelopes to local Mosquitto without saving
 Kohler MQTT credentials.
 
-> **For raw capture, you almost certainly want the integration's own, not this.**
-> Since 2026-08-13 `kohler_anthem_plus` captures raw payloads itself — no second MQTT
-> connection, no separate credentials, no bridge process. See
-> [Raw capture from inside the integration](#raw-capture-from-inside-the-integration)
-> below. The bridge in this runbook remains the right tool only when you need the messages
-> *forwarded* to Mosquitto rather than written to disk.
+> **For raw capture, use the integration's Report Log switch, not this.** Since 2026-08-22
+> `kohler_anthem_plus` captures raw payloads itself, behind a switch on the device page — no
+> second MQTT connection, no separate credentials, no bridge process — and since 0.4.1 the same
+> file also carries the cutoff and warm-up decision trails. See
+> [The Report Log](#the-report-log) below. The bridge in this runbook remains the right tool
+> only when you need the messages *forwarded* to Mosquitto rather than written to disk.
 
-## Raw capture from inside the integration
+## The Report Log
 
 Every payload paho hands the integration, written before any decoding, so the messages the
-decoder drops are captured too.
+decoder drops are captured too — plus every decision the integration makes about them.
 
-> **Two captures exist since 2026-08-22 — this section is the development one.** The
-> **Report Log** switch on the device pages is the *consumer* capture: same record format,
-> same pre-decode tap, but one file per switch-on, appended across restarts, written to
-> `custom_components/kohler_anthem_plus/reports/`. It exists so a user can attach evidence
-> to a GitHub issue without touching `logger.set_level` or `const.py`. Everything below —
-> the logger switch, the pinned constant, `/config/kohler_anthem_plus_raw/`, the per-run
-> files — is the development machine and is unchanged by it
-> (`anthem_plus/report_log.py` has the full design).
+Turn the **Report Log** switch on (either device page, diagnostic section), reproduce, turn it
+off. One file per switch-on in `custom_components/kohler_anthem_plus/reports/`, appended across
+a Home Assistant restart, capped at 8 MB with `_p2`, `_p3`… continuation parts. The design is in
+`anthem_plus/report_log.py`; the `README.txt` beside the files lists every record.
 
-**Switch it on with no restart and no file edit** — Developer Tools → Actions →
-`logger.set_level`, switched to YAML mode:
-
-```yaml
-action: logger.set_level
-data:
-  custom_components.kohler_anthem_plus.anthem_plus.raw_log: debug
-```
-
-Set the same key to `info` to stop; the file is released on the next message.
-
-Three things about that action that trip people up:
-
-* **It is per-logger, not system-wide.** `logger.set_level` takes a free-form mapping of
-  *logger name → level* — the whole `data:` block is that mapping. There is no `entity_id`
-  and no nesting, because a logger is not an entity and has no entity id. The system-wide
-  service is the other one, `logger.set_default_level`.
-* **Only this exact name works.** Capture reads the level set on *this logger*, not the
-  effective level, so `custom_components.kohler_anthem_plus: debug` or `logger: default:
-  debug` will **not** start it. That is deliberate: debugging the integration should not
-  silently begin writing files to disk.
-* **It does not survive a restart** — which is the right default for a capture. To pin it on
-  across restarts, set `ENABLE_RAW_MQTT_LOG = True` in the integration's `const.py`.
-
-**Where it lands:** `<config>/kohler_anthem_plus_raw/`, alongside a `README.txt` explaining
-the format and how to turn it off. Mind the two mount points for that one directory — Home
-Assistant core sees it as `/config/kohler_anthem_plus_raw/`, but **from the terminal add-on
-where these sessions run it is `/homeassistant/kohler_anthem_plus_raw/`.** One JSON object
-per line:
+One JSON object per line, in write order, every line stamped `ts` (ISO-8601 UTC, `Z`). Two
+kinds of line share the file:
 
 ```json
 {"ts":"2026-08-13T15:04:28.123456Z","topic":"$iothub/methods/POST/…","qos":1,"retain":false,"payload":"{\"sku\":\"GCS\",…}"}
+{"ts":"2026-08-14T02:07:11.108Z","journal":"cutoff","event":"flow_end","zone":1,"duration":900.07,"limits":[900],"mask":4,"paused":true,"verdict":"cutoff","matched":900}
+{"ts":"2026-08-14T02:11:20.441Z","journal":"cutoff","event":"flow_end","zone":2,"duration":249.1,"limits":[900],"mask":2,"paused":false,"verdict":"ignored","reason":"stopped (0x00) rather than paused (0x40) — not the valve's timer"}
 ```
 
-`payload` is the payload text **exactly as received** — not a re-serialised dict, so key
-order, duplicates and numeric formatting survive. Bytes that are not valid UTF-8 appear as
-`payload_b64` instead, with no `payload` key.
+* A line with `topic` is a raw message. `payload` is the payload text **exactly as
+  received** — not a re-serialised dict, so key order, duplicates and numeric formatting
+  survive. Bytes that are not valid UTF-8 appear as `payload_b64` instead, with no `payload`.
+* A line with `journal` and `event` is a decision record. `journal` is `cutoff` — the
+  run-time cutoff detector: `arm` (what it could act on at startup), `flow_start`,
+  `mask_change`, `setting_change`, `flow_end` (the verdict), `restore` / `restore_done` /
+  `restore_failed`, `anchor`, `forget` — or `warmup` — the warm-up watcher: `baseline`,
+  `mode`, `announced`, `disabled`, `context`, `restore*`. The two vocabularies share names,
+  which is what `journal` is for. On an account with several valves a record also carries
+  `valve`.
 
-Files roll at 8 MB. **There is no limit on the number of files** — `RAW_MQTT_LOG_KEEP_FILES`
-and `CUTOFF_DEBUG_LOG_KEEP_FILES` are both `None` as of 2026-08-15, at the owner's request, so
-the directory is a permanent record rather than a rotating buffer. It grows in file count and
-needs occasional manual clearing; deleting files is always safe. Nothing is created on disk
-until a message arrives while capture is on.
+The cutoff trail exists because that feature's real failure mode is *silence*:
+`home-assistant.log` gets a WARNING when the water is restarted, and nothing whatsoever when a
+cutoff should have been detected and wasn't. That is the case that shipped undetected for a
+day. The trail records every close the detector evaluated, including the ones it declined and
+why — and it is written whether or not Endless Shower is on, so a `flow_end` with
+`verdict: "cutoff"` followed by a `restore` with `skipped: "restart_on_runtime_cutoff is off"`
+is exactly what an install with the switch off reports.
 
-To find every part of the feature in the source:
+Reading a pair together — a `GCS_SOLO_STS` whose valve word carries `0x40`, against the
+`flow_end` written in the same instant — is the fastest way to answer "why did this not fire":
 
 ```sh
-grep -rn "RAW MQTT LOG" custom_components/kohler_anthem_plus/
-```
-
-That hits `anthem_plus/raw_log.py` (the module), the constants in `const.py`, the call site
-in `anthem_plus/mqtt.py:_on_message`, and the wiring in `coordinator.py`. Deleting those four
-blocks removes it completely.
-
-### The cutoff debug log — the companion file in the same directory
-
-The run-time cutoff detector writes its own decision trail to `cutoff_*.jsonl`, **in the same
-directory and stamped from the same clock**, so the two files interleave by sorting on `ts`.
-
-It exists because the cutoff feature's real failure mode is *silence*: `home-assistant.log`
-gets a WARNING when the water is restarted, and nothing whatsoever when a cutoff should have
-been detected and wasn't. That is the case that shipped undetected for a day. This log
-records every close the detector evaluated, including the ones it declined and why.
-
-Same two switches, independent of the raw capture:
-
-```yaml
-action: logger.set_level
-data:
-  custom_components.kohler_anthem_plus.anthem_plus.cutoff_log: debug
-```
-
-…or `ENABLE_CUTOFF_DEBUG_LOG = True` in `const.py` to pin it across restarts. Volume is a
-handful of lines per shower, so leaving it on for days costs nothing.
-
-```json
-{"ts":"2026-08-14T02:07:11.108Z","event":"flow_end","zone":1,"duration":900.07,"limits":[900],"mask":4,"paused":true,"verdict":"cutoff","matched":900}
-{"ts":"2026-08-14T02:11:20.441Z","event":"flow_end","zone":2,"duration":249.1,"limits":[900],"mask":2,"paused":false,"verdict":"ignored","reason":"stopped (0x00) rather than paused (0x40) — not the valve's timer"}
-```
-
-Events are `arm` (what the feature could act on at startup), `flow_start`, `mask_change`,
-`flow_end` (the verdict), `restore` / `restore_done` / `restore_failed`, and `forget`.
-
-Reading the pair together — a `GCS_SOLO_STS` in the raw log whose valve word carries `0x40`,
-against the `flow_end` written in the same instant — is the fastest way to answer "why did
-this not fire":
-
-```sh
-cd /homeassistant/kohler_anthem_plus_raw
-jq -c '{ts, code:(.payload|fromjson|.data.code)}' mqtt_raw_*.jsonl > /tmp/a.jsonl
-jq -c '{ts, event, zone, verdict, reason}' cutoff_*.jsonl > /tmp/b.jsonl
+cd custom_components/kohler_anthem_plus/reports
+jq -c 'select(.topic)   | {ts, code:(.payload|fromjson|.data.code)}' report_*.jsonl > /tmp/a.jsonl
+jq -c 'select(.journal) | {ts, journal, event, zone, verdict, reason}' report_*.jsonl > /tmp/b.jsonl
 cat /tmp/a.jsonl /tmp/b.jsonl | sort -t'"' -k4 | less
 ```
 
-The **Start new MQTT capture** button rolls both files together, so each experiment leaves a
-matched pair. Source markers:
+(They are already in order in the file; the split is only to read one kind at a time.)
 
-```sh
-grep -rn "CUTOFF DEBUG LOG" custom_components/kohler_anthem_plus/
-```
+### The author's development capture — not part of the integration
+
+Everything in `docs/` cites files named `mqtt_raw_*.jsonl`, `cutoff_*.jsonl` and
+`warmup_*.jsonl` in `/config/kohler_anthem_plus_raw/`. Those are the **same records** — raw
+lines by `format_record`, trail lines by `format_event` without the `journal` key, since the
+filename says which trail — written **always**, one file per Home Assistant run per kind,
+never pruned, by a package (`_dev/`) that lives in the author's checkout and is gitignored.
+From 2026-08-13 to 0.4.1 those writers shipped inside `anthem_plus/`, pinned on by
+`const.py` constants, so every install wrote that folder; that was the author's tooling
+shipping by mistake, and it is out of the published integration now (0.4.1 offers a Repairs
+card to delete the folder). Nothing here applies to an install from a release; the
+`logger.set_level` and `const.py` instructions this section used to carry are gone with it.
 
 ## Known Devices
 

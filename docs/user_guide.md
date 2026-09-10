@@ -199,8 +199,7 @@ becomes `switch.anthem_plus_master_bath_shower` and `switch.anthem_valve_shower`
 | `MQTT Connection` | both | Whether the push stream is connected — **our** link to Kohler |
 | `Cloud Connection` | valve | Whether **Kohler's cloud** can reach the valve. A different question, and the one behind "the app says my valve is offline" — see [When the valve drops off the cloud](#when-the-valve-drops-off-the-cloud) |
 | `Last Update` | both | Timestamp of the most recent message |
-| `Start new MQTT capture` | both | Button; rolls the raw capture over to a fresh file |
-| `Report Log` | both | Switch; one-file bug-report capture of the raw MQTT stream — see [The Report Log switch](#the-report-log-switch) |
+| `Report Log` | both | Switch; one-file bug-report capture — every raw MQTT message plus the integration's own decision records — see [The Report Log switch](#the-report-log-switch) |
 | `Zone N Hex` | valve | The current command word for that zone — copy it into `send_valve_hex` |
 | `Zone N Outlet M Max Run Time` | valve | That outlet's configured run-time ceiling, in seconds |
 | `Zone N Active` | valve | Whether that zone is currently running water |
@@ -567,37 +566,40 @@ producing a shower that doesn't stop on its own.
 
 ### The Report Log switch
 
-The quick way to capture evidence for a bug report — or to document a healthy run on
+The one way to capture evidence for a bug report — or to document a healthy run on
 hardware this integration has never been verified against. A **Report Log** switch sits on
 both device pages (diagnostic section):
 
-* **Switch on** → a new capture file starts, recording every raw MQTT message.
+* **Switch on** → a new capture file starts.
 * **Restart Home Assistant mid-capture** → the same file continues. "It breaks when I
   restart" is a bug report too, so the restart never splits the evidence.
 * **Switch off** → the capture ends. The next switch-on starts a fresh file.
 
+The file holds two kinds of record, on one clock, in the order they happened — so one
+attachment says both what arrived and what the integration made of it:
+
+| A line with… | is | and carries |
+|---|---|---|
+| `topic` | a raw MQTT message, exactly as received, before any decoding | `topic`, `payload` (or `payload_b64`), `qos`, `retain` |
+| `journal` + `event` | one of the integration's own decision records | `journal` is `cutoff` (the run-time cutoff detector: every zone start and stop, every close it judged, the verdict and why) or `warmup` (every warm-up mode change, who wrote it, and what Auto-Restore did about it) |
+
+The decision records are written whether or not Endless Shower and Warmup Auto-Restore are
+on — the switches decide whether the integration *acts*, not whether it *records* — so a
+report from an install with both off still shows, for example, a cutoff that was seen and
+`skipped` because the switch was off. That is usually the whole answer.
+
 Files land in `custom_components/kohler_anthem_plus/reports/` (a `README.txt` there explains
-them), one per capture, capped at 8 MB with continuation parts. Attach them to a GitHub
-issue along with the diagnostics download. **Check them before sharing** — they contain your
-device identifiers and show when the shower was used. And note the folder lives inside the
-integration itself, so **updating or reinstalling the integration deletes it**; move files
-you want to keep first.
+every record), one per capture, capped at 8 MB with continuation parts. Attach them to a
+GitHub issue along with the diagnostics download. **Check them before sharing** — they
+contain your device identifiers and show when the shower was used. And note the folder lives
+inside the integration itself, so **updating or reinstalling the integration deletes it**;
+move files you want to keep first.
 
-### Captures and journals
-
-Separately from the Report Log, the integration writes its development evidence to
-`/config/kohler_anthem_plus_raw/`:
-
-| File | What it holds |
-|---|---|
-| `raw_mqtt_*.jsonl` | Every MQTT message, as received |
-| `cutoff_*.jsonl` | Run-time cutoff events and how each resolved |
-| `warmup_*.jsonl` | Warmup mode changes, with traffic windows either side |
-
-Each is capped at 8 MB per file and rolls over rather than pruning. The `Start new MQTT
-capture` button opens a fresh file, which is useful before a deliberate experiment. If you
-report a problem, these are the files that make it diagnosable —
-[`mqtt/capture_runbook.md`](mqtt/capture_runbook.md) explains how to read them.
+> Before 0.4.1 the integration also wrote an always-on developer capture to
+> `/config/kohler_anthem_plus_raw/` on every install, and had a **Start new MQTT capture**
+> button for it. Both are gone: that was the author's own tooling and now lives outside the
+> published integration. If your install still has that folder, a **Repairs** card offers to
+> delete it; the files are inert either way.
 
 ## Requirements
 
@@ -648,7 +650,10 @@ dashboards can reach it too.
 Every device page and the integration card have a **Download diagnostics** button. It
 produces one JSON report describing the whole installation — model and outlet split as
 detected, what each device is reporting, configured limits — with credentials and account
-identity redacted. If you're on hardware other than a K-28212,
+identity redacted. Kohler's device ids stay in: they name every Konnect product (a valve, a
+controller, a faucet, a toilet) and label every cloud message with the device it is about,
+which is how the report tells one valve from another; they open nothing on their own.
+If you're on hardware other than a K-28212,
 attaching that file to an issue is the single most useful thing you can send.
 
 ## Automation examples
@@ -935,9 +940,10 @@ Issue reports from **different hardware** are the most useful thing anyone can c
 A single-zone valve, a four-outlet valve, or a valve with no controller in front of it would
 each test paths that have never run outside their own source code.
 
-If you're reporting a problem, the journals in `/config/kohler_anthem_plus_raw/` are what make
-it diagnosable. Check them for anything you'd rather not share before attaching them —
-they contain your device identifiers.
+If you're reporting a problem, turn the [Report Log switch](#the-report-log-switch) on
+before reproducing it and attach the file it writes — the raw traffic and the integration's
+own decisions, together, are what make a report diagnosable. Check it for anything you'd
+rather not share before attaching it; it contains your device identifiers.
 
 ## Licence and trademarks
 

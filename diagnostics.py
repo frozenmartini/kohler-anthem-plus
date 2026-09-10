@@ -19,13 +19,19 @@ tenant id), and the mobile registration id — the identity this integration con
 Kohler's MQTT broker with. Preset and favourite *names* are the owner's own words and stay
 out too; counts carry the signal.
 
-What stays in, on purpose: Kohler's device ids (``gcs-…``, ``hub-…``). Since 0.4.0 they key
-the per-valve settings in the entry, and they are what tells one valve's rows from
-another's on an account with several. They carry no access on their own — every cloud call
-needs the account credentials above, and the MQTT identity is the registration id, not the
-shower's — and the project's own documentation quotes them freely. An earlier version of
-this docstring promised they were redacted; they never were, and there is no reason for
-them to be (wording corrected 2026-09-10, after @kedube pointed out the mismatch).
+What stays in, on purpose: Kohler's device ids (``gcs-…``, ``hub-…``). A device id is how
+Konnect names every product on an account — the valve, the controller, and anything else
+Kohler sells with an app (kitchen faucets, toilets, …) — and every MQTT message from the
+cloud carries one to say which device it is about; that is how this integration routes a
+message to the right valve. Since 0.4.1 the ids also key the per-valve settings in the
+entry, and they are what tells one valve's rows from another's on an account with
+several. They carry no access on their own — every cloud call needs the account
+credentials above, and the MQTT identity is the registration id, not the shower's — and
+the project's own documentation quotes them freely. An earlier version of this docstring
+promised they were redacted; they never were, and there is no reason for them to be.
+Wording corrected 2026-09-10: @kedube's fork relabels them in its own reports, which is
+what surfaced the mismatch here; the relabelling itself was not taken up, for the reasons
+above.
 """
 
 from __future__ import annotations

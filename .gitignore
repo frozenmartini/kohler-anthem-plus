@@ -66,3 +66,16 @@ intro.md
 #
 # ⚠️ Like docs/handoff/, git is not backing this up.
 docs/hacs-submission.md
+
+# Developer-only capture — deliberately NOT published.
+#
+# `_dev/` is the author's own always-on diagnostic capture: raw MQTT, the cutoff journal and
+# the warmup journal, one file each in /homeassistant/kohler_anthem_plus_raw/ on this machine,
+# built on the shipped Report Log's formatters so the file formats every analysis script under
+# scripts/kohler-work/ reads stay unchanged. It shipped inside `anthem_plus/` until 0.4.1,
+# pinned on — a capture running, unasked, on every install — which is exactly why it is out
+# of the repository now. `coordinator.py` imports it inside `except ModuleNotFoundError`, so
+# a release never notices it is missing.
+#
+# ⚠️ Like docs/handoff/, git is not backing this up.
+_dev/

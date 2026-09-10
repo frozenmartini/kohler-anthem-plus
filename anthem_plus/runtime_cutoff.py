@@ -22,10 +22,10 @@ cutoffs; in the one logged session where the owner actually moved between shower
 found 1 of 4.
 
 # ---------------------------------------------------------------------------
-# Every decision this module makes is written to the cutoff debug log — including
-# the ones where it decides NOT to fire, which nothing else records. When this
-# feature misbehaves, read `cutoff_*.jsonl` alongside `mqtt_raw_*.jsonl` in the
-# same directory; see `cutoff_log.py`.
+# Every decision this module makes is written to the cutoff trail — including the
+# ones where it decides NOT to fire, which nothing else records. When this feature
+# misbehaves, read the `journal: "cutoff"` records in the Report Log beside the raw
+# MQTT records they interleave with; see `report_log.py` and `journal.py`.
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
@@ -170,7 +170,7 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class Journal(Protocol):
-    """The bit of `cutoff_log.CutoffDebugLog` this module needs.
+    """The one method the detector needs from wherever its trail goes.
 
     Declared structurally so this module keeps no import of it — the detector stays
     dependency-free and unit-testable with a list-backed stub.
@@ -345,7 +345,7 @@ class ZoneCutoffDetector:
     right failure, since guessing would mean re-opening a valve on no evidence.
     """
 
-    #: Where the decision trail goes. See `cutoff_log.py` for why this is worth having: a
+    #: Where the decision trail goes. See `report_log.py` for why this is worth having: a
     #: cutoff that *fails to fire* produces no log line anywhere else, and that is the
     #: failure mode this feature actually has.
     journal: Journal = field(default_factory=_NullJournal)

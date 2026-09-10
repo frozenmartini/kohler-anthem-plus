@@ -36,8 +36,6 @@ import paho.mqtt.client as mqtt
 
 from .auth import AuthError, AuthUnavailable
 from .client import KohlerClient
-from .raw_log import RawMqttLog
-from .report_log import ReportLog
 from .const import (
     MQTT_PORT,
     MQTT_RESPONSE_TOPIC,
@@ -114,8 +112,7 @@ class AnthemMqttStream:
         on_connect: Callable[[], None] | None = None,
         on_auth_error: Callable[[AuthError], None] | None = None,
         mobile_device_id: str | None = None,
-        raw_log: RawMqttLog | None = None,
-        report_log: ReportLog | None = None,
+        raw_sinks: list[Any] | None = None,
         expect_warmup: bool = True,
         loop: asyncio.AbstractEventLoop | None = None,
         ssl_context: ssl.SSLContext | None = None,
@@ -151,13 +148,11 @@ class AnthemMqttStream:
         # Reuse one registered identity instead of a throwaway per connect. None falls back
         # to the old behaviour of generating a fresh one.
         self._mobile_device_id = mobile_device_id
-        # RAW MQTT LOG: None disables capture entirely; the object itself is also a no-op
-        # until switched on. See anthem_plus/raw_log.py.
-        self._raw_log = raw_log
-        # REPORT LOG: the consumer-side capture, fed at the same pre-decode point so a
-        # user's bug report holds exactly what the development capture would. Independent
-        # switches, independent files — see anthem_plus/report_log.py.
-        self._report_log = report_log
+        # RAW SINKS: everything that wants each message exactly as it arrived, before the
+        # decode — `write(topic, payload, *, qos, retain)` on the paho thread, `close()` at
+        # teardown. In a release the list holds the user's Report Log (a no-op until its
+        # switch is on); the author's development capture adds itself on one machine.
+        self._raw_sinks: list[Any] = list(raw_sinks or ())
         # Only a *newly registered* identity can plausibly need warm-up; one that has
         # connected before is already provisioned. Cleared for good by the first message —
         # data arriving is proof the channel works, whatever the clock says.
@@ -185,13 +180,10 @@ class AnthemMqttStream:
             client.disconnect()
             await asyncio.to_thread(client.loop_stop)
         self.connected = False
-        # RAW MQTT LOG: release the capture file on unload.
-        if self._raw_log is not None:
-            self._raw_log.close()
-        # REPORT LOG: release the handle only — `close()` does not end the episode, so a
-        # reload resumes the same file from the persisted name.
-        if self._report_log is not None:
-            self._report_log.close()
+        # Release every sink's file on unload. For the Report Log this is the handle only —
+        # `close()` does not end the episode, so a reload resumes the same file.
+        for sink in self._raw_sinks:
+            sink.close()
 
     @property
     def warming_up(self) -> bool:
@@ -301,24 +293,17 @@ class AnthemMqttStream:
                 b'{"status":"received"}',
                 qos=1,
             )
-        # --- RAW MQTT LOG call site — see anthem_plus/raw_log.py -------------------
+        # --- RAW SINKS call site — see anthem_plus/report_log.py -------------------
         # Before the decode, deliberately: everything below this point is lossy, and the
         # payloads that fail to parse are dropped entirely. Those are the ones worth having.
-        if self._raw_log is not None:
-            self._raw_log.write(
+        for sink in self._raw_sinks:
+            sink.write(
                 message.topic,
                 message.payload,
                 qos=message.qos,
                 retain=message.retain,
             )
-        if self._report_log is not None:
-            self._report_log.write(
-                message.topic,
-                message.payload,
-                qos=message.qos,
-                retain=message.retain,
-            )
-        # --- end RAW MQTT LOG call site -------------------------------------------
+        # --- end RAW SINKS call site -------------------------------------------------
 
         try:
             payload = json.loads(message.payload.decode("utf-8"))
