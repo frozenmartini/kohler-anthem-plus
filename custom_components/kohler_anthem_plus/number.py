@@ -29,6 +29,7 @@ control disabled reports a narrow range rather than being offered one it will no
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from homeassistant.components.number import NumberDeviceClass, NumberEntity, NumberMode
@@ -220,17 +221,21 @@ class ZoneFlowNumber(ZoneNumberBase):
 
     _attr_icon = "mdi:water-percent"
     _attr_native_unit_of_measurement = PERCENTAGE
-    # The byte is 2 units per percent, so 0.5 % is exactly the wire's own resolution — 185
-    # positions over [8, 100], one per legal byte.
+    # **Whole percents, by the owner's decision.** The wire resolves to 0.5 % — one byte is
+    # half a percent — and 0.7.4 briefly exposed that. It was reverted here because a control
+    # is for choosing a flow, not for mirroring the device's internal precision: half-percent
+    # steps double the travel needed to cross the range and offer a distinction nobody can
+    # feel in a shower.
     #
-    # This was 1 % until 0.7.4, on the reasoning that whole percents are all exactly
-    # representable and keep the slider usable. True for writes, but it made the entity
-    # unable to sit still: both of the owner's valves report half values (24.5 % and
-    # 26.5 %), and a step of 1 puts those off-grid, so touching the slider at all snapped
-    # the flow by up to 0.5 % nobody asked for. Matching the hardware's own resolution costs
-    # nothing — a Home Assistant number still accepts any typed value — and lets the control
-    # represent every state the valve can actually be in.
-    _attr_native_step = 0.5
+    # The cost is deliberate and bounded. Where the valve reports a half value — both of the
+    # owner's valves do, 24.5 % and 26.5 % — `native_value` rounds it for display, so the
+    # entity reads 25 % and 27 % while the valve holds the half. Adjusting the slider then
+    # writes the whole number, moving the real flow by at most 0.5 %: below the resolution of
+    # anything a person notices, and it only happens when the control is actually used.
+    #
+    # Every whole percent is exactly representable (percent * 2 is always an integer byte),
+    # so nothing is lost on the write path.
+    _attr_native_step = 1
 
     def __init__(
         self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve, zone: int
@@ -255,7 +260,11 @@ class ZoneFlowNumber(ZoneNumberBase):
         if state is None:
             return FLOW_BYTE_MIN / FLOW_PER_PERCENT
         low, _ = state.zone_flow_limits(self._zone)
-        return low / FLOW_PER_PERCENT
+        # Rounded UP, and away from the forbidden side: an odd limit byte would otherwise put
+        # the bound on a half (byte 17 -> 8.5 %) and, with a whole-number step, every position
+        # on the slider would carry that .5 — defeating the point. Ceiling rather than round,
+        # so the bound never sits below what the valve will accept.
+        return math.ceil(low / FLOW_PER_PERCENT)
 
     @property
     def native_max_value(self) -> float:
@@ -263,7 +272,9 @@ class ZoneFlowNumber(ZoneNumberBase):
         if state is None:
             return FLOW_BYTE_MAX / FLOW_PER_PERCENT
         _, high = state.zone_flow_limits(self._zone)
-        return high / FLOW_PER_PERCENT
+        # Floored, mirroring the minimum: rounding a half-valued ceiling upwards would offer
+        # a percent the valve clamps back down, so the slider would not hold its own maximum.
+        return math.floor(high / FLOW_PER_PERCENT)
 
     @property
     def native_value(self) -> float | None:
@@ -275,7 +286,10 @@ class ZoneFlowNumber(ZoneNumberBase):
         if state is not None and state.flow_is_live:
             word = self._word
             if word is not None:
-                return word.flow_percent
+                # Rounded to the step. The valve resolves to 0.5 % and this control does not,
+                # so an unrounded 24.5 % would sit between two positions the slider can
+                # occupy — Home Assistant would render a value the user cannot return to.
+                return round(word.flow_percent)
         return self._valve.zone_flow.get(self._zone, DEFAULT_FLOW_PERCENT)
 
     @property

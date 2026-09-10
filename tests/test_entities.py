@@ -315,20 +315,45 @@ def test_every_legal_flow_byte_round_trips():
         assert round(percent * FLOW_PER_PERCENT) == byte, (byte, percent)
 
 
-def test_flow_slider_step_matches_the_wire_resolution():
-    """A step coarser than the hardware puts real reported values off-grid.
+def test_flow_slider_is_whole_percent():
+    """Whole-number percentages, by the owner's decision — step and both bounds.
 
-    Both of the owner's valves report half-percent values; with a step of 1 the slider could
-    not sit on either, so touching it snapped the flow by up to 0.5 % unasked.
+    The wire resolves to 0.5 %, but the control deliberately does not: see `ZoneFlowNumber`.
+    The bounds matter as much as the step, because a half-valued bound would put every
+    position on the slider on a half and defeat the whole thing.
     """
     from custom_components.kohler_anthem_plus.anthem_plus.models import get_valve_model
-    from custom_components.kohler_anthem_plus.anthem_plus.valve_hex import (
-        FLOW_PER_PERCENT,
-    )
 
     coordinator = make_coordinator(
         [make_valve(get_valve_model("K-28210"), [31, 11, 1])]
     )
     flows = [e for e in collect("number", coordinator) if e.name == "Flow"]
     assert len(flows) == 1
-    assert flows[0].native_step == 1 / FLOW_PER_PERCENT
+    flow = flows[0]
+    assert flow.native_step == 1
+    assert float(flow.native_min_value).is_integer(), flow.native_min_value
+    assert float(flow.native_max_value).is_integer(), flow.native_max_value
+
+
+def test_flow_rounds_a_half_percent_reading_for_display():
+    """The valve reports halves; the control shows whole numbers.
+
+    Both of the owner's valves sit on half-percent bytes, so an unrounded display would show
+    a value the slider cannot return to.
+    """
+    from custom_components.kohler_anthem_plus.anthem_plus.models import get_valve_model
+    from custom_components.kohler_anthem_plus.anthem_plus.valve_hex import decode_word
+
+    valve = make_valve(get_valve_model("K-28210"), [31, 11, 1])
+    flow = [
+        e for e in collect("number", make_coordinator([valve])) if e.name == "Flow"
+    ][0]
+
+    # Byte 49 = 24.5 %, with outlet 1 open so the valve's own reading is the one shown.
+    valve.gcs_state.valve1 = decode_word("0195310100000001")
+    assert valve.gcs_state.flow_is_live
+    assert float(flow.native_value).is_integer(), flow.native_value
+
+    # A whole reading is untouched.
+    valve.gcs_state.valve1 = decode_word("0195320100000001")  # byte 50 = 25.0 %
+    assert flow.native_value == 25
