@@ -992,3 +992,97 @@ def test_valve_never_calls_a_member_it_no_longer_has():
     }
     missing = sorted(name for name in used - known if not name.startswith("__"))
     assert not missing, f"Valve calls members it does not have: {missing}"
+
+
+# --------------------------------------------------------------------------- #
+# The diagnostics version scan (0.10.1)
+# --------------------------------------------------------------------------- #
+
+
+def test_version_scan_finds_every_firmware_without_leaking_identity():
+    """The scan exists to find the valve and gateway versions the three named blocks miss.
+
+    It walks blocks this module otherwise refuses to reproduce (`configuration`, `iot`,
+    `applicationSource`) because they carry plumbing and cloud addressing — so the property
+    that matters is that it takes version *values* and leaves every sibling behind.
+    """
+    from custom_components.kohler_anthem_plus.diagnostics import _version_fields
+
+    record = {
+        "deviceId": "gcs-secret01",
+        "tenantId": "tenant-secret02",
+        "serialNumber": "SN-secret03",
+        "iot": {
+            "connectionString": "HostName=x.azure-devices.net;DeviceId=gcs-secret01;Key=AAAA",
+            "firmwareVersion": "00.74",
+            "hubName": "kohler-prod",
+        },
+        "configuration": {
+            "valves": [
+                {"valveIndex": "Valve1", "firmwareVersion": 10, "serial": "V-secret04"},
+                {"valveIndex": "Valve2", "firmwareVersion": 10},
+            ],
+            "systemConfiguration": {"pipeLayout": "left-riser", "swRevision": "1.4"},
+        },
+        "applicationSource": {"version": "3.0.1", "buildId": "a" * 40},
+        # Labels that sit beside a version and are not one.
+        "firmwareType": "Application",
+        "isSingleFirmwareUpdate": False,
+    }
+    found = _version_fields(record)
+
+    # The versions the report exists to surface, each at a path that says where it came from.
+    assert found["iot.firmwareVersion"] == "00.74"
+    assert found["configuration.valves[0].firmwareVersion"] == 10
+    assert found["configuration.valves[1].firmwareVersion"] == 10
+    assert found["configuration.systemConfiguration.swRevision"] == "1.4"
+
+    # A value too long to be a version is described, not copied.
+    assert found["applicationSource.buildId"] == "<str, 40 chars>"
+
+    # Type and update-bookkeeping labels are not versions.
+    assert "firmwareType" not in found
+    assert "isSingleFirmwareUpdate" not in found
+
+    blob = __import__("json").dumps(found)
+    for secret in (
+        "secret01",
+        "secret02",
+        "secret03",
+        "secret04",
+        "azure-devices",
+        "left-riser",
+        "kohler-prod",
+    ):
+        assert secret not in blob, f"{secret} leaked into the version scan"
+
+
+def test_version_scan_reads_the_real_block_shapes():
+    """Both interfaces' real payloads, as captured 2026-09-10."""
+    from custom_components.kohler_anthem_plus.diagnostics import _version_fields
+
+    # Shower Left: an Application block beside the Assets one.
+    left = {
+        "firmwareUpdate": {"firmwareType": "Assets", "version": "2.00"},
+        "otaReportedProperties": {
+            "firmwareType": "Application",
+            "initialVersion": "2.20",
+            "updatedVersion": "2.20",
+        },
+        "version": None,
+    }
+    assert _version_fields(left)["otaReportedProperties.updatedVersion"] == "2.20"
+
+    # Shower Right: no Application block anywhere — the reason its entity read 2.00.
+    right = {
+        "firmwareUpdate": {"firmwareType": "Assets", "version": "2.00"},
+        "otaReportedProperties": {
+            "firmwareType": "Assets",
+            "initialVersion": "2.00",
+            "updatedVersion": "2.00",
+        },
+        "version": None,
+    }
+    found = _version_fields(right)
+    assert found["otaReportedProperties.updatedVersion"] == "2.00"
+    assert all(value in ("2.00", None) for value in found.values())

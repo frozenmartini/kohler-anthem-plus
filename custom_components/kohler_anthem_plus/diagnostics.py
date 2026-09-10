@@ -113,6 +113,74 @@ def _word(word: Any) -> dict[str, Any] | None:
     }
 
 
+# Keys whose *values* are version-shaped, wherever they appear in the record. Matched on
+# the key name rather than the value, because a version can be a string ("2.20"), an int
+# (10) or a float — the app shows the valves as bare `10` — and matching on shape alone
+# would sweep up timestamps, ids and counts.
+_VERSION_KEY_HINTS = ("firmware", "version", "swrev", "revision", "build")
+
+# Keys that contain one of the hints above but are NOT a version: update bookkeeping,
+# feature flags, and the type/status labels that sit beside a version. Excluded by exact
+# name so a genuinely new version key is never silently dropped.
+_VERSION_KEY_SKIP = {
+    "firmwaretype",
+    "firmwareupdate",
+    "isfirmwareupdateavailable",
+    "issinglefirmwareupdate",
+    "versionblocks",
+}
+
+# Values that would carry identity rather than a version. A version is short; a device id,
+# serial or GUID is not, and none of them belong in a report that redacts those elsewhere.
+_VERSION_VALUE_MAX_LEN = 24
+
+
+def _version_fields(
+    node: Any, path: str = "", found: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """Every version-shaped field in a record, by dotted path.
+
+    **Why this exists.** `gcs-configuration` carries at least three different firmwares —
+    the touchscreen interface, the valve itself, and the gateway — and the Konnect app shows
+    all three as different numbers (2.2, 10, 00.74 on the owner's system). Only the
+    interface's lives in the three blocks `_configuration_report` reproduces in full, so the
+    other two were invisible in every report, and a single `Firmware` entity was silently
+    picking whichever it found first. See `docs/user_guide.md`.
+
+    **Why by path rather than in full.** The blocks these live in (`configuration`, `iot`,
+    `applicationSource`) also describe someone's plumbing and their cloud addressing, which
+    this module redacts everywhere else. Reproducing them whole to find a version would
+    trade the report's discretion for one field. So this walks the record and takes only
+    values whose *key* names a version, leaving every sibling behind.
+
+    Values longer than `_VERSION_VALUE_MAX_LEN` are reported as their type and length rather
+    than their content: a real version is short, and anything long enough to be a device id,
+    a serial or a connection string is exactly what must not be copied out.
+    """
+    if found is None:
+        found = {}
+    if isinstance(node, Mapping):
+        for key, value in node.items():
+            here = f"{path}.{key}" if path else str(key)
+            lowered = str(key).lower()
+            if isinstance(value, (Mapping, list)):
+                _version_fields(value, here, found)
+                continue
+            if lowered in _VERSION_KEY_SKIP:
+                continue
+            if not any(hint in lowered for hint in _VERSION_KEY_HINTS):
+                continue
+            if isinstance(value, str) and len(value) > _VERSION_VALUE_MAX_LEN:
+                found[here] = f"<{type(value).__name__}, {len(value)} chars>"
+            else:
+                found[here] = value
+    elif isinstance(node, list):
+        # Indexed, so two valves' entries stay distinguishable in the report.
+        for index, item in enumerate(node[:8]):
+            _version_fields(item, f"{path}[{index}]", found)
+    return found
+
+
 def _configuration_report(valve: Valve) -> dict[str, Any]:
     """What `gcs-configuration` returned, summarised rather than reproduced.
 
@@ -154,6 +222,11 @@ def _configuration_report(valve: Valve) -> dict[str, Any]:
         "read": True,
         "firmware": valve.firmware,
         "version_blocks": version_blocks,
+        # Every version-shaped field anywhere in the record, including the blocks named but
+        # not dumped below. The interface firmware is the only one the three blocks above
+        # carry; the valve and gateway versions the Konnect app shows live elsewhere, and
+        # without this a report cannot say where.
+        "version_fields": _version_fields(configuration),
         # True where the key is present AND not null — the distinction the question turns on.
         "populated": {key: configuration.get(key) is not None for key in structural},
         # Every other key the record carried, named but not dumped, so a field nobody has
