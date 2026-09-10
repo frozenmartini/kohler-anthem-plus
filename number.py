@@ -199,10 +199,11 @@ class ZoneFlowNumber(ZoneNumberBase):
         super().__init__(coordinator, valve, zone)
         self._attr_name = f"Zone {zone} Flow"
         self._attr_unique_id = f"{self._device_id}_flow_zone_{zone}"
-        # What to show when the valve's own byte cannot be trusted — see the class
-        # docstring. `DEFAULT_FLOW_PERCENT` is what `async_apply_valve` writes when no flow
-        # is given, so an untouched entity displays exactly what a command would send.
-        self._last_written: float = DEFAULT_FLOW_PERCENT
+        # The chosen flow lives on the valve rather than on this entity, because the outlet
+        # switches need it too: toggling an outlet rewrites the whole word, and without a
+        # shared value it would reset the flow this entity had set. Seeded with
+        # `DEFAULT_FLOW_PERCENT`, which is what an unspecified write sends anyway.
+        self._valve.zone_flow.setdefault(zone, DEFAULT_FLOW_PERCENT)
 
     @property
     def native_min_value(self) -> float:
@@ -236,7 +237,7 @@ class ZoneFlowNumber(ZoneNumberBase):
             word = self._word
             if word is not None:
                 return word.flow_percent
-        return self._last_written
+        return self._valve.zone_flow.get(self._zone, DEFAULT_FLOW_PERCENT)
 
     @property
     def extra_state_attributes(self) -> dict[str, object]:
@@ -270,8 +271,9 @@ class ZoneFlowNumber(ZoneNumberBase):
     async def async_set_native_value(self, value: float) -> None:
         key = "zone1_flow" if self._zone == 1 else "zone2_flow"
         await self._valve.async_apply_valve(**{key: float(value)})
-        # Remembered so an idle valve shows what was asked for rather than reverting to the
-        # byte it happens to be holding. Recorded only after the write is accepted.
-        self._last_written = float(value)
+        # Remembered on the valve so an idle entity shows what was asked for rather than
+        # the byte it happens to be holding, and so an outlet toggle preserves it. Recorded
+        # only after the write is accepted.
+        self._valve.zone_flow[self._zone] = float(value)
         self.async_write_ha_state()
 

@@ -494,6 +494,14 @@ class Valve:
         # yet"; `{}` means the read was attempted and produced nothing usable, which is the
         # documented result on a controller-attached valve and is not an error.
         self.configuration: dict[str, Any] | None = None
+        # The flow each zone's Flow number is currently showing, keyed by zone. Written by
+        # that entity and read by the outlet switches, so toggling an outlet does not
+        # silently reset a flow the user chose — see `async_set_zone_outlet`. Seeded with
+        # `DEFAULT_FLOW_PERCENT`, which is what an unspecified write sends anyway, so the
+        # behaviour before anyone touches the entity is exactly as it was.
+        self.zone_flow: dict[int, float] = {
+            zone: DEFAULT_FLOW_PERCENT for zone in self.model.zones
+        }
 
     def __repr__(self) -> str:
         return f"<Valve {self.device_id} {self.name!r}>"
@@ -1692,11 +1700,26 @@ class Valve:
         finally:
             remove()
 
-    async def async_set_zone_outlet(self, zone: int, outlet: int, on: bool) -> None:
+    async def async_set_zone_outlet(
+        self, zone: int, outlet: int, on: bool, *, flow: float | None = None
+    ) -> None:
         """Open or close one outlet within a zone.
 
         ``outlet`` is 1-based **within that zone**, matching how the hardware and the API
         address it. Every other outlet, in both zones, is preserved.
+
+        ``flow`` is the flow to write for this zone, and callers should pass the Flow
+        number's current value. Omitting it falls back to `async_apply_valve`'s rule and
+        writes `DEFAULT_FLOW_PERCENT`.
+
+        **Why this is not "inherit the valve's flow".** `async_apply_valve` never carries
+        flow forward, so that nothing silently adopts whatever the touchscreen last wrote.
+        That rule is about the *valve's* byte, not about a value Home Assistant itself
+        holds — the run-time-cutoff restore already makes the same distinction, replaying a
+        flow it observed rather than defaulting. Passing the Flow entity's value is the
+        same case: the user set it, so a subsequent outlet toggle should not silently undo
+        it. The valve's idle byte is still never read here; see `GcsState.flow_is_live` for
+        why it cannot be trusted.
         """
         if self.gcs_state is None:
             raise HomeAssistantError("No Anthem valve on this account")
@@ -1704,7 +1727,8 @@ class Valve:
         mask = word.outlet_mask if word else 0
         bit = 1 << (outlet - 1)
         mask = (mask | bit) if on else (mask & ~bit)
-        await self.async_apply_valve(zone_masks={zone: mask})
+        key = "zone1_flow" if zone == 1 else "zone2_flow"
+        await self.async_apply_valve(zone_masks={zone: mask}, **{key: flow})
 
     async def async_activate_preset(self, preset_id: int | str) -> None:
         """Start a stored GCS preset. **This runs water.**

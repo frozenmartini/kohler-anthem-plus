@@ -107,6 +107,14 @@ class ShowerSwitch(KohlerValveEntity, SwitchEntity):
     no "run my default", so a whole-shower start has to name a stored scene; the preset
     supplies the outlets, temperature, and flow that this entity cannot.
 
+    **Not redundant with the outlet switches, despite both running water.** They answer
+    different questions. An outlet switch opens *one* outlet at whatever temperature the
+    zone already holds — manual control, one outlet at a time. This runs the shower the
+    owner configured: outlets, temperature and flow together, in a single command, from a
+    preset edited in the Konnect app rather than in this integration. Change that preset
+    and this switch starts something different with no code change. The redundancy is only
+    at the *off* end, where both stop the water.
+
     Which means **what "on" does is stored on the valve, not here.** Edit the preset in the
     Konnect app and this switch starts something different, with no code change — the reason
     the id is a constant rather than a hardcoded literal.
@@ -539,7 +547,13 @@ class ZoneOutletSwitch(KohlerValveEntity, SwitchEntity):
         self.async_write_ha_state()
         try:
             await self._valve.async_set_zone_outlet(
-                self._zone, self._outlet, target
+                self._zone,
+                self._outlet,
+                target,
+                # The flow the Flow number is showing for this zone. Without it every
+                # outlet toggle would rewrite the word with `DEFAULT_FLOW_PERCENT` and
+                # silently undo a flow the user had set.
+                flow=self._valve.zone_flow.get(self._zone),
             )
         except Exception:
             # The command failed, so stop showing the position we never reached.
