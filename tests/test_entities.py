@@ -345,9 +345,9 @@ def test_flow_rounds_a_half_percent_reading_for_display():
     from custom_components.kohler_anthem_plus.anthem_plus.valve_hex import decode_word
 
     valve = make_valve(get_valve_model("K-28210"), [31, 11, 1])
-    flow = [
+    flow = next(
         e for e in collect("number", make_coordinator([valve])) if e.name == "Flow"
-    ][0]
+    )
 
     # Byte 49 = 24.5 %, with outlet 1 open so the valve's own reading is the one shown.
     valve.gcs_state.valve1 = decode_word("0195310100000001")
