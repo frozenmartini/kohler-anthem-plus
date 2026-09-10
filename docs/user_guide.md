@@ -647,8 +647,8 @@ dashboards can reach it too.
 
 Every device page and the integration card have a **Download diagnostics** button. It
 produces one JSON report describing the whole installation — model and outlet split as
-detected, what each device is reporting, configured limits — with credentials, account
-identity, and device serial numbers redacted. If you're on hardware other than a K-28212,
+detected, what each device is reporting, configured limits — with credentials and account
+identity redacted. If you're on hardware other than a K-28212,
 attaching that file to an issue is the single most useful thing you can send.
 
 ## Automation examples

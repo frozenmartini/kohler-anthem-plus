@@ -15,10 +15,17 @@ arrived. A user on unverified hardware attaches this JSON to a "hardware report"
 that model's row can be marked verified.
 
 What deliberately stays out: credentials (refresh token), account identity (username,
-tenant id), and device identity (device ids, serial numbers, the mobile registration id).
-Kohler device serials double as cloud addresses, so they are redacted the same way tokens
-are — presence and SKU are enough for validation. Preset and favourite *names* are the
-owner's own words and stay out too; counts carry the signal.
+tenant id), and the mobile registration id — the identity this integration connects to
+Kohler's MQTT broker with. Preset and favourite *names* are the owner's own words and stay
+out too; counts carry the signal.
+
+What stays in, on purpose: Kohler's device ids (``gcs-…``, ``hub-…``). Since 0.4.0 they key
+the per-valve settings in the entry, and they are what tells one valve's rows from
+another's on an account with several. They carry no access on their own — every cloud call
+needs the account credentials above, and the MQTT identity is the registration id, not the
+shower's — and the project's own documentation quotes them freely. An earlier version of
+this docstring promised they were redacted; they never were, and there is no reason for
+them to be (wording corrected 2026-09-10, after @kedube pointed out the mismatch).
 """
 
 from __future__ import annotations
@@ -254,7 +261,8 @@ async def async_get_device_diagnostics(
         for index, controller in enumerate(coordinator.controllers):
             if identifier == controller.device_id:
                 # Plain "controller" with one, as every report so far has said; an index
-                # into `controllers` when there are several, since ids are redacted.
+                # into `controllers` when there are several — the index is the stable
+                # cross-reference into the lists below, whatever the ids are.
                 requested_for = (
                     "controller"
                     if len(coordinator.controllers) == 1

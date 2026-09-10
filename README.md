@@ -274,7 +274,7 @@ diagnosable:</p>
 
 <ul>
 <li><b>Download diagnostics</b> — on the integration card and both device pages. One JSON report
-of the whole installation, with credentials, account identity and serial numbers redacted. On
+of the whole installation, with credentials and account identity redacted. On
 anything other than a K-28212, this is the single most useful file you can send.</li>
 <li><b>Report Log</b> — a switch on both device pages that captures every raw MQTT message, one
 file per switch-on, continuing across a Home Assistant restart so "it breaks when I restart" stays
