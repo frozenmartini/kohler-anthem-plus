@@ -255,24 +255,22 @@ def test_multi_zone_names_stay_unique_across_every_platform():
 
 
 # --------------------------------------------------------------------------- #
-# Water total: the device counts quarter-gallon ticks
+# Water total: published exactly as the device reports it
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [
-        # The owner's two valves, against what the Kohler Konnect app displays.
-        (8224.0, 2056.00),
-        (25955.0, 6488.75),
-        # Already-gallons readings from the capture corpus pass through: a quarter fraction
-        # cannot survive the tick scale, so it identifies a value that is not a tick count.
+        # The owner's Konnect app read 2056.00 and 6488.75 for the two valves, which are
+        # exactly these raw counter values. 0.7.3 divided by four on a misreading of which
+        # capture those app figures matched; 0.7.6 reverted it. No scaling belongs here.
+        (2056.0, 2056.0),
+        (6488.75, 6488.75),
+        (8224.0, 8224.0),
         (413.25, 413.25),
-        # The same total as ticks — 413.25 * 4 — which must land back on 413.25.
-        (1653, 413.25),
-        (1656, 414.0),
         (None, None),
     ],
 )
-def test_total_flow_is_scaled_from_quarter_gallon_ticks(raw, expected):
+def test_total_flow_is_published_unscaled(raw, expected):
     from custom_components.kohler_anthem_plus.anthem_plus.state import GcsState
 
     holder = SimpleNamespace(total_flow_filtered=raw)

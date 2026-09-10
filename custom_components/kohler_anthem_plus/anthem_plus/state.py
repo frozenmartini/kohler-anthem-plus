@@ -232,29 +232,6 @@ class GcsPreset:
         return not self.is_empty and not self.is_experience
 
 
-#: The valve counts water in quarter-gallon ticks, so a raw `totalFlow` is four times the
-#: gallon figure the Kohler Konnect app shows. Confirmed against two valves and the app; see
-#: `GcsState.total_flow_gallons`.
-TOTAL_FLOW_PER_GALLON = 4
-
-
-def _reads_in_quarter_gallons(reading: float) -> bool:
-    """Whether a raw `totalFlow` is a tick count rather than a gallon figure.
-
-    Both scales exist in the wild — the corpus holds `413.25` from one install and `1653`
-    from another, which are the same total four ticks apart — so this cannot be a blanket
-    divide. A tick count is a whole number by construction; a gallon figure carries the
-    quarter fractions that scale produces (`.25`, `.5`, `.75`). So a fractional reading is
-    already in gallons and is passed through untouched.
-
-    The ambiguity is a whole-numbered gallon figure, which is indistinguishable from a tick
-    count and gets divided. That is the right way round to be wrong: the owner's valves and
-    every large reading in the corpus are tick counts, and a device genuinely reporting whole
-    gallons would have to land on an exact integer every time to stay misread.
-    """
-    return float(reading).is_integer()
-
-
 @dataclass
 class GcsState:
     """Live state of one Anthem digital valve.
@@ -539,35 +516,19 @@ class GcsState:
 
     @property
     def total_flow_gallons(self) -> float | None:
-        """Lifetime water total in US gallons, filtered and scaled to match the Konnect app.
+        """Lifetime water total in US gallons, with the known glitch frames filtered out.
 
         This is the value an entity should publish. `total_flow` is the raw reading and
-        keeps whatever the device last said, glitch and device scale included.
+        keeps whatever the device last said, glitch included.
 
-        **The device counts quarter-gallons, not gallons.** Confirmed 2026-09-10 against the
-        owner's two valves and the Kohler Konnect app, which is the only reference for what
-        the number is supposed to mean:
-
-            left   raw 8224  -> 2056.00 gal   app: 2056.00
-            right  raw 25955 -> 6488.75 gal   app: 6488.80
-
-        Both to the cent, on two valves with unrelated totals — arithmetic, not coincidence.
-        The corpus agrees: it holds `413.25` from one install and `1653` from another, and
-        `413.25 * 4 == 1653`, so the same counter appears in both scales.
-
-        Neither the reference integration nor the upstream library scales this field. Their
-        "gallons" reading traces to a single hand-written line in a reverse-engineered API
-        document, never calibrated against a device; both would over-report by 4x here.
-
-        `TOTAL_FLOW_PER_GALLON` carries the divisor and the reasoning for applying it only
-        to whole-tick readings.
+        **Reported as-is.** 0.7.3 divided this by four and 0.7.6 reverted that. The owner's
+        Konnect app read 2056.00 and 6488.75 for the two valves, which are exactly the raw
+        counter values from the capture taken at 01:59Z that day — so the app agrees with the
+        raw field and no divisor belongs here. The 4x that appeared between that capture and
+        the one at 11:44Z was the counter moving during the day, not a change of unit, and
+        treating it as a scale made the sensor read a quarter of the truth.
         """
-        reading = self.total_flow_filtered
-        if reading is None:
-            return None
-        if not _reads_in_quarter_gallons(reading):
-            return reading
-        return reading / TOTAL_FLOW_PER_GALLON
+        return self.total_flow_filtered
 
     def _accept_total_flow(self, value: object) -> bool:
         """Fold one `totalFlow` reading into the raw and filtered totals.

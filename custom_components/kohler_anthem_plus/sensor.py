@@ -263,16 +263,13 @@ class ValveTotalWaterSensor(KohlerValveEntity, SensorEntity):
     published value comes from `total_flow_gallons`, which holds the last good reading
     across a collapse; `GcsState._accept_total_flow` carries the rule and the reasoning.
 
-    **Scaled.** The device counts quarter-gallon ticks, so the raw `totalFlow` is four times
-    the figure the Konnect app shows — confirmed against the owner's two valves and the app,
-    to the cent. `GcsState.total_flow_gallons` carries the divisor and the reasoning; the
-    upstream "documented as gallons" claim traces to one unverified line in a
-    reverse-engineered API document and is wrong for this hardware.
+    `totalFlow` is reported in US gallons and is converted for a `Liters` account. It is
+    published as the device sends it: 0.7.3 divided it by four on a misreading and 0.7.6
+    reverted that — see `GcsState.total_flow_gallons`.
 
-    The gallons figure is then converted for a `Liters` account. This is a **lifetime**
-    total: Kohler exposes no per-session volume, and `totalVolume` — the other counter in the
-    same message, reading in the hundreds of millions — has no established unit and is
-    published only as an attribute here.
+    This is a **lifetime** total: Kohler exposes no per-session volume, and `totalVolume` —
+    the other counter in the same message, reading in the hundreds of millions — has no
+    established unit and is published only as an attribute here.
     """
 
     _attr_name = "Total Water Used"
