@@ -222,6 +222,9 @@ class OutletLimits:
     # tenths (`450`); both are normalised to tenths on the way in, so this field means one
     # thing whichever source filled it.
     #
+    # **A setting, not a hardware limit** — changed from the app or the panel and observed
+    # moving 450 -> 477 within minutes on 2026-09-10. Never cache it as a device property.
+    #
     # 🚨 **This is a safety setting.** `docs/gcs/api.md` warns that a whole-record write
     # which omits it, or sends it on the wrong scale, silently changes it. Nothing here
     # writes it — this integration only reads it — but that is why it is recorded exactly

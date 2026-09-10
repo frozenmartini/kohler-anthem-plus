@@ -1515,3 +1515,42 @@ def test_118f_encodes_to_the_valve_without_being_clamped():
     celsius = unit_to_celsius(118, "Fahrenheit")
     word = encode_word(1, celsius, 50.0, 0b001)
     assert decode_word(word).temperature_celsius == pytest.approx(celsius, abs=0.05)
+
+
+def test_max_temperature_is_a_setting_not_a_hardware_ceiling(valve_model):
+    """Observed live 2026-09-10: 450 tenths at 16:48, 477 at 16:55, on one valve.
+
+    The owner changed it from 113 °F to 118 °F in the Konnect app and the valve took it on all
+    three outlets. This entity therefore reports the ceiling **in force now**, which can move
+    at any time — nothing may treat it as a fixed device property, and in particular the
+    temperature slider's bounds must not be derived from it.
+    """
+    before = _max_temperature_sensor(valve_model, 450, "Fahrenheit")
+    after = _max_temperature_sensor(valve_model, 477, "Fahrenheit")
+    assert before.native_value == pytest.approx(113.0, abs=0.05)
+    # 477 tenths is 47.7 °C = 117.86 °F, which the entity's display precision shows as 118 —
+    # and 477 is exactly what `unit_to_celsius(118, "Fahrenheit")` produces, so Kohler's
+    # stored value and this integration's conversion table agree on what "118 °F" means.
+    assert after.native_value == pytest.approx(117.86, abs=0.05)
+    assert round(after.native_value) == 118
+
+
+def test_the_slider_does_not_follow_the_scald_limit(valve_model):
+    """The slider matches the app's range, not the valve's current setting.
+
+    Deriving it from `maximumOutletTemperature` would have been the intuitive fix and is the
+    wrong one: the limit is user-configurable, so the slider would silently reshape itself
+    whenever somebody changed a setting in the app — and would have to be rebuilt to widen,
+    since Home Assistant caches an entity's bounds.
+    """
+    from custom_components.kohler_anthem_plus.anthem_plus.state import OutletLimits
+
+    valve = make_valve(valve_model, [31, 11, 1])
+    # A valve set well below the slider's ceiling.
+    valve.gcs_state.outlet_limits[1] = OutletLimits(1, 16, 200, 1800, 200, 11, 450)
+    coordinator = make_coordinator([valve])
+    coordinator.temperature_unit = "Fahrenheit"
+    number = next(
+        e for e in collect("number", coordinator) if "temperature" in e.unique_id
+    )
+    assert number.native_max_value == 118, "the slider follows the app, not the valve"

@@ -809,11 +809,18 @@ class OutletMaxRunTimeSensor(ValveDiagnosticSensor):
 class OutletMaxTemperatureSensor(ValveDiagnosticSensor):
     """The scald limit — ``maximumOutletTemperature``, as the app's "Max Temperature".
 
-    🚨 **This is a safety setting**, and the reason it is worth surfacing: it is the ceiling
-    the valve will not exceed however it is commanded, and the Konnect app is otherwise the
-    only place it is visible. Read-only here — this integration never writes it, and
-    `docs/gcs/api.md` warns that a whole-record write which omits it or sends it on the wrong
-    scale silently changes it.
+    🚨 **A safety setting, and a configurable one** — not a fixed hardware ceiling. Demonstrated
+    2026-09-10: the owner's left valve read 450 tenths (113 °F), was changed to 118 °F in the
+    Konnect app, and read 477 tenths on the next diagnostics download minutes later, all three
+    outlets together. So this reports *what the valve is currently set to*, which can change
+    at any time from the app or the panel — it is the ceiling in force now, not a property of
+    the hardware.
+
+    Worth surfacing because the Konnect app is otherwise the only place it is visible, and
+    because two valves on one account can sit at different values without anything saying so.
+
+    Read-only here — this integration never writes it, and `docs/gcs/api.md` warns that a
+    whole-record write which omits it or sends it on the wrong scale silently changes it.
 
     Reported in the account's own temperature unit, like every other temperature this
     integration publishes, so an install set to Fahrenheit reads `118 °F` rather than a

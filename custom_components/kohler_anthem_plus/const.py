@@ -422,9 +422,12 @@ RELOAD_IGNORED_DATA_KEYS = frozenset(
 # cautious.
 #
 # The bounds were 80-113 before 0.12.0 — both ends invented here rather than taken from the
-# app. The valve's own `maximumOutletTemperature` remains the real ceiling and is enforced by
-# the hardware whatever this says; see the `Max Temperature` sensor, which reports it per
-# valve (450 tenths on one of the owner's valves, 477 on the other).
+# app. The old ceiling was justified as matching `maximumOutletTemperature`, which was a
+# double mistake: that value was read from one valve and generalised, and it is a **setting**
+# rather than a hardware limit. The owner changed one valve from 113 °F to 118 °F in the app
+# on 2026-09-10 and the valve took it. So there is no fixed device ceiling for this slider to
+# match — only the app's range, which is what it matches now. `maximumOutletTemperature` is
+# still the ceiling in force at any moment, and the `Max Temperature` sensor reports it.
 #
 # Stated in Fahrenheit and converted for a Celsius account — the reverse would make these
 # unrecognisable to anyone checking them against the shower.
