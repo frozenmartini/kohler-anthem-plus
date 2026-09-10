@@ -1582,3 +1582,82 @@ def test_auto_restore_says_whether_the_fault_can_even_occur(valve_model):
         if e.unique_id.endswith("_warmup_auto_restore")
     )
     assert switch.extra_state_attributes["hub_present"] is True
+
+
+# --------------------------------------------------------------------------- #
+# Water used this year (0.13.0)
+# --------------------------------------------------------------------------- #
+
+
+def _yearly_sensor(valve_model, series, units="Standard", now_month="2026-09"):
+    valve = make_valve(valve_model, [31, 11, 1])
+    valve.usage = {"gcsUsageDataDetailsList": series}
+    coordinator = make_coordinator([valve])
+    coordinator.water_units = units
+    sensor = next(
+        e
+        for e in collect("sensor", coordinator)
+        if e.unique_id.endswith("_water_this_year")
+    )
+    return sensor
+
+
+def test_yearly_water_sums_twelve_complete_months(valve_model):
+    """500 gallons a month for a year, in the litres the API actually returns."""
+    litres_per_month = 500 / 0.264172
+    series = [
+        {"intervalKey": f"2025-{m:02d}", "volume": litres_per_month}
+        for m in range(9, 13)
+    ] + [
+        {"intervalKey": f"2026-{m:02d}", "volume": litres_per_month}
+        for m in range(1, 9)
+    ]
+    sensor = _yearly_sensor(valve_model, series)
+    assert sensor.native_value == pytest.approx(6000, abs=1)
+    assert sensor.extra_state_attributes["months_counted"] == 12
+
+
+def test_yearly_water_excludes_the_current_month(valve_model):
+    """A rolling window that crept up through the month would not be a `TOTAL`.
+
+    The partial month belongs to `Water Used This Month`; including it here would make the
+    value climb daily and then fall at every month boundary.
+    """
+    litres = 100 / 0.264172
+    series = [
+        {"intervalKey": "2026-08", "volume": litres},
+        {"intervalKey": "2026-09", "volume": litres * 99},  # the current, partial month
+    ]
+    sensor = _yearly_sensor(valve_model, series)
+    assert sensor.native_value == pytest.approx(100, abs=1)
+    assert sensor.extra_state_attributes["excludes_current_month"] == "2026-09"
+
+
+def test_yearly_water_takes_only_the_twelve_most_recent(valve_model):
+    """A 400-day fetch returns thirteen months; the thirteenth must not inflate the year."""
+    litres = 100 / 0.264172
+    series = [{"intervalKey": f"2025-{m:02d}", "volume": litres} for m in range(1, 13)]
+    series += [{"intervalKey": f"2026-{m:02d}", "volume": litres} for m in range(1, 9)]
+    sensor = _yearly_sensor(valve_model, series)
+    assert sensor.extra_state_attributes["months_counted"] == 12
+    assert sensor.native_value == pytest.approx(1200, abs=1)
+    assert sensor.extra_state_attributes["last_month"] == "2026-08"
+
+
+def test_yearly_water_reports_a_short_series_honestly(valve_model):
+    """A young account has fewer than twelve months, and must not read as a dry year."""
+    litres = 100 / 0.264172
+    series = [{"intervalKey": "2026-07", "volume": litres}]
+    sensor = _yearly_sensor(valve_model, series)
+    assert sensor.native_value == pytest.approx(100, abs=1)
+    assert sensor.extra_state_attributes["months_counted"] == 1
+
+
+def test_yearly_water_stays_in_litres_on_a_metric_account(valve_model):
+    series = [{"intervalKey": "2026-08", "volume": 1000.0}]
+    sensor = _yearly_sensor(valve_model, series, units="Liters")
+    assert sensor.native_value == pytest.approx(1000.0)
+
+
+def test_yearly_water_is_none_without_a_series(valve_model):
+    assert _yearly_sensor(valve_model, []).native_value is None

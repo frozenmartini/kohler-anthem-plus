@@ -185,6 +185,7 @@ An outlet whose type the valve has not reported falls back to its position: `Out
 | Entity | Type | What it does |
 |---|---|---|
 | `Water Used This Month` | sensor | This calendar month's usage, from **Kohler's own history** — the same figure the Konnect app charts. Carries every month it returned as a `history` attribute |
+| `Water Used This Year` | valve | The last **twelve complete months** from Kohler's own usage history, summed. The current partial month is excluded so the value changes once a month rather than creeping daily — `Water Used This Month` covers that. Enabled by default |
 | `Shower on` | switch | Turns the shower on or off. From cold it opens **the valve's own default outlets**; if outlets are already open it preserves them |
 | `Rainhead`, `Showerhead`, `Handshower`, `Tub Filler` | switch | One per outlet, named after the fixture the valve reports. See **Outlet names** below |
 | `Temperature` | number | Setpoint for that zone, in your account's unit. `Temperature 1` / `Temperature 2` on a two-zone valve |

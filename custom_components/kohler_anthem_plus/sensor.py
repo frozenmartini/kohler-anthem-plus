@@ -80,6 +80,7 @@ async def async_setup_entry(
             ValveSystemStateSensor(coordinator, valve),
             ValveTotalWaterSensor(coordinator, valve),
             ValveMonthlyWaterSensor(coordinator, valve),
+            ValveYearlyWaterSensor(coordinator, valve),
             ValveLastUpdateSensor(coordinator, valve),
             ValveFirmwareSensor(coordinator, valve),
             # The other two firmwares the Konnect app shows. Separate entities rather than
@@ -458,6 +459,100 @@ class ValveDiagnosticSensor(KohlerValveEntity, SensorEntity):
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_entity_registry_enabled_default = False
+
+
+class ValveYearlyWaterSensor(KohlerValveEntity, SensorEntity):
+    """Water used over the last twelve complete months, from Kohler's own usage history.
+
+    **The way out of the lifetime-counter problem.** The valve's `totalVolume` is a real
+    meter — an isolated 2.4 gallon session moved it by 19 counts, so it counts eighths of a
+    US gallon — but its absolute value is around 537 million, which at that unit would be 67
+    million gallons and cannot be what it claims. Something else is packed into the field and
+    nobody has established what, so a lifetime total derived from it would be a guess.
+
+    This needs none of that. `gcs-usage` returns a per-month series in **litres**, which is
+    the same data the Konnect app charts, and summing twelve of its entries is arithmetic on
+    values whose unit is already settled. A year is not a lifetime, but it is a real number
+    that matches the app — which a wrong lifetime figure would not be.
+
+    **Complete months only.** The current partial month is excluded, so the value does not
+    creep upward through the month and then drop when the window rolls: it changes once, at a
+    month boundary, which is what `TOTAL` means. `Water Used This Month` covers the partial
+    month beside it.
+
+    Read once at setup with the rest of the usage series — no extra API call, and no polling.
+    """
+
+    _attr_name = "Water Used This Year"
+    _attr_icon = "mdi:calendar-range"
+    _attr_device_class = SensorDeviceClass.WATER
+    # `TOTAL`, not `TOTAL_INCREASING`: a rolling window falls whenever the month dropping off
+    # the back was wetter than the one joining, and calling that a meter reset would inject a
+    # phantom year of water into long-term statistics.
+    _attr_state_class = SensorStateClass.TOTAL
+    _attr_entity_registry_enabled_default = True
+
+    def __init__(self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve) -> None:
+        super().__init__(coordinator, valve)
+        self._attr_unique_id = f"{self._device_id}_water_this_year"
+        # Cached on the payload's identity, exactly as the monthly sensor is: every MQTT
+        # message re-renders every entity, and this sums a 13-entry series that changes only
+        # when the entry reloads.
+        self._cache_key: int | None = None
+        self._cached: tuple[float | None, dict[str, Any]] = (None, {})
+
+    @property
+    def _metric(self) -> bool:
+        return self.coordinator.water_units == "Liters"
+
+    @property
+    def native_unit_of_measurement(self) -> str:
+        return UnitOfVolume.LITERS if self._metric else UnitOfVolume.GALLONS
+
+    def _rendered(self) -> tuple[float | None, dict[str, Any]]:
+        usage = self._valve.usage
+        key = id(usage)
+        if key == self._cache_key:
+            return self._cached
+
+        this_month = datetime.now(UTC).strftime("%Y-%m")
+        months: dict[str, float] = {}
+        for entry in usage_series(usage):
+            interval = entry.get("intervalKey")
+            # The current month is deliberately excluded — see the class docstring.
+            if not interval or str(interval) >= this_month:
+                continue
+            litres = entry.get("volume")
+            if isinstance(litres, (int, float)):
+                months[str(interval)] = float(litres)
+
+        total: float | None = None
+        attributes: dict[str, Any] = {}
+        if months:
+            # The twelve most recent complete months. Fewer where the account is younger, and
+            # `months_counted` says so rather than letting a short series read as a low year.
+            recent = sorted(months)[-12:]
+            litres = sum(months[key_] for key_ in recent)
+            value = litres if self._metric else usage_volume_gallons(litres)
+            total = round(value, 1)
+            attributes = {
+                "months_counted": len(recent),
+                "first_month": recent[0],
+                "last_month": recent[-1],
+                "excludes_current_month": this_month,
+            }
+
+        self._cache_key = key
+        self._cached = (total, attributes)
+        return self._cached
+
+    @property
+    def native_value(self) -> float | None:
+        return self._rendered()[0]
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return self._rendered()[1]
 
 
 class ValveLastUpdateSensor(ValveDiagnosticSensor):
