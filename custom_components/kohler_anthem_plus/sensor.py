@@ -41,7 +41,6 @@ from .coordinator import Controller, KohlerAnthemPlusCoordinator, Valve
 from .entity import (
     KohlerControllerEntity,
     KohlerValveEntity,
-    outlet_name,
     zone_label,
 )
 
@@ -94,6 +93,7 @@ async def async_setup_entry(
             ValveRegisteredSensor(coordinator, valve),
             ValveHexSensor(coordinator, valve, 1),
             OutletMaxRunTimeSensor(coordinator, valve, 1),
+            OutletMaxTemperatureSensor(coordinator, valve, 1),
         ]
         if valve.model.uses_valve2:
             entities.append(ValveHexSensor(coordinator, valve, 2))
@@ -725,7 +725,13 @@ class OutletMaxRunTimeSensor(ValveDiagnosticSensor):
 
     _attr_icon = "mdi:timer-cog-outline"
     _attr_device_class = SensorDeviceClass.DURATION
-    _attr_native_unit_of_measurement = UnitOfTime.SECONDS
+    # **Minutes, not seconds.** The valve reports `maximumRunTime` in seconds (1800), and
+    # this published that number raw — while the Konnect app, the touchscreen and Kohler's
+    # own documentation all say "30 minutes". Home Assistant converts for display where a
+    # device class and unit are set, but the *stored* value is what automations and history
+    # read, so it is converted here rather than left to the frontend.
+    _attr_native_unit_of_measurement = UnitOfTime.MINUTES
+    _attr_suggested_display_precision = 0
     _attr_entity_registry_enabled_default = True
 
     def __init__(
@@ -733,11 +739,14 @@ class OutletMaxRunTimeSensor(ValveDiagnosticSensor):
     ) -> None:
         super().__init__(coordinator, valve)
         self._outlet = outlet
-        zone, index = valve.model.outlet_location(outlet)
-        # Named after the same fixture its switch is, so the two line up on the device page
-        # — `Rainhead Max Run Time` beside `Rainhead`. Falls back to the position exactly
-        # as the switch does when the type code is not one this integration can name.
-        self._attr_name = f"{outlet_name(valve, zone, index + 1)} Max Run Time"
+        # **Named for the setting, not the outlet.** It was `Rainhead Max Run Time` — the
+        # fixture its switch is named after — which read as a property of that one outlet.
+        # It is not: the limit is timed per zone (see `runtime_cutoff.py`), every outlet on
+        # this install reports the same figure, and only one entity is created. "Max Shower
+        # Duration" is what the Konnect app calls it, and matching the app is what makes a
+        # value recognisable.
+        self._attr_name = "Max Shower Duration"
+        # Unique id unchanged: a rename must not orphan history or an automation.
         self._attr_unique_id = f"{self._device_id}_outlet_{outlet}_max_run_time"
 
     @property
@@ -746,8 +755,69 @@ class OutletMaxRunTimeSensor(ValveDiagnosticSensor):
         return self.coordinator.last_update_success
 
     @property
-    def native_value(self) -> int | None:
-        return self._valve.outlet_run_times.get(self._outlet)
+    def native_value(self) -> float | None:
+        seconds = self._valve.outlet_run_times.get(self._outlet)
+        if seconds is None:
+            return None
+        # 1800 -> 30. Kept as a float so a limit that is not a whole number of minutes is
+        # reported honestly rather than rounded into a lie; the display precision above
+        # shows the usual whole-minute case as `30`.
+        return seconds / 60
+
+
+class OutletMaxTemperatureSensor(ValveDiagnosticSensor):
+    """The scald limit — ``maximumOutletTemperature``, as the app's "Max Temperature".
+
+    🚨 **This is a safety setting**, and the reason it is worth surfacing: it is the ceiling
+    the valve will not exceed however it is commanded, and the Konnect app is otherwise the
+    only place it is visible. Read-only here — this integration never writes it, and
+    `docs/gcs/api.md` warns that a whole-record write which omits it or sends it on the wrong
+    scale silently changes it.
+
+    Reported in the account's own temperature unit, like every other temperature this
+    integration publishes, so an install set to Fahrenheit reads `118 °F` rather than a
+    converted-looking 47.8.
+
+    Reads `unknown` until the valve has reported it — which is not the same as "no limit".
+    """
+
+    _attr_icon = "mdi:thermometer-alert"
+    _attr_device_class = SensorDeviceClass.TEMPERATURE
+    _attr_suggested_display_precision = 0
+    _attr_entity_registry_enabled_default = True
+
+    def __init__(
+        self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve, outlet: int
+    ) -> None:
+        super().__init__(coordinator, valve)
+        self._outlet = outlet
+        # Named for the setting, like the duration beside it — and for the same reason: the
+        # limit is the valve's, not one outlet's.
+        self._attr_name = "Max Temperature"
+        self._attr_unique_id = f"{self._device_id}_outlet_{outlet}_max_temperature"
+
+    @property
+    def native_unit_of_measurement(self) -> str:
+        """The account's own unit, matching every other temperature on the device."""
+        if self.coordinator.temperature_unit == "Fahrenheit":
+            return UnitOfTemperature.FAHRENHEIT
+        return UnitOfTemperature.CELSIUS
+
+    @property
+    def available(self) -> bool:
+        """A learned setting, not a live reading — available once known."""
+        return self.coordinator.last_update_success
+
+    @property
+    def native_value(self) -> float | None:
+        limits = self._valve.gcs_state.outlet_limits.get(self._outlet)
+        tenths = None if limits is None else limits.maximum_temperature_tenths
+        if tenths is None:
+            return None
+        celsius = tenths / 10
+        if self.coordinator.temperature_unit == "Fahrenheit":
+            return celsius * 9 / 5 + 32
+        return celsius
 
 
 class ControllerDiagnosticSensor(KohlerControllerEntity, SensorEntity):

@@ -253,7 +253,8 @@ the valve's own byte is authoritative, including a change made at the panel mid-
 | `Start new MQTT capture` | both | Button; rolls the raw capture over to a fresh file |
 | `Report Log` | both | Switch; one-file bug-report capture of the raw MQTT stream — see [The Report Log switch](#the-report-log-switch) |
 | `Hex` | valve | The current command word for that zone — copy it into `send_valve_hex`. `Zone N Hex` on a two-zone valve |
-| `Rainhead Max Run Time` | valve | The valve's configured run-time ceiling, in seconds — named after outlet 1's fixture. **One sensor, not one per outlet**: every outlet observed reports the same figure, and the valve times the limit per zone rather than per outlet. Enabled by default, unlike the rest of this table |
+| `Max Shower Duration` | valve | The valve's configured run-time ceiling, **in minutes** — the same name and unit the Konnect app uses. **One sensor, not one per outlet**: every outlet observed reports the same figure, and the valve times the limit per zone rather than per outlet. Enabled by default, unlike the rest of this table |
+| `Max Temperature` | valve | 🚨 The **scald limit** — the ceiling the valve will not exceed however it is commanded, shown in the account's own unit (118 °F on the reference system). Read-only; this integration never writes it. Enabled by default |
 | `Zone N Active` | valve | Whether that zone is currently running water |
 | `Preset Active` | valve | Whether a stored preset is driving the valve |
 | `Interface Firmware` | valve | The touchscreen's own version — what the Konnect app calls the interface firmware. Reads `unknown` where the record carries no interface version |
@@ -929,7 +930,7 @@ legacy delayed-start modes. It's shown so Home Assistant can display the true st
 disappears once you select something else. You can't select it.
 
 **The shower stops after about fifteen minutes.** That's the configured maximum run time, and
-it's working as designed. `Rainhead Max Run Time` shows the ceiling. The
+it's working as designed. `Max Shower Duration` shows the ceiling. The
 `Endless Shower` switch will re-open the zone if you want that behaviour.
 
 **Zone 2 entities are missing.** Expected on a single-zone valve — K-28209 and K-28210 have

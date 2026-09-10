@@ -93,9 +93,53 @@ def test_outlets_named_after_their_fixture(coordinator):
     assert "Shower on" in names
 
 
-def test_run_time_sensors_follow_outlet_names(coordinator):
+def test_limit_sensors_are_named_for_the_setting_not_the_outlet(coordinator):
+    """0.11.1 renamed `Rainhead Max Run Time`, which named the wrong thing.
+
+    The limit is timed per zone rather than per outlet, every outlet on the reference
+    install reports the same figure, and only one entity is created — so naming it after one
+    fixture read as a property of that fixture. `Max Shower Duration` is what the Konnect app
+    calls it, and matching the app is what makes a value recognisable.
+    """
     names = {e.name for e in collect("sensor", coordinator)}
-    assert "Rainhead Max Run Time" in names, sorted(names)
+    assert "Max Shower Duration" in names, sorted(names)
+    assert "Max Temperature" in names, sorted(names)
+    assert not any("Max Run Time" in name for name in names), sorted(names)
+
+
+def test_the_duration_rename_kept_its_unique_id(coordinator):
+    """A rename that moved the id would orphan history and every automation using it."""
+    ids = [e.unique_id for e in collect("sensor", coordinator)]
+    assert any(i.endswith("_outlet_1_max_run_time") for i in ids), sorted(ids)
+
+
+def test_max_shower_duration_is_reported_in_minutes(valve_model):
+    """The valve reports 1800 seconds; the app, the panel and Kohler all say 30 minutes."""
+    from homeassistant.const import UnitOfTime
+
+    valve = make_valve(valve_model, [31, 11, 1])
+    valve.outlet_run_times = {1: 1800}
+    coordinator = make_coordinator([valve])
+    sensor = next(
+        e
+        for e in collect("sensor", coordinator)
+        if e.unique_id.endswith("_outlet_1_max_run_time")
+    )
+    assert sensor.native_value == 30
+    assert sensor.native_unit_of_measurement == UnitOfTime.MINUTES
+
+
+def test_max_shower_duration_is_unknown_before_it_is_learned(valve_model):
+    """`unknown` and zero are different answers; only one of them is safe to show."""
+    valve = make_valve(valve_model, [31, 11, 1])
+    valve.outlet_run_times = {}
+    coordinator = make_coordinator([valve])
+    sensor = next(
+        e
+        for e in collect("sensor", coordinator)
+        if e.unique_id.endswith("_outlet_1_max_run_time")
+    )
+    assert sensor.native_value is None
 
 
 def test_single_zone_valve_drops_the_zone_prefix(coordinator):
@@ -1223,3 +1267,94 @@ def test_firmware_entities_keep_their_ids_and_do_not_collide(valve_model):
     assert any(i.endswith("_firmware") for i in firmware_ids), firmware_ids
     assert any(i.endswith("_firmware_valve") for i in firmware_ids), firmware_ids
     assert any(i.endswith("_firmware_gateway") for i in firmware_ids), firmware_ids
+
+
+# --------------------------------------------------------------------------- #
+# The scald limit (0.11.1)
+# --------------------------------------------------------------------------- #
+
+
+def _max_temperature_sensor(valve_model, tenths, unit):
+    from custom_components.kohler_anthem_plus.anthem_plus.state import OutletLimits
+
+    valve = make_valve(valve_model, [31, 11, 1])
+    valve.gcs_state.outlet_limits[1] = OutletLimits(1, 16, 200, 1800, 200, 11, tenths)
+    coordinator = make_coordinator([valve])
+    coordinator.temperature_unit = unit
+    return next(
+        e
+        for e in collect("sensor", coordinator)
+        if e.unique_id.endswith("_outlet_1_max_temperature")
+    )
+
+
+def test_max_temperature_reads_118f_on_a_fahrenheit_account(valve_model):
+    """The reference system's real setting: 47.8 C is the 118 F the Konnect app shows."""
+    from homeassistant.const import UnitOfTemperature
+
+    sensor = _max_temperature_sensor(valve_model, 478, "Fahrenheit")
+    assert sensor.native_value == pytest.approx(118.04, abs=0.05)
+    assert sensor.native_unit_of_measurement == UnitOfTemperature.FAHRENHEIT
+
+
+def test_max_temperature_stays_celsius_on_a_metric_account(valve_model):
+    from homeassistant.const import UnitOfTemperature
+
+    sensor = _max_temperature_sensor(valve_model, 478, "Celsius")
+    assert sensor.native_value == pytest.approx(47.8)
+    assert sensor.native_unit_of_measurement == UnitOfTemperature.CELSIUS
+
+
+def test_max_temperature_is_unknown_before_it_is_reported(valve_model):
+    """`unknown` is not the same as "no limit", and must not read as a number."""
+    sensor = _max_temperature_sensor(valve_model, None, "Fahrenheit")
+    assert sensor.native_value is None
+
+
+def test_rest_and_mqtt_agree_on_the_scald_limit():
+    """REST reports display C (`45`), MQTT reports tenths (`450`). Both mean 45.0 C.
+
+    The same wire/display split as flow, and getting it wrong here would silently misreport
+    a safety setting by a factor of ten.
+    """
+    from custom_components.kohler_anthem_plus.anthem_plus.state import (
+        outlet_limits_from_settings,
+    )
+
+    rest = outlet_limits_from_settings(
+        {
+            "valveSettings": [
+                {
+                    "outletConfigurations": [
+                        {
+                            "outLetId": "1",
+                            "minimumFlowrate": "4",
+                            "maximumFlowrate": "50",
+                            "maximumRuntime": "1800",
+                            "maximumOutletTemperature": "45",
+                        }
+                    ]
+                }
+            ]
+        }
+    )
+    assert rest[1].maximum_temperature_tenths == 450
+
+    # And the documented decimal case, which must not round to 478 vs 477.
+    decimal = outlet_limits_from_settings(
+        {
+            "valveSettings": [
+                {
+                    "outletConfigurations": [
+                        {
+                            "outLetId": "1",
+                            "minimumFlowrate": "4",
+                            "maximumFlowrate": "50",
+                            "maximumOutletTemperature": "47.8",
+                        }
+                    ]
+                }
+            ]
+        }
+    )
+    assert decimal[1].maximum_temperature_tenths == 478

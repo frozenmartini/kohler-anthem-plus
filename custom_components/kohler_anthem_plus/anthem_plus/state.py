@@ -149,8 +149,21 @@ def outlet_limits_from_settings(payload: Any) -> dict[int, OutletLimits]:
                 outlet_type: int | None = int(str(entry.get("outLetType")))
             except (TypeError, ValueError):
                 outlet_type = None
+            try:
+                # REST reports this in display °C (`45`, `47.8`); stored in tenths.
+                max_temperature: int | None = round(
+                    float(str(entry.get("maximumOutletTemperature"))) * 10
+                )
+            except (TypeError, ValueError):
+                max_temperature = None
             limits[outlet_id] = OutletLimits(
-                outlet_id, low, high, run_time, _flow("defaultFlowrate"), outlet_type
+                outlet_id,
+                low,
+                high,
+                run_time,
+                _flow("defaultFlowrate"),
+                outlet_type,
+                max_temperature,
             )
     return limits
 
@@ -204,6 +217,18 @@ class OutletLimits:
     # None when the valve has not announced this outlet yet — the same "not learned"
     # meaning the run time carries, never a real type.
     outlet_type: int | None = None
+    # The scald limit — `maximumOutletTemperature`, in **tenths of °C** here, matching the
+    # wire scale the valve's own words use. REST reports it in display °C (`45`) and MQTT in
+    # tenths (`450`); both are normalised to tenths on the way in, so this field means one
+    # thing whichever source filled it.
+    #
+    # 🚨 **This is a safety setting.** `docs/gcs/api.md` warns that a whole-record write
+    # which omits it, or sends it on the wrong scale, silently changes it. Nothing here
+    # writes it — this integration only reads it — but that is why it is recorded exactly
+    # as read rather than rounded.
+    #
+    # None when the valve has not reported it, which is not the same as no limit.
+    maximum_temperature_tenths: int | None = None
 
 
 @dataclass(frozen=True)
@@ -645,8 +670,22 @@ class GcsState:
                 outlet_type: int | None = int(str(attribute.get("outLetType")))
             except (TypeError, ValueError):
                 outlet_type = None
+            try:
+                # MQTT reports this in **tenths** already (`450`), unlike REST's display °C
+                # — the same wire/display split as flow. Stored as read.
+                max_temperature: int | None = int(
+                    str(attribute.get("maximumOutletTemperature"))
+                )
+            except (TypeError, ValueError):
+                max_temperature = None
             limits = OutletLimits(
-                outlet_id, low, high, run_time, default_flow, outlet_type
+                outlet_id,
+                low,
+                high,
+                run_time,
+                default_flow,
+                outlet_type,
+                max_temperature,
             )
             if self.outlet_limits.get(outlet_id) != limits:
                 self.outlet_limits[outlet_id] = limits
