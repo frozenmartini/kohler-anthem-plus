@@ -41,6 +41,7 @@ from .coordinator import Controller, KohlerAnthemPlusCoordinator, Valve
 from .entity import (
     KohlerControllerEntity,
     KohlerValveEntity,
+    outlet_name,
     zone_label,
 )
 
@@ -717,10 +718,16 @@ class OutletMaxRunTimeSensor(ValveDiagnosticSensor):
     (`Valve.outlet_run_times`), so a value showing up here means that outlet is now
     protected by the cutoff, too.
 
-    One outlet only, deliberately — every outlet observed on this install has agreed (all six
-    at the same `maximumRunTime`), so a second one would just repeat this value. If a future
-    install disagrees per outlet, `Valve.outlet_run_times` already has the full map;
-    only the entity is limited to one.
+    ⚠️ **Outlets do not always agree, so this reports the shortest one.** Observed
+    2026-09-10: one of the owner's two valves runs 1800 s on its Rainhead and Handshower and
+    **3600 s on its Showerhead**, in a single zone. This entity read outlet 1 alone until
+    0.11.3 and so reported 30 minutes on a valve that would run one fixture for 60 — the
+    number was right for the outlet it named and wrong for the valve it appeared on.
+
+    The shortest is the honest single answer: it is the soonest the water can stop, which is
+    what somebody reading "Max Shower Duration" is planning around. Where the outlets differ
+    the full per-outlet map is published in the `per_outlet` attribute and `outlets_agree` is
+    `false`, so the disagreement is visible rather than averaged away.
     """
 
     _attr_icon = "mdi:timer-cog-outline"
@@ -756,13 +763,36 @@ class OutletMaxRunTimeSensor(ValveDiagnosticSensor):
 
     @property
     def native_value(self) -> float | None:
-        seconds = self._valve.outlet_run_times.get(self._outlet)
-        if seconds is None:
+        run_times = self._valve.outlet_run_times
+        if not run_times:
             return None
+        # The soonest the water can stop. See the class docstring for why the minimum rather
+        # than outlet 1's value or an average.
+        seconds = min(run_times.values())
         # 1800 -> 30. Kept as a float so a limit that is not a whole number of minutes is
         # reported honestly rather than rounded into a lie; the display precision above
         # shows the usual whole-minute case as `30`.
         return seconds / 60
+
+    @property
+    def extra_state_attributes(self) -> dict[str, object]:
+        """The per-outlet breakdown, named the way the outlets are named elsewhere.
+
+        Only worth reading when `outlets_agree` is false — but published either way, so a
+        report from an install where they agree still says so positively rather than leaving
+        it to be inferred from an absent attribute.
+        """
+        run_times = self._valve.outlet_run_times
+        if not run_times:
+            return {}
+        per_outlet: dict[str, float] = {}
+        for outlet, seconds in sorted(run_times.items()):
+            zone, index = self._valve.model.outlet_location(outlet + 1)
+            per_outlet[outlet_name(self._valve, zone, index + 1)] = seconds / 60
+        return {
+            "outlets_agree": len(set(run_times.values())) == 1,
+            "per_outlet": per_outlet,
+        }
 
 
 class OutletMaxTemperatureSensor(ValveDiagnosticSensor):

@@ -319,6 +319,12 @@ def _valve_report(valve: Valve) -> dict[str, Any]:
                     if lim.outlet_type is None
                     else OUTLET_TYPE_NAMES.get(lim.outlet_type)
                 ),
+                # The scald limit, in tenths of °C. Added to `OutletLimits` in 0.11.1 and
+                # missing from this report until 0.11.3 — so the first reports carrying the
+                # new sensor could not say whether the valve had sent the field or the
+                # parser had missed it, which is the one question such a report exists to
+                # answer.
+                "maximum_temperature_tenths": lim.maximum_temperature_tenths,
             }
             for outlet_id, lim in sorted(gcs.outlet_limits.items())
         },

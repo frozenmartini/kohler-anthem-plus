@@ -1286,13 +1286,19 @@ class Valve:
 
         The valve reports this per outlet but **times it per zone** (see
         `anthem_plus/runtime_cutoff.py`), so there is no single "the" limit for a zone unless
-        its outlets happen to agree — which they do on every install seen, all six at 900 s.
+        its outlets happen to agree.
+
+        ⚠️ **They do not always agree — observed 2026-09-10.** One of the owner's two valves
+        reports 1800 s on its Rainhead and Handshower and **3600 s on its Showerhead**, in a
+        single zone. Until then every outlet on every install seen had matched, and several
+        comments here and in `sensor.py` said so; that claim was wrong.
 
         Where they disagree, every distinct value is offered as a candidate rather than
-        picking one. A mixed-limit zone has never been observed and there is no evidence for
-        which value the valve would use; matching any of them means such a zone is still
-        protected, and the cost is a handful of extra 10 s windows in a 15-minute session
-        that would each also have to coincide with a `0x40` pause to fire.
+        picking one. There is still no evidence for which value the valve actually applies to
+        a mixed zone; matching any of them means such a zone stays protected, and the cost is
+        a handful of extra 10 s windows in a 15-minute session that would each also have to
+        coincide with a `0x40` pause to fire. This design anticipated the case correctly — it
+        is only the "never observed" note that has aged.
 
         ⚠️ **`maximumRunTime` only. Preset timers are deliberately excluded — do not add
         them here.** A preset carries its own `time` (`GCS_PRESET_STS`), a *second*

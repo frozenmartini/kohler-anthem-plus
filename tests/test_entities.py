@@ -1378,3 +1378,54 @@ def test_cloud_connection_is_visible_and_enabled(valve_model):
     assert sensor.entity_registry_visible_default is True
     assert sensor.entity_registry_enabled_default is True
     assert sensor.name == "Cloud Connection"
+
+
+def _duration_sensor(valve_model, run_times):
+    valve = make_valve(valve_model, [31, 11, 1])
+    valve.outlet_run_times = run_times
+    coordinator = make_coordinator([valve])
+    return next(
+        e
+        for e in collect("sensor", coordinator)
+        if e.unique_id.endswith("_outlet_1_max_run_time")
+    )
+
+
+def test_max_shower_duration_reports_the_shortest_outlet(valve_model):
+    """Shower Right, as captured 2026-09-10: Showerhead 3600 s, the other two 1800 s.
+
+    This read outlet 1 alone until 0.11.3 and so reported 30 minutes on a valve that would
+    run one fixture for 60. The shortest is the soonest the water can stop, which is what
+    somebody reading "Max Shower Duration" is planning around.
+    """
+    sensor = _duration_sensor(valve_model, {0: 1800, 1: 3600, 2: 1800})
+    assert sensor.native_value == 30
+    assert sensor.extra_state_attributes["outlets_agree"] is False
+    assert sensor.extra_state_attributes["per_outlet"] == {
+        "Rainhead": 30,
+        "Showerhead": 60,
+        "Handshower": 30,
+    }
+
+
+def test_max_shower_duration_says_so_when_outlets_agree(valve_model):
+    """Shower Left: all three at 1800 s. The attribute is published either way."""
+    sensor = _duration_sensor(valve_model, {0: 1800, 1: 1800, 2: 1800})
+    assert sensor.native_value == 30
+    assert sensor.extra_state_attributes["outlets_agree"] is True
+
+
+def test_max_shower_duration_has_no_attributes_before_it_is_learned(valve_model):
+    sensor = _duration_sensor(valve_model, {})
+    assert sensor.native_value is None
+    assert sensor.extra_state_attributes == {}
+
+
+def test_a_longer_first_outlet_does_not_hide_a_shorter_one(valve_model):
+    """The failure this replaces, in the direction that actually matters.
+
+    Reading outlet 1 alone would report 60 minutes here while the Rainhead stops at 30 —
+    telling somebody they have twice the shower they have.
+    """
+    sensor = _duration_sensor(valve_model, {0: 3600, 1: 1800, 2: 1800})
+    assert sensor.native_value == 30
