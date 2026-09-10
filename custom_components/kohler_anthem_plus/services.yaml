@@ -160,3 +160,20 @@ custom_shower:
               step: 1
               unit_of_measurement: "%"
               mode: box
+
+probe_usage:
+  name: Probe water usage history
+  description: >-
+    Exploratory. Calls Kohler's undocumented gcs-usage endpoint with a list of candidate
+    query parameters and reports what each returns, writing the findings to
+    custom_components/kohler_anthem_plus/reports/. Read-only — it changes nothing on the
+    valve. The endpoint is known to exist but its parameters are not recorded anywhere, so
+    most candidates are expected to fail; that is the point.
+  fields:
+    device_id:
+      name: Valve
+      description: Which valve to query. Leave empty when there is only one.
+      required: false
+      selector:
+        device:
+          integration: kohler_anthem_plus

@@ -355,3 +355,45 @@ def test_flow_rounds_a_half_percent_reading_for_display():
     # A whole reading is untouched.
     valve.gcs_state.valve1 = decode_word("0195320100000001")  # byte 50 = 25.0 %
     assert flow.native_value == 25
+
+
+# --------------------------------------------------------------------------- #
+# The gcs-usage probe
+# --------------------------------------------------------------------------- #
+def test_usage_probe_candidates_all_render():
+    """Every candidate must survive substitution — one bad placeholder breaks the run.
+
+    The probe makes real network calls, so a `KeyError` here would surface as a failed
+    service call against live hardware rather than a test failure.
+    """
+    from datetime import UTC, datetime, timedelta
+
+    from custom_components.kohler_anthem_plus.services import _USAGE_ATTEMPTS
+
+    now = datetime.now(UTC)
+    start = now - timedelta(days=400)
+    substitutions = {
+        "from": start.date().isoformat(),
+        "to": now.date().isoformat(),
+        "from_epoch": str(int(start.timestamp())),
+        "to_epoch": str(int(now.timestamp())),
+        "year": str(now.year),
+        "month": str(now.month),
+    }
+    assert _USAGE_ATTEMPTS
+    labels = [label for label, _ in _USAGE_ATTEMPTS]
+    assert len(labels) == len(set(labels)), labels
+    for _label, query in _USAGE_ATTEMPTS:
+        query.format(**substitutions)
+
+
+def test_usage_probe_is_read_only():
+    """The probe must only ever GET. It exists to learn, not to change anything."""
+    import inspect
+
+    from custom_components.kohler_anthem_plus.anthem_plus import client
+
+    source = inspect.getsource(client.KohlerClient.async_probe_usage)
+    assert '"GET"' in source
+    for verb in ('"POST"', '"PATCH"', '"PUT"', '"DELETE"'):
+        assert verb not in source, verb

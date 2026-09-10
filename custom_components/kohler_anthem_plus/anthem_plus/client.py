@@ -30,6 +30,7 @@ from .const import (
     GCS_CONFIGURATION,
     GCS_PRESETS,
     GCS_STATE,
+    GCS_USAGE,
     HUB_CONFIGURATION,
     HUB_EXPERIENCES,
     HUB_FAVORITES,
@@ -394,6 +395,48 @@ class KohlerClient:
         if not isinstance(payload, dict):
             return {}
         return payload.get("setting") or {}
+
+    async def async_probe_usage(
+        self, device_id: str, attempts: list[tuple[str, str]]
+    ) -> list[dict[str, Any]]:
+        """Call `gcs-usage` with candidate query strings and report what each returns.
+
+        **Exploratory, and deliberately not wired into anything.** The endpoint answers HTTP
+        400 to a bare call while its neighbours answer 404, so the route is real and wants
+        parameters nobody has recorded. This tries a list of candidates and reports the
+        status and shape of each, which is the only way to learn the contract without the
+        Konnect APK to decompile.
+
+        Each attempt is ``(label, query)`` where `query` is appended after `?`. Failures are
+        captured rather than raised: a 400 is the expected answer for most candidates and is
+        itself the finding. Returns one record per attempt, with the payload included only
+        when the call succeeded — an error body can echo back parameters, and this result is
+        written to a file the owner may attach to an issue.
+        """
+        results: list[dict[str, Any]] = []
+        for label, query in attempts:
+            path = GCS_USAGE.format(device_id=device_id)
+            if query:
+                path = f"{path}?{query}"
+            record: dict[str, Any] = {"label": label, "query": query}
+            try:
+                payload = await self.async_request("GET", path)
+            except KohlerError as err:
+                # The status is in the message; the message itself may quote an error body,
+                # so it is truncated rather than stored whole.
+                record["error"] = str(err)[:300]
+            else:
+                record["ok"] = True
+                record["payload_type"] = type(payload).__name__
+                if isinstance(payload, dict):
+                    record["keys"] = sorted(payload)
+                elif isinstance(payload, list):
+                    record["length"] = len(payload)
+                    if payload and isinstance(payload[0], dict):
+                        record["item_keys"] = sorted(payload[0])
+                record["payload"] = payload
+            results.append(record)
+        return results
 
     async def async_get_gcs_configuration(self, device_id: str) -> dict[str, Any]:
         """Read the valve's configuration record — firmware, and possibly nothing else.

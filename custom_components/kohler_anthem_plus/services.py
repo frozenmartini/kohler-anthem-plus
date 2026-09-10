@@ -29,7 +29,10 @@ not model.
 
 from __future__ import annotations
 
+import json
 import logging
+import os
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import voluptuous as vol
@@ -57,6 +60,7 @@ from .const import (
     DEFAULT_FLOW_PERCENT,
     DOMAIN,
     SERVICE_CUSTOM_SHOWER,
+    SERVICE_PROBE_USAGE,
     SERVICE_SEND_VALVE_HEX,
     UI_TEMPERATURE_MAX_F,
     UI_TEMPERATURE_MIN_F,
@@ -102,6 +106,14 @@ SEND_VALVE_HEX_SCHEMA = vol.Schema(
         # `vol.Maybe` because the UI submits "" for a touched-then-cleared optional text
         # field, which would otherwise fail the regex instead of meaning "closed".
         vol.Optional(ATTR_ZONE2_HEX): vol.Any("", None, _HEX_WORD),
+    }
+)
+
+#: Only the valve picker — the probe's candidates are fixed in code, because the point is to
+#: try a known list and record the answers, not to hand-type query strings.
+PROBE_USAGE_SCHEMA = vol.Schema(
+    {
+        vol.Optional(ATTR_DEVICE_ID): vol.Any(None, cv.string),
     }
 )
 
@@ -496,6 +508,89 @@ async def _async_custom_shower(call: ServiceCall) -> ServiceResponse:
     return {**result, ATTR_KEEP_ON: keep_on}
 
 
+#: Candidate query strings for `gcs-usage`, tried in order.
+#:
+#: The endpoint answers 400 to a bare call, so it wants *something*; nothing records what.
+#: These cover the shapes a monthly-chart endpoint plausibly takes, cheapest and most likely
+#: first — Kohler's other endpoints use camelCase, so those spellings lead.
+#:
+#: Dates are filled in at call time: `{from}` and `{to}` span the last 400 days, wide enough
+#: to cover the owner's 2025-2026 chart, and `{year}`/`{month}` are the current ones.
+_USAGE_ATTEMPTS: tuple[tuple[str, str], ...] = (
+    ("bare", ""),
+    ("startDate/endDate", "startDate={from}&endDate={to}"),
+    ("fromDate/toDate", "fromDate={from}&toDate={to}"),
+    ("startdate/enddate", "startdate={from}&enddate={to}"),
+    ("from/to", "from={from}&to={to}"),
+    ("start/end", "start={from}&end={to}"),
+    ("period=monthly", "period=monthly"),
+    ("type=monthly", "type=monthly"),
+    ("frequency=monthly", "frequency=monthly"),
+    ("interval=month", "interval=month"),
+    ("groupBy=month", "groupBy=month"),
+    ("year/month", "year={year}&month={month}"),
+    ("monthly+range", "period=monthly&startDate={from}&endDate={to}"),
+    ("type+range", "type=monthly&fromDate={from}&toDate={to}"),
+    ("epoch range", "startTime={from_epoch}&endTime={to_epoch}"),
+)
+
+
+async def _async_probe_usage(call: ServiceCall) -> ServiceResponse:
+    """Try the undocumented `gcs-usage` endpoint and report what each candidate returns.
+
+    Exploratory by design: this exists to learn a contract nobody has recorded, so it makes
+    a handful of read-only GETs and reports statuses. It changes nothing on the valve.
+
+    The result is returned to the caller *and* written to a file, because a service response
+    in Developer Tools is easy to lose and this is evidence worth keeping.
+    """
+    valve = _resolve_valve(call.hass, call.data.get(ATTR_DEVICE_ID))
+    now = datetime.now(UTC)
+    start = now - timedelta(days=400)
+    substitutions = {
+        "from": start.date().isoformat(),
+        "to": now.date().isoformat(),
+        "from_epoch": str(int(start.timestamp())),
+        "to_epoch": str(int(now.timestamp())),
+        "year": str(now.year),
+        "month": str(now.month),
+    }
+    attempts = [
+        (label, query.format(**substitutions)) for label, query in _USAGE_ATTEMPTS
+    ]
+
+    results = await valve.client.async_probe_usage(valve.device_id, attempts)
+
+    # Written where the report log already lives, so there is one place to look for evidence
+    # and one thing to attach to an issue.
+    directory = call.hass.config.path("custom_components", DOMAIN, "reports")
+    path = os.path.join(directory, f"usage_probe_{now.strftime('%Y%m%dT%H%M%SZ')}.json")
+
+    def _write() -> None:
+        os.makedirs(directory, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(results, handle, indent=2, ensure_ascii=False)
+
+    try:
+        await call.hass.async_add_executor_job(_write)
+    except OSError as err:  # pragma: no cover - the response still carries the findings
+        _LOGGER.warning("Could not write the usage probe to %s: %s", path, err)
+        path = ""
+
+    succeeded = [record["label"] for record in results if record.get("ok")]
+    _LOGGER.info(
+        "gcs-usage probe: %d candidates tried, %d succeeded (%s)",
+        len(results),
+        len(succeeded),
+        ", ".join(succeeded) if succeeded else "none",
+    )
+    return {
+        "written_to": path,
+        "succeeded": succeeded,
+        "results": results,
+    }
+
+
 def async_register_services(
     hass: HomeAssistant, coordinator: KohlerAnthemPlusCoordinator
 ) -> None:
@@ -534,6 +629,14 @@ def async_register_services(
     _async_describe_service(
         hass, any(model.uses_valve2 for model in models), len(models) > 1
     )
+    if not hass.services.has_service(DOMAIN, SERVICE_PROBE_USAGE):
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_PROBE_USAGE,
+            _async_probe_usage,
+            schema=PROBE_USAGE_SCHEMA,
+            supports_response=SupportsResponse.OPTIONAL,
+        )
     if not hass.services.has_service(DOMAIN, SERVICE_CUSTOM_SHOWER):
         hass.services.async_register(
             DOMAIN,

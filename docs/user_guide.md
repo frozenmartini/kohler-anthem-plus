@@ -1031,3 +1031,26 @@ MIT — see [LICENSE](../LICENSE).
 
 Kohler, Anthem, Anthem+ and Konnect are trademarks of Kohler Co. This project is not
 affiliated with, authorised by, or endorsed by Kohler Co., and is not a supported product.
+
+### Probing Kohler's water usage history
+
+`kohler_anthem_plus.probe_usage` is an **exploratory** action, not a feature. Kohler's cloud
+has a `gcs-usage` endpoint — it answers HTTP 400 to a bare call while every neighbouring
+guess answers 404, so the route is real — but nothing records what parameters it wants, and
+no integration has ever called it successfully.
+
+This runs a list of candidate query strings against it and writes what each returns to
+`custom_components/kohler_anthem_plus/reports/usage_probe_<timestamp>.json`. It is read-only:
+every call is a GET, and nothing on the valve changes. Most candidates are expected to fail —
+that is the point, and the failures narrow the search.
+
+**Why it matters.** `Total Water Used` is a lifetime counter whose origin is undocumented. On
+the reference account Shower Left reads 8224 gal while the Konnect app's monthly chart sums to
+5613.49 — a gap of roughly five months at the observed rate. Pre-charting usage (factory test,
+commissioning) is the likeliest explanation, but nothing available proves it. A per-month
+series from this endpoint would settle it, and would let the integration expose monthly usage
+rather than only a running total.
+
+Run it from **Developer Tools → Actions**, pick the valve, and attach the resulting file to an
+issue. Skim it first — it contains your device id.
+

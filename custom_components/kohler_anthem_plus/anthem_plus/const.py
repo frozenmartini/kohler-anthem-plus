@@ -92,6 +92,20 @@ GCS_ADVANCE_STATE = f"{DEVICE_API}/gcs-state/gcsadvancestate/{{device_id}}"
 # above is what to read instead. This is here for `about` (firmware) and to settle whether
 # a GCS-only install populates the rest, which no capture has ever covered.
 GCS_CONFIGURATION = f"{DEVICE_API}/gcs-configuration/{{device_id}}"
+# **Water usage history — the endpoint behind the Konnect app's monthly chart.**
+#
+# Probed bare on 2026-08-12 and answered **HTTP 400**, not 404, while eleven guessed names
+# beside it answered 404. A 400 means the route is real and rejected the call for missing
+# parameters. Nothing in this integration, the upstream library, or the reference integration
+# has ever called it successfully, and no capture records its shape.
+#
+# It matters because `totalFlow` is a lifetime counter with an undocumented origin: the
+# owner's Shower Left reads 8224 gal against 5613.49 summed from the app's monthly chart, and
+# nothing available says whether the difference is pre-charting usage or something else. A
+# per-month series would answer that directly.
+#
+# `kohler_anthem_plus.probe_usage` calls this with candidate parameters — see `services.py`.
+GCS_USAGE = f"{DEVICE_API}/gcs-usage/{{device_id}}"
 
 # ---------------------------------------------------------------------------
 # Commands — /platform/api/v1/commands/

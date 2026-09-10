@@ -517,6 +517,9 @@ SERVICE_SEND_VALVE_HEX = "send_valve_hex"
 # ONE complete write. Added 2026-09-06 after GitHub issue #1 showed that every UI-built
 # automation ends up as two valve commands back to back, which the valve cannot take.
 SERVICE_CUSTOM_SHOWER = "custom_shower"
+#: Exploratory: calls the undocumented `gcs-usage` endpoint with candidate query strings and
+#: writes what each returns to a file. See `anthem_plus/const.py:GCS_USAGE`.
+SERVICE_PROBE_USAGE = "probe_usage"
 
 # ---------------------------------------------------------------------------
 # Warmup auto-restore
