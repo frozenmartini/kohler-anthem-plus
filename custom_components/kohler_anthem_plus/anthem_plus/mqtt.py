@@ -36,14 +36,14 @@ import paho.mqtt.client as mqtt
 
 from .auth import AuthError, AuthUnavailable
 from .client import KohlerClient
-from .raw_log import RawMqttLog
-from .report_log import ReportLog
 from .const import (
     MQTT_PORT,
     MQTT_RESPONSE_TOPIC,
     MQTT_SUBSCRIBE_TOPIC,
     MQTT_WARMUP_SECONDS,
 )
+from .raw_log import RawMqttLog
+from .report_log import ReportLog
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -359,7 +359,7 @@ class AnthemMqttStream:
     def _safe_callback(self, envelope: Envelope) -> None:
         try:
             self._on_envelope(envelope)
-        except Exception:  # noqa: BLE001 - a bad consumer must not kill the stream
+        except Exception:
             _LOGGER.exception("Kohler MQTT consumer raised on %s", envelope.code)
 
     def _dispatch_connected(self) -> None:
@@ -376,7 +376,7 @@ class AnthemMqttStream:
         try:
             if self._on_connect_cb is not None:
                 self._on_connect_cb()
-        except Exception:  # noqa: BLE001 - a bad consumer must not kill the stream
+        except Exception:
             _LOGGER.exception("Kohler MQTT connect consumer raised")
 
     def _report_auth_error(self, err: AuthError) -> None:
@@ -390,7 +390,7 @@ class AnthemMqttStream:
         self._auth_error_reported = True
         try:
             self._on_auth_error_cb(err)
-        except Exception:  # noqa: BLE001 - a bad consumer must not kill the stream
+        except Exception:
             _LOGGER.exception("Kohler MQTT auth-error consumer raised")
 
     def _schedule_reconnect(self) -> None:
@@ -419,7 +419,7 @@ class AnthemMqttStream:
                 try:
                     old.disconnect()
                     await asyncio.to_thread(old.loop_stop)
-                except Exception:  # noqa: BLE001
+                except Exception:
                     _LOGGER.debug("Error tearing down old MQTT client", exc_info=True)
             try:
                 await self._async_connect()
@@ -434,5 +434,5 @@ class AnthemMqttStream:
                 if not isinstance(err, AuthUnavailable):
                     self._report_auth_error(err)
                 _LOGGER.warning("Kohler MQTT reconnect failed: %s", err)
-            except Exception as err:  # noqa: BLE001 - keep retrying on any failure
+            except Exception as err:
                 _LOGGER.warning("Kohler MQTT reconnect failed: %s", err)

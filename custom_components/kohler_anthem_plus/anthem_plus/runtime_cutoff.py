@@ -575,14 +575,21 @@ class ZoneCutoffDetector:
             }
             self._last_reading.pop(zone, None)
 
-            def stop(reason: str, **extra: Any) -> None:
+            def stop(reason: str, _record: dict = record, **extra: Any) -> None:
                 """Record a close this detector is not claiming, and why.
 
                 Recording only. A close that matches no announced `maximumRunTime` is left
                 alone — see the module docstring on why nothing is inferred from durations.
+
+                `record` is bound as a default argument rather than captured from the
+                enclosing scope. Every call happens inside the same loop iteration that
+                defines it, so closing over it would be correct today — but a closure over a
+                loop variable is one refactor away from reading the wrong zone's record, and
+                the failure would be a mislabelled journal entry rather than a crash. Bound
+                explicitly so it cannot drift.
                 """
                 self.journal.note(
-                    "flow_end", **record, verdict="ignored", reason=reason, **extra
+                    "flow_end", **_record, verdict="ignored", reason=reason, **extra
                 )
 
             if not candidates:

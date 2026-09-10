@@ -47,9 +47,9 @@ sent, only after the pause that ends a warm-up its own write started.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
-from typing import Sequence
 
 # The valve's first echo lands 1.1–2.1 s after the REST call returns, and it already carries
 # `warmUpStatus`. Ten seconds is five times that, with room for a slow cloud.

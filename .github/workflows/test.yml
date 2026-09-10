@@ -1,0 +1,52 @@
+name: Test
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  pytest:
+    name: pytest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-test.txt
+
+      # The point of this job. `Validate` checks the manifest and the HACS layout — it
+      # never imports a Python file, which is why a release once shipped with two entities
+      # missing and CI stayed green. This imports every platform and constructs every
+      # entity.
+      - name: Run tests
+        run: python -m pytest tests/ -q
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install Ruff
+        run: pip install ruff
+
+      # Catches unused imports and undefined names — the class of mistake that a syntax
+      # check passes and a user finds.
+      - name: Ruff check
+        run: ruff check custom_components tests
+
+      - name: Ruff format check
+        run: ruff format --check custom_components tests

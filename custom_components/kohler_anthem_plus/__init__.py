@@ -24,8 +24,8 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
 
-from .coordinator import KohlerAnthemPlusCoordinator, entry_reload_signature
 from .const import DOMAIN, ISSUE_NOT_SET_UP
+from .coordinator import KohlerAnthemPlusCoordinator, entry_reload_signature
 from .services import async_register_services, async_unregister_services
 
 _LOGGER = logging.getLogger(__name__)

@@ -16,7 +16,7 @@ See ``anthem_plus.models.resolve_outlet_source``.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
@@ -250,7 +250,7 @@ class MqttConnectionMixin:
         attributes: dict[str, object] = {
             "credentials_present": auth.has_credentials,
             "access_token_expires_at": (
-                datetime.fromtimestamp(expires_at, tz=timezone.utc).isoformat()
+                datetime.fromtimestamp(expires_at, tz=UTC).isoformat()
                 if expires_at
                 else None
             ),
@@ -259,7 +259,7 @@ class MqttConnectionMixin:
             attributes["warming_up"] = stream.warming_up
             attributes["last_message_at"] = (
                 datetime.fromtimestamp(
-                    stream.last_message_at, tz=timezone.utc
+                    stream.last_message_at, tz=UTC
                 ).isoformat()
                 if stream.last_message_at
                 else None

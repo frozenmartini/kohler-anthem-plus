@@ -1,0 +1,42 @@
+[tool.ruff]
+target-version = "py313"
+line-length = 88
+
+[tool.ruff.lint]
+# Deliberately not the full Ruff catalogue. These are the rules that catch the mistakes
+# this project has actually shipped — unused imports left behind by an edit, undefined
+# names, and mutable default arguments — plus the ordinary correctness set. Style opinions
+# beyond formatting are left out; the codebase has a consistent voice already and churning
+# it would bury real findings in noise.
+select = [
+    "F",      # pyflakes: undefined names, unused imports and variables
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "B",      # bugbear: likely bugs, mutable defaults, unused loop vars
+    "I",      # import sorting
+    "UP",     # pyupgrade: outdated syntax for the target version
+    "SIM",    # simplifiable constructs
+    "RUF",    # Ruff's own checks
+]
+ignore = [
+    "E501",    # line length is enforced by the formatter, not the linter
+    "B008",    # function call in default argument — used deliberately by voluptuous schemas
+    # This codebase's comments and docstrings are prose, and use en dashes and minus signs
+    # where those are the correct characters. Flagging them as "ambiguous" would trade real
+    # findings for typography churn in a file nothing executes.
+    "RUF002",  # ambiguous unicode in docstrings
+    "RUF003",  # ambiguous unicode in comments
+    # `try/except/pass` reads more plainly than `contextlib.suppress` at these sites, each
+    # of which has a comment explaining what is being swallowed and why.
+    "SIM105",
+    # Percent formatting is correct for logging calls — the arguments are only interpolated
+    # if the record is actually emitted.
+    "UP031",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests build deliberately partial fakes and shadow names for readability.
+"tests/*" = ["B011"]
+
+[tool.ruff.format]
+quote-style = "double"

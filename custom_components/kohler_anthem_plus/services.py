@@ -330,7 +330,7 @@ def _async_describe_service(
                 "fields": fields,
             },
         )
-    except Exception:  # noqa: BLE001 - a cosmetic override must not break setup
+    except Exception:
         _LOGGER.debug("Could not override the service description", exc_info=True)
 
 
@@ -398,7 +398,7 @@ def _async_describe_custom_shower(
                 "fields": fields,
             },
         )
-    except Exception:  # noqa: BLE001 - a cosmetic override must not break setup
+    except Exception:
         _LOGGER.debug("Could not override the custom_shower description", exc_info=True)
 
 

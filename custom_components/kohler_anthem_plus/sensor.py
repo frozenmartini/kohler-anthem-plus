@@ -15,7 +15,8 @@ hex sensor, where a zero reads as data rather than as a broken entity.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from typing import ClassVar
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -220,7 +221,7 @@ class ValveSystemStateSensor(KohlerValveEntity, SensorEntity):
     # published as-is by returning None below rather than being forced into this list,
     # since an ENUM sensor reporting an option it never declared is logged as an error by
     # Home Assistant on every single update.
-    _attr_options = ["normalOperation", "showerInProgress"]
+    _attr_options: ClassVar[list[str]] = ["normalOperation", "showerInProgress"]
 
     def __init__(self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve) -> None:
         super().__init__(coordinator, valve)
@@ -342,7 +343,7 @@ class ValveLastUpdateSensor(ValveDiagnosticSensor):
         state = self._state
         if state is None or state.last_update is None:
             return None
-        return datetime.fromtimestamp(state.last_update, tz=timezone.utc)
+        return datetime.fromtimestamp(state.last_update, tz=UTC)
 
 
 class ValveFirmwareSensor(ValveDiagnosticSensor):
@@ -407,7 +408,7 @@ class ValveRegisteredSensor(ValveDiagnosticSensor):
             if epoch > 10**12:
                 epoch //= 1000
             try:
-                return datetime.fromtimestamp(epoch, tz=timezone.utc)
+                return datetime.fromtimestamp(epoch, tz=UTC)
             except (OverflowError, OSError, ValueError):
                 return None
 
@@ -419,7 +420,7 @@ class ValveRegisteredSensor(ValveDiagnosticSensor):
             return None
         # A timestamp device class requires an aware datetime; a naive one from the cloud
         # is UTC, which is what every other date this API returns has been.
-        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
     @property
     def extra_state_attributes(self) -> dict[str, object]:
@@ -608,7 +609,7 @@ class ControllerLastUpdateSensor(ControllerDiagnosticSensor):
         state = self._state
         if state is None or state.last_update is None:
             return None
-        return datetime.fromtimestamp(state.last_update, tz=timezone.utc)
+        return datetime.fromtimestamp(state.last_update, tz=UTC)
 
 
 class ControllerStatusSensor(KohlerControllerEntity, SensorEntity):

@@ -22,7 +22,6 @@ from typing import Any
 import aiohttp
 
 from .auth import AuthError, KohlerAuth
-from .models import OutletStateSource, resolve_outlet_source
 from .const import (
     API_BASE,
     APIM_SUBSCRIPTION_KEY,
@@ -41,6 +40,7 @@ from .const import (
     STATUS_DEVICE_OFFLINE,
     STATUS_DEVICE_RUNNING,
 )
+from .models import OutletStateSource, resolve_outlet_source
 
 _LOGGER = logging.getLogger(__name__)
 

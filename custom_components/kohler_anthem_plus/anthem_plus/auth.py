@@ -41,7 +41,6 @@ from typing import Any
 import aiohttp
 
 from .const import (
-    API_RESOURCE,
     B2C_AUTHORIZE_URL,
     B2C_CONFIRMED_URL,
     B2C_REDIRECT_URI,
@@ -289,9 +288,12 @@ class KohlerAuth:
         # This endpoint answers 200 with a JSON body whose "status" carries the result.
         try:
             payload = json.loads(body)
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as err:
             _raise_for_b2c_error(body)
-            raise AuthError("Unexpected response from Kohler during sign-in.")
+            # Reached only when `_raise_for_b2c_error` recognised nothing in the body and
+            # returned. Chained so the original decode failure survives in the traceback —
+            # the body that would not parse is the useful evidence here.
+            raise AuthError("Unexpected response from Kohler during sign-in.") from err
         if str(payload.get("status")) != "200":
             _raise_for_b2c_error(payload.get("errorCode") or body)
             raise InvalidCredentials(

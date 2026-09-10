@@ -21,7 +21,6 @@ import logging
 from typing import Any
 
 import voluptuous as vol
-
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -39,8 +38,6 @@ from .anthem_plus import (
     KohlerClient,
     KohlerError,
     SignInBlocked,
-)
-from .anthem_plus import (
     describe_topology,
     model_for_topology,
     topology_from_hub_configuration,
@@ -53,11 +50,11 @@ from .anthem_plus.models import (
 )
 from .const import (
     CONF_REFRESH_TOKEN,
-    CONF_ZONE_OUTLETS,
     CONF_TEMPERATURE_UNIT,
     CONF_TENANT_ID,
     CONF_VALVE_MODEL,
     CONF_WATER_UNITS,
+    CONF_ZONE_OUTLETS,
     DOMAIN,
 )
 

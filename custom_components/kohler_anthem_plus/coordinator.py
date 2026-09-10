@@ -23,7 +23,7 @@ import os
 import time
 import uuid
 from collections import Counter, deque
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -39,9 +39,15 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homeassistant.util import dt as dt_util
 
 from .anthem_plus import (
+    MSG_GCS_SOLO_STATUS,
+    MSG_GCS_WARMUP_STATUS,
+    WARMUP_DISABLED,
+    WARMUP_MODES_CURRENT,
+    WARMUP_README,
     AnthemMqttStream,
     AuthError,
     AuthUnavailable,
+    CutoffDebugLog,
     Device,
     DeviceOffline,
     Envelope,
@@ -53,31 +59,24 @@ from .anthem_plus import (
     KohlerAuth,
     KohlerClient,
     KohlerError,
-    CutoffDebugLog,
-    WARMUP_README,
     RawMqttLog,
     ReportLog,
+    ValveModel,
     ZoneCutoff,
     ZoneCutoffDetector,
     ZoneReading,
-    MSG_GCS_SOLO_STATUS,
-    MSG_GCS_WARMUP_STATUS,
-    WARMUP_DISABLED,
-    WARMUP_MODES_CURRENT,
-    journal_event,
-    restore_target,
-    should_restore_warmup,
-    ValveModel,
     describe_topology,
     get_valve_model,
+    journal_event,
     model_for_topology,
+    restore_target,
+    should_restore_warmup,
     topology_from_hub_configuration,
     topology_from_valve_settings,
     unit_to_celsius,
 )
 from .anthem_plus.entry_reload import reload_signature
 from .anthem_plus.state import outlet_limits_from_settings
-from .anthem_plus.warmup_resume import Decision, WarmupResume
 from .anthem_plus.valve_hex import (
     UNUSED_VALVE_WORD,
     VALVE1_PREFIX,
@@ -88,24 +87,23 @@ from .anthem_plus.valve_hex import (
     encode_word,
     normalize_word,
 )
+from .anthem_plus.warmup_resume import Decision, WarmupResume
 from .cloud_watch import CloudConnectionWatch
 from .const import (
+    CONF_LAST_WARMUP_MODE,
     CONF_MOBILE_DEVICE_ID,
     CONF_OUTLET_RUN_TIMES,
     CONF_REFRESH_TOKEN,
+    CONF_REPORT_LOG_FILE,
     CONF_RESTART_ON_RUNTIME_CUTOFF,
     CONF_TEMPERATURE_UNIT,
-    CONF_WATER_UNITS,
     CONF_TENANT_ID,
-    CONF_VALVES,
     CONF_VALVE_MODEL,
+    CONF_VALVES,
+    CONF_WARMUP_AUTO_RESTORE,
+    CONF_WATER_UNITS,
     CONF_ZONE_OUTLETS,
     CUTOFF_DEBUG_LOG_KEEP_FILES,
-    ENABLE_WARMUP_DEBUG_LOG,
-    WARMUP_CONTEXT_AFTER_SECONDS,
-    WARMUP_CONTEXT_BEFORE_SECONDS,
-    WARMUP_CONTEXT_MAX_MESSAGES,
-    WARMUP_DEBUG_LOG_KEEP_FILES,
     DEFAULT_FLOW_PERCENT,
     DEFAULT_PRESET_ID,
     DEFAULT_PRESET_TIMER_SECONDS,
@@ -114,30 +112,32 @@ from .const import (
     DOMAIN,
     ENABLE_CUTOFF_DEBUG_LOG,
     ENABLE_RAW_MQTT_LOG,
-    RAW_MQTT_LOG_DIR,
-    CONF_REPORT_LOG_FILE,
-    REPORT_LOG_DIR_NAME,
-    REPORT_LOG_MAX_BYTES,
-    RAW_MQTT_LOG_KEEP_FILES,
-    RAW_MQTT_LOG_MAX_BYTES,
-    RELOAD_IGNORED_DATA_KEYS,
+    ENABLE_WARMUP_DEBUG_LOG,
     ENDLESS_SHOWER_NOT_SET_UP,
     ENDLESS_SHOWER_NOTHING_TO_RESTORE,
     ENDLESS_SHOWER_ON,
-    CONF_LAST_WARMUP_MODE,
-    CONF_WARMUP_AUTO_RESTORE,
+    ENDLESS_SHOWER_RESTARTED,
+    ISSUE_NOT_SET_UP,
+    RAW_MQTT_LOG_DIR,
+    RAW_MQTT_LOG_KEEP_FILES,
+    RAW_MQTT_LOG_MAX_BYTES,
+    RELOAD_IGNORED_DATA_KEYS,
+    RELOAD_IGNORED_OPTION_KEYS,
+    REPORT_LOG_DIR_NAME,
+    REPORT_LOG_MAX_BYTES,
+    SCAN_INTERVAL,
+    SYNC_DEFAULT_PRESET_TIMER,
     WARMUP_AUTO_RESTORE_DELAY_SECONDS,
     WARMUP_AUTO_RESTORE_GIVING_UP,
     WARMUP_AUTO_RESTORE_MAX_CONSECUTIVE,
     WARMUP_AUTO_RESTORE_NO_TARGET,
     WARMUP_AUTO_RESTORE_SETTLED_SECONDS,
+    WARMUP_CONTEXT_AFTER_SECONDS,
+    WARMUP_CONTEXT_BEFORE_SECONDS,
+    WARMUP_CONTEXT_MAX_MESSAGES,
+    WARMUP_DEBUG_LOG_KEEP_FILES,
     WARMUP_READBACK_DELAYS,
     WARMUP_SELF_WRITE_GRACE_SECONDS,
-    ENDLESS_SHOWER_RESTARTED,
-    ISSUE_NOT_SET_UP,
-    RELOAD_IGNORED_OPTION_KEYS,
-    SCAN_INTERVAL,
-    SYNC_DEFAULT_PRESET_TIMER,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -1661,7 +1661,7 @@ class Valve:
             while True:
                 try:
                     await asyncio.wait_for(poke.wait(), timeout=1.0)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     pass
                 poke.clear()
                 if self._local_write_serial != serial:
@@ -2893,7 +2893,7 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         record: dict[str, Any] = {
             # The same stamp shape the journal and the raw capture use, so the three sort
             # together on one clock.
-            "ts": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "ts": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
             "at": time.monotonic(),
             "sku": envelope.sku,
             "code": envelope.code,

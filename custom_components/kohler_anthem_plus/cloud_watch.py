@@ -85,7 +85,7 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.core import callback
@@ -115,7 +115,7 @@ def _utc_iso(stamp: float | None) -> str | None:
     """Wall-clock seconds to the ISO-8601 Z form the journals and raw capture use."""
     if stamp is None:
         return None
-    return datetime.fromtimestamp(stamp, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+    return datetime.fromtimestamp(stamp, tz=UTC).isoformat().replace("+00:00", "Z")
 
 
 class CloudConnectionWatch:

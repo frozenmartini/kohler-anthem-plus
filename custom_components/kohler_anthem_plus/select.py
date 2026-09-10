@@ -528,7 +528,7 @@ class HubFavouriteSelect(OptimisticOptionMixin, KohlerControllerEntity, SelectEn
         running = None if state is None else state.active_favorite_name
         if running and running not in names:
             names.append(running)
-        return [OPTION_OFF] + names
+        return [OPTION_OFF, *names]
 
     @property
     def _device_option(self) -> str | None:

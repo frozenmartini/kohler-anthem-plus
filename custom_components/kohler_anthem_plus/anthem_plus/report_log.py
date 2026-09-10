@@ -244,7 +244,7 @@ class ReportLog:
             path = self._part_path(part)
             size = 0
         self._path = path
-        self._handle = open(path, "a", encoding="utf-8")
+        self._handle = open(path, "a", encoding="utf-8")  # noqa: SIM115 - handle outlives this call; closed by close()
         self._written = size
 
     def _write_readme(self) -> None:

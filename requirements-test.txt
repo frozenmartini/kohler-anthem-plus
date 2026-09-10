@@ -1,0 +1,4 @@
+# Test dependencies. Home Assistant itself is required because the integration imports
+# from it at module level; `pytest-homeassistant-custom-component` pins a matching pair.
+pytest>=8.0
+pytest-homeassistant-custom-component>=0.13

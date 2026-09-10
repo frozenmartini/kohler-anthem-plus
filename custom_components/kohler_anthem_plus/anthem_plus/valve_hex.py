@@ -629,7 +629,7 @@ def preset_valve_to_command(valve_detail: dict, prefix: int) -> str:
     return encode_word(prefix, temperature_c or 38.0, percent, mask)
 
 
-def preset_opens_anything(valve_details: "list[dict]") -> bool:
+def preset_opens_anything(valve_details: list[dict]) -> bool:
     """True if the preset opens at least one outlet on any valve.
 
     Kohler "experiences" carry no outlet data and cannot be started this way, so this is
@@ -647,7 +647,7 @@ def preset_opens_anything(valve_details: "list[dict]") -> bool:
 
 
 def preset_to_pair(
-    model: ValveModel, valve_details: "list[dict]"
+    model: ValveModel, valve_details: list[dict]
 ) -> tuple[str, str]:
     """Build both command words for a preset.
 

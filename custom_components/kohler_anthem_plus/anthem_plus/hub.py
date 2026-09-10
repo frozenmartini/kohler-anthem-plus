@@ -22,7 +22,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from .client import KohlerClient
-from .models import ValveModel
 from .const import (
     EXPERIENCE_ENDPOINTS,
     HUB_FAVORITE,
@@ -32,6 +31,7 @@ from .const import (
     HUB_VALVE_CONTROL,
     SKU_HUB,
 )
+from .models import ValveModel
 
 ON = "ON"
 OFF = "OFF"

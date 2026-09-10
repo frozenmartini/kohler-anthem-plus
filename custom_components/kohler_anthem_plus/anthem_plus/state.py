@@ -15,8 +15,9 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Container
 from dataclasses import dataclass, field
-from typing import Any, Container
+from typing import Any
 
 from .const import (
     MSG_GCS_OUTLET_CONFIG,
@@ -130,7 +131,7 @@ def outlet_limits_from_settings(payload: Any) -> dict[int, OutletLimits]:
             def _flow(key: str, item: dict = entry) -> int | None:
                 """Display flow -> byte scale, the units OutletLimits is defined in."""
                 try:
-                    return int(round(float(str(item.get(key))) * 4))
+                    return round(float(str(item.get(key))) * 4)
                 except (TypeError, ValueError):
                     return None
 
@@ -1111,7 +1112,7 @@ class HubState:
         lights = state.get("light")
         if isinstance(lights, list):
             self.light_on = any(
-                str((l or {}).get("status", "")).upper() == "ON" for l in lights
+                str((light or {}).get("status", "")).upper() == "ON" for light in lights
             )
         # Top level, beside `state` rather than inside it — and camelCase here, against the
         # all-lowercase `showerwarmup` MQTT sends for the same thing.

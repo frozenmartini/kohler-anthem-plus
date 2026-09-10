@@ -66,7 +66,7 @@ import logging
 import os
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 _LOGGER = logging.getLogger(__name__)
@@ -315,7 +315,7 @@ class CutoffDebugLog:
             return
 
         record: dict[str, Any] = {
-            "ts": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "ts": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
             "event": event,
         }
         # Rounded on the way in: these are seconds measured off a monotonic clock, and
@@ -353,7 +353,7 @@ class CutoffDebugLog:
         self._path = os.path.join(
             self._directory, f"{self._prefix}_{stamp}Z_{os.getpid()}_{suffix}.jsonl"
         )
-        self._handle = open(self._path, "a", encoding="utf-8")
+        self._handle = open(self._path, "a", encoding="utf-8")  # noqa: SIM115 - handle outlives this call; closed by close()
         self._prune()
         if not self._announced:
             self._announced = True

@@ -58,7 +58,7 @@ import logging
 import os
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 _LOGGER = logging.getLogger(__name__)
@@ -124,7 +124,7 @@ def format_record(
     duplicates, and numeric formatting. None when the record cannot be serialised.
     """
     record: dict[str, Any] = {
-        "ts": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "ts": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         "topic": topic,
         "qos": qos,
         "retain": retain,
@@ -248,7 +248,7 @@ class RawMqttLog:
         self._path = os.path.join(
             self._directory, f"mqtt_raw_{stamp}Z_{os.getpid()}_{suffix}.jsonl"
         )
-        self._handle = open(self._path, "a", encoding="utf-8")
+        self._handle = open(self._path, "a", encoding="utf-8")  # noqa: SIM115 - handle outlives this call; closed by close()
         self._written = 0
         self._prune()
         if not self._announced:

@@ -55,11 +55,14 @@ def should_restore_warmup(
     """
     if not enabled:
         return False
+    # The branches below stay separate deliberately: each is a distinct reason a restore
+    # is refused, and collapsing the last two into one boolean would lose which one fired
+    # when reading this against the journal.
     if after != WARMUP_DISABLED:
         return False
     if before is None or before == WARMUP_DISABLED:
         return False
-    if (
+    if (  # noqa: SIM103
         self_write_mode == WARMUP_DISABLED
         and self_write_age is not None
         and self_write_age <= grace_seconds
