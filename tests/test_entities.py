@@ -746,3 +746,249 @@ def test_device_names_never_contain_a_device_id():
     names = valve_names(devices)
     for name in names.values():
         assert "gcs-secret" not in name, names
+
+
+# --------------------------------------------------------------------------- #
+# Malformed cloud payloads (0.10.0)
+# --------------------------------------------------------------------------- #
+#
+# `or {}` rescues null but not a wrong type: where the cloud sends a list, a string or a
+# number, the `or` passes it straight through and the next `.get` raises inside the REST
+# seed — which fails setup with a traceback rather than a message. Every seed entry point
+# is checked against the shapes a schema change, a truncated response, or an error body
+# shaped like a success could actually produce.
+MALFORMED = ({}, None, [], "", "nonsense", 0, 7, [1, 2], {"state": []}, {"state": "x"})
+
+
+@pytest.mark.parametrize("payload", MALFORMED)
+def test_valve_seed_survives_a_malformed_payload(payload, valve_model):
+    """A wrong-typed `gcs-state` must leave defaults in place, not raise."""
+    from custom_components.kohler_anthem_plus.anthem_plus.state import GcsState
+
+    state = GcsState(model=valve_model)
+    state.apply_rest_state(payload)  # must not raise
+    assert state.warmup_mode is None or isinstance(state.warmup_mode, str)
+
+
+@pytest.mark.parametrize("payload", MALFORMED)
+def test_hub_seed_survives_a_malformed_payload(payload, valve_model):
+    """A wrong-typed `hub-state` must leave defaults in place, not raise."""
+    from custom_components.kohler_anthem_plus.anthem_plus.state import HubState
+
+    state = HubState(model=valve_model)
+    state.apply_rest_state(payload)  # must not raise
+    assert state.zones == {}
+
+
+def test_hub_seed_skips_entries_that_are_not_objects(valve_model):
+    """`zone_number` reads five spellings off the entry, so a bare string would raise."""
+    from custom_components.kohler_anthem_plus.anthem_plus.state import HubState
+
+    state = HubState(model=valve_model)
+    state.apply_rest_state(
+        {"state": {"shower": ["not-an-object", None, 5, {"zone": "1", "status": "ON"}]}}
+    )
+    assert list(state.zones) == [1]
+
+
+def test_hub_seed_ignores_a_string_outlet_array(valve_model):
+    """`outlet_flags` indexes positionally: a string would read as every outlet running."""
+    from custom_components.kohler_anthem_plus.anthem_plus.state import HubState
+
+    state = HubState(model=valve_model)
+    state.apply_rest_state(
+        {"state": {"shower": [{"zone": "1", "status": "ON", "outlets": "111"}]}}
+    )
+    assert not any(state.zones[1].outlets)
+
+
+def test_preset_seed_survives_a_malformed_payload(valve_model):
+    from custom_components.kohler_anthem_plus.anthem_plus.state import GcsState
+
+    state = GcsState(model=valve_model)
+    for payload in MALFORMED:
+        assert state.apply_preset_list(payload) is False
+
+
+# --------------------------------------------------------------------------- #
+# Preset words read back from the cloud (0.10.0)
+# --------------------------------------------------------------------------- #
+
+
+def test_preset_word_temperature_inverts_the_encoder():
+    """Every temperature the encoder can produce must read back as itself."""
+    from custom_components.kohler_anthem_plus.anthem_plus.valve_hex import (
+        encode_preset_word,
+        preset_word_temperature,
+    )
+
+    for tenths in range(0, 489):
+        celsius = tenths / 10
+        word = encode_preset_word(celsius, 50.0, 0b001)
+        assert preset_word_temperature(word) == pytest.approx(celsius)
+
+
+def test_check_preset_word_accepts_anything_we_wrote():
+    """The ceiling is the encoder's own clamp, so our own words always pass."""
+    from custom_components.kohler_anthem_plus.anthem_plus.valve_hex import (
+        check_preset_word,
+        encode_preset_word,
+    )
+
+    for celsius in (0.0, 20.0, 38.8, 48.8, 60.0, 120.0):
+        for mask in (0b000, 0b001, 0b111):
+            word = encode_preset_word(celsius, 50.0, mask)
+            assert check_preset_word(word) == word.lower()
+
+
+def test_check_preset_word_refuses_a_scalding_word():
+    """A 10-bit temperature reaches 102.3 C, and this word would be echoed to the valve."""
+    from custom_components.kohler_anthem_plus.anthem_plus.valve_hex import (
+        ValveHexError,
+        check_preset_word,
+    )
+
+    # byte0 low bits 0b11 -> tenths |= 0x300; 0x3FF tenths = 102.3 C.
+    with pytest.raises(ValveHexError, match=r"102\.3"):
+        check_preset_word("03ffc8")
+
+
+@pytest.mark.parametrize(
+    "word", ["", "zz", "01", "0189c", "0189c88", "01 89c8", "gg89c8"]
+)
+def test_check_preset_word_refuses_a_malformed_word(word):
+    from custom_components.kohler_anthem_plus.anthem_plus.valve_hex import (
+        ValveHexError,
+        check_preset_word,
+    )
+
+    with pytest.raises(ValveHexError):
+        check_preset_word(word)
+
+
+def test_preset_timer_plan_drops_a_scalding_stored_word():
+    """`writepreset` replaces the record whole, so a stored word is echoed back verbatim.
+
+    Dropping it sends an empty field for that valve — exactly what an unused valve already
+    gets — so the failure mode is a preset that stops driving one valve, not one that runs
+    it too hot.
+    """
+    from custom_components.kohler_anthem_plus.anthem_plus.gcs import plan_preset_timer
+
+    payload = {
+        "gcsPresetExperienceDetails": [
+            {
+                "presetId": "1",
+                "title": "Default shower",
+                "time": "0",
+                "valveDetails": [
+                    {"valveIndex": "Valve1", "hexString": "03FFC8"},
+                    {"valveIndex": "Valve2", "hexString": "0589C8"},
+                ],
+            }
+        ]
+    }
+    plan = plan_preset_timer(payload, 1, 600)
+    assert 1 not in plan.valves, "a 102.3 C word must not be echoed back"
+    assert plan.valves[2] == "0589c8", "the sound word is preserved byte for byte"
+
+
+def test_preset_timer_plan_preserves_normal_words():
+    """The guard must be invisible on every real record."""
+    from custom_components.kohler_anthem_plus.anthem_plus.gcs import plan_preset_timer
+
+    payload = {
+        "gcsPresetExperienceDetails": [
+            {
+                "presetId": "1",
+                "title": "Default shower",
+                "time": "0",
+                "valveDetails": [
+                    {"valveIndex": "Valve1", "hexString": "018448"},
+                    {"valveIndex": "Valve2", "hexString": "05849C"},
+                ],
+            }
+        ]
+    }
+    plan = plan_preset_timer(payload, 1, 600)
+    assert plan.valves == {1: "018448", 2: "05849c"}
+
+
+# --------------------------------------------------------------------------- #
+# The warm-up extraction (0.10.0)
+# --------------------------------------------------------------------------- #
+
+
+def test_valve_still_exposes_the_whole_warmup_surface():
+    """The move must be invisible: entities, services and diagnostics call these names."""
+    from custom_components.kohler_anthem_plus.coordinator import Valve
+
+    for name in (
+        "async_set_warmup",
+        "async_read_warmup_mode",
+        "warmup_auto_restore",
+        "last_warmup_mode",
+        "_handle_warmup_mode_change",
+        "_message_window",
+    ):
+        assert hasattr(Valve, name), f"Valve lost {name} in the warm-up extraction"
+
+
+def test_warmup_manager_owns_every_moved_member():
+    """The other half of the same check: nothing was left behind on `Valve`."""
+    from custom_components.kohler_anthem_plus.coordinator import Valve
+    from custom_components.kohler_anthem_plus.warmup_manager import WarmupManager
+
+    moved = (
+        "_remember_warmup_mode",
+        "_schedule_warmup_restore",
+        "_async_restore_warmup",
+        "_async_journal_warmup_context",
+        "_warmup_write_status",
+        "_warmup_journal",
+    )
+    for name in moved:
+        assert hasattr(WarmupManager, name), f"WarmupManager is missing {name}"
+        assert not hasattr(Valve, name), f"Valve kept a moved member: {name}"
+
+
+def test_valve_never_calls_a_member_it_no_longer_has():
+    """The extraction's real hazard: a leftover `self._warmup_*` call site.
+
+    `journal_baseline` still called `self._warmup_journal` after the move, which would have
+    raised `AttributeError` on every warm-up log open — a path no other test exercises,
+    because it needs a log file to exist. Checked statically instead: every `self.<name>`
+    inside `Valve` must resolve to something `Valve` actually has.
+    """
+    import ast
+    import inspect
+
+    from custom_components.kohler_anthem_plus import coordinator as module
+    from custom_components.kohler_anthem_plus.coordinator import Valve
+
+    tree = ast.parse(inspect.getsource(module))
+    valve = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ClassDef) and node.name == "Valve"
+    )
+    # Names bound by `self.x = ...` anywhere in the class, plus everything on the type.
+    assigned = {
+        target.attr
+        for node in ast.walk(valve)
+        for target in getattr(node, "targets", [])
+        + ([node.target] if isinstance(node, ast.AnnAssign) else [])
+        if isinstance(target, ast.Attribute)
+        and isinstance(target.value, ast.Name)
+        and target.value.id == "self"
+    }
+    known = assigned | set(dir(Valve))
+    used = {
+        node.attr
+        for node in ast.walk(valve)
+        if isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "self"
+    }
+    missing = sorted(name for name in used - known if not name.startswith("__"))
+    assert not missing, f"Valve calls members it does not have: {missing}"

@@ -344,6 +344,46 @@ def encode_preset_word(
     return f"{byte0:02X}{tenths & 0xFF:02X}{flow_byte:02X}"
 
 
+def preset_word_temperature(word: str) -> float:
+    """Read the commanded temperature, in °C, out of a 3-byte preset hexString.
+
+    The inverse of :func:`encode_preset_word`'s temperature half, and the only part of a
+    preset word worth reading back: it is the one field that can hurt someone. Raises
+    :class:`ValveHexError` if the word is not six hex characters.
+    """
+    text = str(word or "").strip()
+    if not PRESET_WORD.match(text):
+        raise ValveHexError(f"Preset word must be 6 hex characters, got {word!r}")
+    byte0 = int(text[0:2], 16)
+    tenths = ((byte0 & TEMPERATURE_HIGH_BITS) << 8) | int(text[2:4], 16)
+    return round(tenths / TEMPERATURE_TENTHS_PER_DEGREE, 1)
+
+
+def check_preset_word(word: str) -> str:
+    """Return ``word`` normalised, or raise if it is malformed or commands a scald.
+
+    Used on words **read back from the cloud** before they are echoed into a write.
+    ``writepreset`` replaces a preset record whole, so every field not being changed has to
+    be sent back exactly as it was found — which means a value the integration never
+    computed passes through it to the valve. That is a narrow trust boundary, but a real
+    one, and it is cheap to close: a preset word carries the same 10-bit temperature the
+    command word does, so a corrupted or hostile record could set a preset to 102.3 °C and
+    this integration would be the thing that wrote it there.
+
+    Applies exactly the ceiling :func:`encode_preset_word` clamps to, so a word this
+    integration wrote always passes and only a foreign one can fail.
+    """
+    text = str(word or "").strip().lower()
+    ceiling = TEMPERATURE_MAX_TENTHS / TEMPERATURE_TENTHS_PER_DEGREE
+    commanded = preset_word_temperature(text)
+    if commanded > ceiling:
+        raise ValveHexError(
+            f"Preset word {text!r} commands {commanded:.1f} °C, above the "
+            f"{ceiling:.1f} °C ceiling"
+        )
+    return text
+
+
 class ValveHexError(ValueError):
     """Raised when a valve word is malformed or a value is out of range."""
 

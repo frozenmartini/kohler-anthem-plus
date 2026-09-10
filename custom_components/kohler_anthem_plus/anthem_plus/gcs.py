@@ -13,6 +13,7 @@ two-command path was removed 2026-08-21.)
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -31,12 +32,16 @@ from .valve_hex import (
     VALVE1_PREFIX,
     VALVE2_PREFIX,
     ValveHexError,
+    check_preset_word,
     encode_pair,
     encode_word,
     pause_pair,
     stop_pair,
     unit_to_celsius,
 )
+
+_LOGGER = logging.getLogger(__name__)
+
 
 # The payload carries eight valve slots. Only the first two are ever populated; the rest
 # must still be present and zeroed.
@@ -113,6 +118,22 @@ def plan_preset_timer(
         index = str(detail.get("valveIndex") or "")
         word = str(detail.get("hexString") or "").strip().lower()
         if not index.lower().startswith("valve") or not word or set(word) == {"0"}:
+            continue
+        # **Validate before echoing.** This word came from the cloud and is about to be
+        # written back verbatim, because `writepreset` replaces the record whole. A
+        # malformed or scalding word is dropped rather than passed through — dropping it
+        # sends an empty field for that valve, which is what `_valve_fields` already sends
+        # for a valve the preset does not use, so the failure mode is a preset that stops
+        # driving one valve rather than one that runs it too hot.
+        try:
+            word = check_preset_word(word)
+        except ValveHexError:
+            _LOGGER.warning(
+                "Ignoring preset %s %s: the stored word %r is malformed or out of range",
+                preset_id,
+                index,
+                word,
+            )
             continue
         try:
             valves[int(index[5:])] = word

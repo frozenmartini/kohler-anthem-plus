@@ -118,10 +118,12 @@ def outlet_limits_from_settings(payload: Any) -> dict[int, OutletLimits]:
         )
     if not isinstance(source, dict):
         return limits
-    for valve in source.get("valveSettings") or []:
+    settings = source.get("valveSettings")
+    for valve in settings if isinstance(settings, list) else ():
         if not isinstance(valve, dict):
             continue
-        for entry in valve.get("outletConfigurations") or []:
+        configurations = valve.get("outletConfigurations")
+        for entry in configurations if isinstance(configurations, list) else ():
             if not isinstance(entry, dict):
                 continue
             try:
@@ -753,10 +755,23 @@ class GcsState:
         return changed
 
     def apply_rest_state(self, payload: dict[str, Any]) -> None:
-        """Seed from a ``gcs-state`` read, so entities are populated before any event."""
-        state = (payload or {}).get("state") or {}
+        """Seed from a ``gcs-state`` read, so entities are populated before any event.
+
+        Every container is type-checked before it is walked. ``or {}`` only rescues the
+        null case: where the cloud sends a list, a string or a number for ``state`` — a
+        schema change, a truncated response, an error body shaped like a success — the
+        ``or`` passes it straight through and ``.get`` raises `AttributeError` inside the
+        REST seed, which fails setup with a traceback rather than a message. Falling back
+        to the pre-seed defaults is the honest response: MQTT is authoritative here and
+        will correct anything this seed misses.
+        """
+        state = payload.get("state") if isinstance(payload, dict) else None
+        if not isinstance(state, dict):
+            return
         for number, attr in ((1, "valve1"), (2, "valve2")):
-            valve = state.get(attr) or {}
+            valve = state.get(attr)
+            if not isinstance(valve, dict):
+                continue
             mask = 0
             for bit, key in enumerate(("out1", "out2", "out3")):
                 if str(valve.get(key)) == "1":
@@ -806,7 +821,11 @@ class GcsState:
         Replaces the whole mapping rather than merging, so a preset deleted while Home
         Assistant was not listening disappears instead of lingering.
         """
-        details = (payload or {}).get("gcsPresetExperienceDetails")
+        details = (
+            payload.get("gcsPresetExperienceDetails")
+            if isinstance(payload, dict)
+            else None
+        )
         if not isinstance(details, list):
             return False
         presets: dict[int, GcsPreset] = {}
@@ -950,7 +969,8 @@ class HubState:
         changed = False
         # `showerwarmup` sits beside `attributes` under `data`, not within it. Note the
         # casing: MQTT sends `showerwarmup`, the REST read sends `showerWarmUp`.
-        warmup = _flag((envelope.raw.get("data") or {}).get("showerwarmup"))
+        data = envelope.raw.get("data")
+        warmup = _flag(data.get("showerwarmup") if isinstance(data, dict) else None)
         if warmup is not None and warmup != self.shower_warmup:
             self.shower_warmup = warmup
             changed = True
@@ -1087,35 +1107,59 @@ class HubState:
         return True
 
     def apply_rest_state(self, payload: dict[str, Any]) -> None:
-        """Seed from a ``hub-state`` read."""
-        state = (payload or {}).get("state") or {}
-        for entry in state.get("shower") or []:
+        """Seed from a ``hub-state`` read.
+
+        Type-checked the whole way down, for the reason given on the valve's
+        :meth:`GcsState.apply_rest_state`: ``or {}`` rescues null but not a wrong type, and
+        an `AttributeError` raised inside the seed fails setup with a traceback. A
+        malformed container is skipped and its fields keep their defaults.
+        """
+        if not isinstance(payload, dict):
+            return
+        state = payload.get("state")
+        if not isinstance(state, dict):
+            return
+        shower = state.get("shower")
+        for entry in shower if isinstance(shower, list) else ():
+            # `zone_number` reads five different spellings off the entry, so it needs a
+            # mapping; a bare string in the list would raise there rather than here.
+            if not isinstance(entry, dict):
+                continue
             number = zone_number(entry)
             if number is None:
                 continue
             count = (
                 self.model.outlets_valve1 if number == 1 else self.model.outlets_valve2
             )
+            outlets = entry.get("outlets")
             self.zones[number] = HubZone(
                 status=entry.get("status"),
-                outlets=outlet_flags(entry.get("outlets"), count),
+                # `outlet_flags` indexes this positionally, so a string would decompose
+                # into truthy characters and read as every outlet running.
+                outlets=outlet_flags(
+                    outlets if isinstance(outlets, list) else None, count
+                ),
                 temperature=entry.get("temperature"),
                 flowrate=entry.get("flowRate"),
             )
-        music = (state.get("musicStateModel") or {}).get("status")
+        music_state = state.get("musicStateModel")
+        music = music_state.get("status") if isinstance(music_state, dict) else None
         if music is not None:
             self.music_on = str(music).upper() == "ON"
-        steam = (state.get("hubSteamState") or {}).get("status")
+        steam_state = state.get("hubSteamState")
+        steam = steam_state.get("status") if isinstance(steam_state, dict) else None
         if steam is not None:
             self.steam_on = str(steam).upper() == "ON"
         lights = state.get("light")
         if isinstance(lights, list):
             self.light_on = any(
-                str((light or {}).get("status", "")).upper() == "ON" for light in lights
+                str(light.get("status", "")).upper() == "ON"
+                for light in lights
+                if isinstance(light, dict)
             )
         # Top level, beside `state` rather than inside it — and camelCase here, against the
         # all-lowercase `showerwarmup` MQTT sends for the same thing.
-        warmup = _flag((payload or {}).get("showerWarmUp"))
+        warmup = _flag(payload.get("showerWarmUp"))
         if warmup is not None:
             self.shower_warmup = warmup
         self.last_update = time.time()
