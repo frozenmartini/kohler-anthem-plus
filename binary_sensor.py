@@ -46,6 +46,7 @@ async def async_setup_entry(
     for valve in coordinator.valves:
         entities += [
             ValveAtTemperatureSensor(coordinator, valve),
+            ValveProblemSensor(coordinator, valve),
             MqttConnectionSensor(coordinator, valve),
             # CLOUD CONNECTION WATCH. Created for every valve, including on valve-only
             # accounts — the quiet-interval trigger needs no controller. On an account
@@ -148,6 +149,63 @@ class ValveAtTemperatureSensor(KohlerValveEntity, BinarySensorEntity):
     def is_on(self) -> bool | None:
         state = self._state
         return None if state is None else state.at_temperature
+
+
+class ValveProblemSensor(KohlerValveEntity, BinarySensorEntity):
+    """Whether the valve is reporting a fault, from the status word's ``errorFlag``.
+
+    **Enabled, and deliberately not a diagnostic.** A fault the owner cannot see is the
+    one failure mode where a hidden entity is worse than no entity: every other reading
+    here is a convenience, and this one is the only thing that would say the hardware is
+    unhappy. It is on the valve device, in the ordinary entity list, so it appears on the
+    card without anyone having gone looking for it.
+
+    > ⚠️ **Never observed set — 0 of 992 captured valve words.** An earlier revision of
+    > this integration removed the entity for exactly that reason: publishing it claimed a
+    > fault detector nobody had been able to test, and a sensor stuck at "OK" is
+    > indistinguishable from one that is broken. That reasoning was sound and is *not*
+    > overturned here; what changed is the weighing. The decode is straightforward and its
+    > cost when wrong is a false "OK" — which is what a user without the entity already
+    > has — while its value when right is the only warning the integration can give. So it
+    > ships, and says plainly in `fault_detection_verified` that it has never fired.
+    >
+    > If you ever see this turn on, please open an issue with diagnostics attached: it
+    > would be the first captured fault, and it is what this entity is waiting for.
+
+    Reads the flag from **either** zone: `GcsState.has_fault` is any-of across both words,
+    so a single-zone valve is covered by valve1 alone and a two-zone valve reports a fault
+    in either. `error_code` is deliberately *not* the trigger — byte 7 reads a constant
+    ``1`` on the tested unit, so a nonzero code is not a fault. The flag is the only fault
+    signal; the codes ride along as attributes.
+    """
+
+    _attr_name = "Problem"
+    _attr_device_class = BinarySensorDeviceClass.PROBLEM
+
+    def __init__(self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve) -> None:
+        super().__init__(coordinator, valve)
+        self._attr_unique_id = f"{self._device_id}_problem"
+
+    @property
+    def is_on(self) -> bool | None:
+        state = self._state
+        # None — "not known yet" — before the first word arrives, rather than a confident
+        # "no problem" the integration has no basis for.
+        return None if state is None else state.has_fault
+
+    @property
+    def extra_state_attributes(self) -> dict[str, object]:
+        state = self._state
+        codes = {} if state is None else state.error_codes
+        return {
+            # Per-zone byte 7. Constant `1` on the tested unit and **not** a fault
+            # indicator on its own — published so a real fault can be characterised from a
+            # bug report rather than guessed at.
+            "error_codes": codes,
+            # Honest about the caveat in the class docstring: this detector has never been
+            # seen to fire, so a False here is weaker evidence than it looks.
+            "fault_detection_verified": False,
+        }
 
 
 class ValveDiagnosticBinarySensor(KohlerValveEntity, BinarySensorEntity):

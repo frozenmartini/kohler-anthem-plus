@@ -20,9 +20,15 @@ from datetime import datetime, timezone
 from homeassistant.components.sensor import (
     SensorDeviceClass,
     SensorEntity,
+    SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfTemperature, UnitOfTime
+from homeassistant.const import (
+    PERCENTAGE,
+    UnitOfTemperature,
+    UnitOfTime,
+    UnitOfVolume,
+)
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -32,6 +38,10 @@ from .anthem_plus.valve_hex import encode_word
 from .const import DOMAIN, EXPOSE_CONTROLLER_WATER_STATE
 from .coordinator import Controller, KohlerAnthemPlusCoordinator, Valve
 from .entity import KohlerControllerEntity, KohlerValveEntity
+
+# US liquid gallons to litres. `totalFlow` is reported in US gallons; a `Liters` account
+# is converted for display only — the filter and the stored total stay in gallons.
+_LITERS_PER_GALLON = 3.785411784
 
 # The four states the valve can be in, in priority order. "Warming Up" outranks "Water
 # Running" because warmup does run water — reporting it as an ordinary shower would hide
@@ -61,6 +71,9 @@ async def async_setup_entry(
     for valve in coordinator.valves:
         entities += [
             ValveStatusSensor(coordinator, valve),
+            ValveSystemStateSensor(coordinator, valve),
+            ValveFlowSensor(coordinator, valve),
+            ValveTotalWaterSensor(coordinator, valve),
             ValveLastUpdateSensor(coordinator, valve),
             ValveHexSensor(coordinator, valve, 1),
             OutletMaxRunTimeSensor(coordinator, valve, 1),
@@ -177,6 +190,165 @@ class ValveStatusSensor(KohlerValveEntity, SensorEntity):
                 if self._paired or not self.coordinator.controllers
                 else None
             ),
+        }
+
+
+class ValveSystemStateSensor(KohlerValveEntity, SensorEntity):
+    """The valve's own `currentSystemState` — `normalOperation` or `showerInProgress`.
+
+    **A second opinion, not a restatement of `Status`.** `Status` is decoded from the
+    command word — outlet mask, pause flag, warm-up — whereas this is a flag the valve
+    sets for itself. They usually agree, and when they do not, that disagreement is the
+    useful signal: it is the valve saying a session is open while the word says no outlet
+    is flowing, or the reverse.
+
+    Reported as the device's own strings rather than remapped onto `VALVE_STATES`. Folding
+    them into the same four words would make the two sensors look interchangeable, which
+    is exactly the confusion this one exists to expose. Automations that only want "is a
+    shower on" should read `Status`.
+    """
+
+    _attr_name = "System State"
+    _attr_icon = "mdi:state-machine"
+    _attr_device_class = SensorDeviceClass.ENUM
+    # The two values observed across the whole capture corpus. An unrecognised value is
+    # published as-is by returning None below rather than being forced into this list,
+    # since an ENUM sensor reporting an option it never declared is logged as an error by
+    # Home Assistant on every single update.
+    _attr_options = ["normalOperation", "showerInProgress"]
+
+    def __init__(self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve) -> None:
+        super().__init__(coordinator, valve)
+        self._attr_unique_id = f"{self._device_id}_system_state"
+
+    @property
+    def native_value(self) -> str | None:
+        state = self._state
+        if state is None or state.system_state is None:
+            return None
+        value = state.system_state
+        # Never hand HA an option outside `_attr_options` — see the class docstring. A
+        # firmware that adds a third state shows as `unknown` here and in the attribute
+        # below as its real string, rather than spamming the log.
+        return value if value in self._attr_options else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, object]:
+        state = self._state
+        reported = None if state is None else state.system_state
+        return {
+            # What the valve actually said, including a value this integration does not
+            # yet know about.
+            "reported": reported,
+            "recognised": reported in self._attr_options if reported else None,
+        }
+
+
+class ValveFlowSensor(KohlerValveEntity, SensorEntity):
+    """Commanded flow, as a percentage — **only while water is actually moving.**
+
+    Reads `unknown` on an idle or paused valve, and that is deliberate. The flow byte is
+    not the commanded flow unless an outlet is open: the corpus holds 296 idle words
+    carrying a flow nobody selected, in recurring pairs like 34.5 %/82.5 %, with the same
+    message collapsing `totalFlow` to 2 and everything back to normal seconds later. See
+    `docs/gcs/valve_hex.md`.
+
+    Publishing that number would put a flow percentage on a dashboard for a shower that is
+    not running, which is worse than showing nothing. The raw byte is still available
+    unconditionally on the Zone 1 Hex diagnostic sensor's `flow_percent` attribute, beside
+    the `flow_is_live` flag that governs this entity.
+    """
+
+    _attr_name = "Flow"
+    _attr_icon = "mdi:water-percent"
+    _attr_native_unit_of_measurement = PERCENTAGE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve) -> None:
+        super().__init__(coordinator, valve)
+        self._attr_unique_id = f"{self._device_id}_flow"
+
+    @property
+    def native_value(self) -> float | None:
+        state = self._state
+        if state is None or not state.flow_is_live:
+            return None
+        return state.flow_percent
+
+    @property
+    def extra_state_attributes(self) -> dict[str, object]:
+        """Why the value is missing, so `unknown` is never a mystery."""
+        state = self._state
+        return {
+            "flow_is_live": bool(state and state.flow_is_live),
+            # The byte as the word carries it, live or not — the number this entity is
+            # declining to publish, so the decision can be checked rather than trusted.
+            "reported_flow_percent": None if state is None else state.flow_percent,
+        }
+
+
+class ValveTotalWaterSensor(KohlerValveEntity, SensorEntity):
+    """Lifetime water used, from the valve's `totalFlow`, in the account's unit.
+
+    **Glitch-filtered.** The device emits an occasional frame where `totalFlow` collapses
+    to near-zero and is back at its previous value seconds later — three times on separate
+    days in the corpus. As a `total_increasing` sensor, one such frame reads to Home
+    Assistant as a meter replacement and injects a phantom spike the size of the whole
+    counter into long-term statistics, which cannot easily be undone once recorded. So the
+    published value comes from `total_flow_gallons`, which holds the last good reading
+    across a collapse; `GcsState._accept_total_flow` carries the rule and the reasoning.
+
+    `totalFlow` is documented upstream as US gallons and is converted for a `Liters`
+    account. This is a **lifetime** total: Kohler exposes no per-session volume, and
+    `totalVolume` — the other counter in the same message, reading in the hundreds of
+    millions — has no established unit and is published only as an attribute here.
+    """
+
+    _attr_name = "Total Water Used"
+    _attr_icon = "mdi:water"
+    _attr_device_class = SensorDeviceClass.WATER
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+
+    def __init__(self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve) -> None:
+        super().__init__(coordinator, valve)
+        self._attr_unique_id = f"{self._device_id}_total_water"
+
+    @property
+    def _metric(self) -> bool:
+        return self.coordinator.water_units == "Liters"
+
+    @property
+    def native_unit_of_measurement(self) -> str:
+        return UnitOfVolume.LITERS if self._metric else UnitOfVolume.GALLONS
+
+    @property
+    def native_value(self) -> float | None:
+        state = self._state
+        if state is None:
+            return None
+        gallons = state.total_flow_gallons
+        if gallons is None:
+            return None
+        if self._metric:
+            return round(gallons * _LITERS_PER_GALLON, 1)
+        return round(gallons, 1)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, object]:
+        """The raw counters and the filter's own tally, so it can be audited.
+
+        `raw_total_flow` is what the last message actually carried — during a glitch frame
+        it differs from the published state, which is the one case where seeing both
+        matters.
+        """
+        state = self._state
+        if state is None:
+            return {}
+        return {
+            "raw_total_flow": state.total_flow,
+            # Undocumented unit; exposed for anyone wanting to settle what it counts.
+            "total_volume": state.total_volume,
+            "glitch_frames_ignored": state.total_flow_glitches,
         }
 
 

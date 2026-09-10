@@ -225,6 +225,25 @@ class GcsState:
     # messages and does not behave like a monotonic counter, so any statistics built on it
     # would be meaningless.
     total_volume: str | None = None
+    # Lifetime water total in US gallons, from `totalFlow`. **Not trustworthy frame by
+    # frame** — the corpus has it collapsing to `2` and returning to its previous value
+    # seconds later, three times on separate days. `total_flow` holds the raw reading;
+    # `total_flow_gallons` below is the filtered one, and is what an entity should read.
+    total_flow: float | None = None
+    # The last reading accepted as real, and how many frames have been rejected since the
+    # integration started. Both exist so the filter can be audited from an entity attribute
+    # rather than only from a log.
+    total_flow_filtered: float | None = None
+    total_flow_glitches: int = 0
+    # The reading rejected immediately before this one, if any. A second low reading that
+    # is consistent with the first means the drop is real, not a glitch — see
+    # `_accept_total_flow`.
+    _total_flow_pending: float | None = None
+    # `currentSystemState` — `normalOperation` or `showerInProgress`, as the valve itself
+    # reports it. Kept as the device's own string rather than folded into the four-state
+    # `Status` vocabulary, because it is a second, independent opinion: it is the valve's
+    # own session flag, not a decode of the command word, and the two can disagree.
+    system_state: str | None = None
     last_update: float | None = None
 
     # Stored presets, keyed by slot id. Ids are **slots, not positions**: creating fills the
@@ -357,11 +376,11 @@ class GcsState:
     def has_fault(self) -> bool | None:
         """Whether any valve is reporting a fault (byte 3's errorFlag).
 
-        **Not surfaced as an entity, deliberately** — kept because the decode is correct and
-        costs nothing, not because anything consumes it. The bit has never been observed
-        set: 0 of 992 captured valve words. Exposing a sensor that has only ever been "no
-        problem" claimed a fault detector nobody had tested, so the entity was removed and
-        this stayed. If a fault is ever captured, the entity is the easy part to restore.
+        Surfaced by `binary_sensor.ValveProblemSensor`. The bit has never been observed
+        set — 0 of 992 captured valve words — and that caveat travels with the entity
+        rather than being a reason to withhold it: a fault nobody can see is the one case
+        where a hidden entity is worse than an untested one. See that class for the full
+        reasoning, including why this was withheld previously.
 
         See also :attr:`error_codes` — byte 7 reads a constant ``1`` on the tested unit, so
         a nonzero code is not a fault. This flag is the only fault signal.
@@ -438,6 +457,86 @@ class GcsState:
     def flow_percent(self) -> float | None:
         """Flow as a percentage, taken from valve1."""
         return None if self.valve1 is None else self.valve1.flow_percent
+
+    @property
+    def flow_is_live(self) -> bool:
+        """Whether `flow_percent` is the flow somebody actually asked for.
+
+        The flow byte is only meaningful while an outlet is open. On an idle valve it is
+        not the commanded flow: 296 words in the corpus carry a flow other than 100 % with
+        nothing open, in recurring pairs like 34.5 %/82.5 %. So anything presenting "the
+        flow setting" must gate on this, or it will show a number nobody chose.
+        """
+        word = self.valve1
+        if word is None:
+            return False
+        return bool(word.outlet_mask) and not word.paused
+
+    @property
+    def total_flow_gallons(self) -> float | None:
+        """Lifetime water total in US gallons, with the known glitch frames filtered out.
+
+        This is the value an entity should publish. `total_flow` is the raw reading and
+        keeps whatever the device last said, glitch included.
+        """
+        return self.total_flow_filtered
+
+    def _accept_total_flow(self, value: object) -> bool:
+        """Fold one `totalFlow` reading into the raw and filtered totals.
+
+        Returns True if anything changed. The filter exists because the device emits an
+        occasional frame where `totalFlow` collapses to near-zero and is back at its
+        previous value seconds later — see `docs/gcs/valve_hex.md`. Published unfiltered
+        as a `total_increasing` sensor, one such frame tells Home Assistant the meter was
+        replaced and injects a phantom ~1650-gallon spike into long-term statistics, which
+        is effectively permanent once recorded.
+
+        A reading is rejected when it drops **below half** the last accepted one. That
+        threshold is deliberately loose: every observed glitch is a collapse to ~0 from
+        four figures.
+
+        **A low reading is only ever rejected once.** A genuine counter reset — a valve
+        replaced, or firmware zeroing the total — also arrives as a collapse, and would
+        otherwise be rejected for ever, freezing the sensor at a value the device has
+        stopped reporting. So the first low reading is held aside; if the *next* one is
+        also low, the drop is treated as real and adopted. A glitch costs nothing, because
+        the frame after it is back at the old value and clears the hold. A real reset
+        costs one frame of delay.
+        """
+        try:
+            reading = float(str(value))
+        except (TypeError, ValueError):
+            return False
+
+        changed = reading != self.total_flow
+        self.total_flow = reading
+
+        previous = self.total_flow_filtered
+        if previous is not None and reading < previous / 2:
+            if self._total_flow_pending is None:
+                # First low reading: hold it aside and publish nothing.
+                self._total_flow_pending = reading
+                self.total_flow_glitches += 1
+                _LOGGER.debug(
+                    "Holding totalFlow drop: %s after %s (%d rejected so far)",
+                    reading,
+                    previous,
+                    self.total_flow_glitches,
+                )
+                # The raw field moved even though the published one did not, so an
+                # enabled diagnostic attribute still reflects it.
+                return changed
+            # Two low readings in a row — the drop is real. Fall through and adopt it.
+            _LOGGER.info(
+                "totalFlow has stayed low (%s then %s); treating as a counter reset",
+                self._total_flow_pending,
+                reading,
+            )
+
+        self._total_flow_pending = None
+        changed |= reading != previous
+        self.total_flow_filtered = reading
+        return changed
 
     @property
     def warmup_enabled(self) -> bool | None:
@@ -579,6 +678,12 @@ class GcsState:
         if (volume := attribute.get("totalVolume")) is not None:
             changed |= volume != self.total_volume
             self.total_volume = volume
+        if (flow_total := attribute.get("totalFlow")) is not None:
+            changed |= self._accept_total_flow(flow_total)
+        if (system := attribute.get("currentSystemState")) is not None:
+            system = str(system)
+            changed |= system != self.system_state
+            self.system_state = system
         if (status := attribute.get("warmUpStatus")) is not None:
             in_progress = _is_warmup_in_progress(status)
             changed |= in_progress != self.warmup_in_progress
@@ -645,6 +750,10 @@ class GcsState:
         if progress is not None:
             self.warmup_in_progress = _is_warmup_in_progress(progress)
         self.total_volume = state.get("totalVolume") or self.total_volume
+        if (flow_total := state.get("totalFlow")) is not None:
+            self._accept_total_flow(flow_total)
+        if (system := state.get("currentSystemState")) is not None:
+            self.system_state = str(system)
         if "presetOrExperienceId" in state:
             self.active_preset_id = _preset_id_or_none(state.get("presetOrExperienceId"))
         self.last_update = time.time()

@@ -95,6 +95,7 @@ from .const import (
     CONF_REFRESH_TOKEN,
     CONF_RESTART_ON_RUNTIME_CUTOFF,
     CONF_TEMPERATURE_UNIT,
+    CONF_WATER_UNITS,
     CONF_TENANT_ID,
     CONF_VALVES,
     CONF_VALVE_MODEL,
@@ -2196,6 +2197,9 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         else:
             self.model = get_valve_model(entry.data[CONF_VALVE_MODEL])
         self.temperature_unit: str = entry.data.get(CONF_TEMPERATURE_UNIT, "Fahrenheit")
+        # `Standard` (US gallons) or `Liters`, as the Konnect account is set. Captured at
+        # config time beside the temperature unit; refreshed from the customer read below.
+        self.water_units: str = entry.data.get(CONF_WATER_UNITS, "Standard")
 
         session = async_get_clientsession(hass)
         self.auth = KohlerAuth(session, entry.data.get(CONF_REFRESH_TOKEN))
@@ -2245,6 +2249,7 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raise ConfigEntryNotReady(f"Cannot reach Kohler: {err}") from err
 
         self.temperature_unit = customer.temperature_unit or self.temperature_unit
+        self.water_units = customer.water_units or self.water_units
         valves = customer.gcs_devices
         controllers = customer.hub_devices
         if not valves and not controllers:

@@ -1,11 +1,16 @@
 """Diagnostics for Kohler Anthem Plus — the "Download diagnostics" button.
 
 One report, many buttons: the config entry and every device page (the Anthem Valve and
-each Anthem Plus controller) all produce the **same** payload, by design — a hardware
-report should describe the whole installation, because the products are one plumbing
-system and half a picture has repeatedly misled this project (see
-``docs/architecture.md``). The only per-button difference is the ``requested_for`` field
-saying which button was pressed.
+each Anthem Plus controller) all describe the **whole installation**, by design — a
+hardware report should cover everything, because the products are one plumbing system and
+half a picture has repeatedly misled this project (see ``docs/architecture.md``). Every
+device appears in ``valves`` and ``controllers`` whichever button was pressed.
+
+Two things do follow the button: ``requested_for``, naming it, and the singular ``valve``
+/ ``controller`` blocks, which describe **that** device. Those singular keys exist only so
+a report from a single-device account reads as it always has; on an account with several,
+pressing the second valve's button and getting the first valve's limits under a
+``valve_1`` label is precisely the half-picture this module is meant to prevent.
 
 What this is for: **hardware validation reports.** Every claim in this integration is
 verified against exactly one installation (a K-28212 + controller), and the support matrix
@@ -91,6 +96,18 @@ def _valve_report(valve: Valve) -> dict[str, Any]:
         "warmup_mode": gcs.warmup_mode,
         "warmup_in_progress": gcs.warmup_in_progress,
         "active_preset_id": gcs.active_preset_id,
+        # The valve's own session flag, beside the decoded `is_running`/`is_paused` above.
+        # A disagreement between them is worth seeing in a bug report.
+        "system_state": gcs.system_state,
+        "water": {
+            # Raw and filtered both, so a report shows whether the glitch filter fired and
+            # by how much — see `GcsState._accept_total_flow`.
+            "total_flow_raw": gcs.total_flow,
+            "total_flow_published": gcs.total_flow_gallons,
+            "glitch_frames_ignored": gcs.total_flow_glitches,
+            # Undocumented unit; recorded so the question can be settled from real reports.
+            "total_volume": gcs.total_volume,
+        },
         "presets": {
             "slots_seen": len(gcs.presets),
             "selectable": sum(1 for p in gcs.presets.values() if p.is_selectable),
@@ -168,9 +185,18 @@ def _controller_report(controller: Controller) -> dict[str, Any]:
 
 
 def _build(
-    coordinator: KohlerAnthemPlusCoordinator, requested_for: str
+    coordinator: KohlerAnthemPlusCoordinator,
+    requested_for: str,
+    valve_index: int = 0,
+    controller_index: int = 0,
 ) -> dict[str, Any]:
-    """The whole installation, as this integration currently understands it."""
+    """The whole installation, as this integration currently understands it.
+
+    ``valve_index`` / ``controller_index`` say which device the singular ``valve`` /
+    ``controller`` blocks should describe — the one whose Download-diagnostics button was
+    pressed. The full ``valves`` / ``controllers`` lists are unaffected and always carry
+    every device; see the note beside those blocks for why the singular keys still exist.
+    """
     model = coordinator.model
 
     payload: dict[str, Any] = {
@@ -201,24 +227,40 @@ def _build(
     }
 
     # One entry per valve, in the cloud's order. `valve`, `endless_shower` and `warmup`
-    # (singular) are kept for the first so reports from before 2026-09-08 and after read
-    # the same on a single-valve account; `valves` carries all of them, each with its own
+    # (singular) are kept so reports from before 2026-09-08 and after read the same on a
+    # single-valve account; `valves` carries all of them, each with its own
     # `endless_shower` and `warmup` nested inside.
+    #
+    # **The singular block describes the valve whose button was pressed, not always the
+    # first.** Until 2026-09-09 it was hardcoded to index 0, so a report downloaded from
+    # the second valve's page carried `requested_for: valve_1` above a `valve` block
+    # describing valve 0 — two valves on one account can differ in exactly the fields this
+    # block is read for (a 30-minute and a 60-minute run-time limit, on the account that
+    # found this). The full picture was always present in `valves`; the label was the lie,
+    # which is the failure mode this module's header exists to warn about.
     reports = [_valve_report(valve) for valve in coordinator.valves]
     if reports:
+        # Defensive: an out-of-range index would be a caller bug, but a diagnostics report
+        # that raises is a report nobody can attach to an issue.
+        primary = reports[valve_index] if 0 <= valve_index < len(reports) else reports[0]
         payload["valve"] = {
-            k: v for k, v in reports[0].items() if k not in ("endless_shower", "warmup")
+            k: v for k, v in primary.items() if k not in ("endless_shower", "warmup")
         }
-        payload["endless_shower"] = reports[0]["endless_shower"]
-        payload["warmup"] = reports[0]["warmup"]
+        payload["endless_shower"] = primary["endless_shower"]
+        payload["warmup"] = primary["warmup"]
         payload["valves"] = reports
 
-    # One entry per controller, in the cloud's order. `controller` (singular) is kept for
-    # the first so reports from before 2026-09-08 and after read the same on a
-    # single-controller account; `controllers` carries all of them.
+    # One entry per controller, in the cloud's order. `controller` (singular) is kept so
+    # reports from before 2026-09-08 and after read the same on a single-controller
+    # account; `controllers` carries all of them. Follows the pressed device for the same
+    # reason as the valve block above.
     reports = [_controller_report(controller) for controller in coordinator.controllers]
     if reports:
-        payload["controller"] = reports[0]
+        payload["controller"] = (
+            reports[controller_index]
+            if 0 <= controller_index < len(reports)
+            else reports[0]
+        )
         payload["controllers"] = reports
 
     return payload
@@ -240,9 +282,18 @@ async def async_get_config_entry_diagnostics(
 async def async_get_device_diagnostics(
     hass: HomeAssistant, entry: ConfigEntry, device: DeviceEntry
 ) -> dict[str, Any]:
-    """Diagnostics from any device page — same report, whichever button was pressed."""
+    """Diagnostics from any device page.
+
+    The whole-installation payload is the same whichever button was pressed — that is the
+    point of this module. What follows the button is `requested_for` and the singular
+    `valve` / `controller` blocks, which describe the device whose page it came from.
+    """
     coordinator = _coordinator(hass, entry)
     requested_for = "unknown_device"
+    # Default to the first of each, which is what the config-entry button reports and what
+    # every single-device account has always produced.
+    valve_index = 0
+    controller_index = 0
     for domain, identifier in device.identifiers:
         if domain != DOMAIN:
             continue
@@ -251,6 +302,7 @@ async def async_get_device_diagnostics(
                 requested_for = (
                     "valve" if len(coordinator.valves) == 1 else f"valve_{index}"
                 )
+                valve_index = index
         for index, controller in enumerate(coordinator.controllers):
             if identifier == controller.device_id:
                 # Plain "controller" with one, as every report so far has said; an index
@@ -260,4 +312,5 @@ async def async_get_device_diagnostics(
                     if len(coordinator.controllers) == 1
                     else f"controller_{index}"
                 )
-    return _build(coordinator, requested_for)
+                controller_index = index
+    return _build(coordinator, requested_for, valve_index, controller_index)

@@ -206,16 +206,51 @@ class FavouriteSelect(OptimisticOptionMixin, KohlerValveEntity, SelectEntity):
         return preset.name
 
     @property
+    def _experiences(self) -> list[str]:
+        """Names of the stored experiences, which cannot be offered as options.
+
+        Experiences share the id space with favourites via ``presetOrExperienceId`` but
+        carry no valve settings, so activating one does nothing — the shower ignores the
+        command. They are therefore kept out of `options`, and named here instead.
+        """
+        state = self._state
+        if state is None:
+            return []
+        return sorted(
+            preset.name
+            for preset in state.presets.values()
+            if preset.is_experience and not preset.is_empty
+        )
+
+    @property
     def extra_state_attributes(self) -> dict[str, Any]:
         state = self._state
         if state is None:
             return {}
-        return {
+        attributes: dict[str, Any] = {
             # The raw id behind the current option, including the ids this entity hides —
             # useful when the dropdown reads Off but something is clearly running.
             "active_preset_id": state.active_preset_id,
             "favourite_count": len(self._presets),
         }
+        # **Why the dropdown can look empty.** A valve whose slots are all experiences
+        # offers nothing but `Off`, which reads as a broken entity rather than as a
+        # correct one. Naming them here — with the reason — turns "this is broken" into
+        # "these exist and cannot be started", without putting options in the list that
+        # would raise the moment anyone picked one.
+        #
+        # Not merely cosmetic: on the account this was written for, one valve holds 6
+        # slots of which 5 are experiences, and the single remaining favourite made the
+        # picker look like it had failed to load.
+        experiences = self._experiences
+        if experiences:
+            attributes["experiences"] = experiences
+            attributes["experiences_note"] = (
+                "Experiences are stored on the valve but carry no valve settings, so "
+                "they cannot be started from Home Assistant — the shower ignores the "
+                "command. Start them from the Konnect app or the touchscreen."
+            )
+        return attributes
 
     async def async_select_option(self, option: str) -> None:
         """Start the named favourite, or stop the shower.
@@ -232,6 +267,15 @@ class FavouriteSelect(OptimisticOptionMixin, KohlerValveEntity, SelectEntity):
             None if state is None else state.preset_by_name(option, PRESET_HIDDEN_IDS)
         )
         if preset is None:
+            # An experience named by an automation reaches here, because `preset_by_name`
+            # only resolves selectable slots. Saying so beats "no such favourite", which
+            # is misleading when the thing plainly exists in the app.
+            if option in self._experiences:
+                raise HomeAssistantError(
+                    f"{option!r} is an Anthem experience, not a favourite. Experiences "
+                    "carry no valve settings, so the shower ignores the command — start "
+                    "it from the Konnect app or the touchscreen instead."
+                )
             raise HomeAssistantError(
                 f"No Anthem favourite called {option!r}. It may have been renamed or "
                 "deleted in the Konnect app."
