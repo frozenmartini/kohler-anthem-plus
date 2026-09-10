@@ -1554,3 +1554,31 @@ def test_the_slider_does_not_follow_the_scald_limit(valve_model):
         e for e in collect("number", coordinator) if "temperature" in e.unique_id
     )
     assert number.native_max_value == 118, "the slider follows the app, not the valve"
+
+
+def test_auto_restore_says_whether_the_fault_can_even_occur(valve_model):
+    """The only identified cause of a spontaneous warm-up disable lives in the HUB.
+
+    `docs/gcs/api.md` §3h: the Anthem Plus controller's web UI writes `warmUpDisabled` to the
+    valve as a fixed step of its signed-in routine. The write originates in the hub's
+    firmware; the valve is only the recipient. So on a controller-free account this switch
+    defends against nothing observed, and `hub_present` is what says so.
+    """
+    valve = make_valve(valve_model, [31, 11, 1])
+    alone = make_coordinator([valve])
+    switch = next(
+        e
+        for e in collect("switch", alone)
+        if e.unique_id.endswith("_warmup_auto_restore")
+    )
+    assert switch.extra_state_attributes["hub_present"] is False
+
+    with_hub = make_coordinator(
+        [valve], controllers=(make_controller(valve_model, device_id="hub-1"),)
+    )
+    switch = next(
+        e
+        for e in collect("switch", with_hub)
+        if e.unique_id.endswith("_warmup_auto_restore")
+    )
+    assert switch.extra_state_attributes["hub_present"] is True

@@ -348,6 +348,15 @@ class WarmupAutoRestoreSwitch(KohlerValveEntity, SwitchEntity):
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     # Off unless someone goes looking for it: this is a workaround for a device fault, not a
     # feature of the shower, and an owner who has never seen the mode revert does not need it.
+    #
+    # ⚠️ **Specifically a fix for a HUB fault.** The one identified cause of a spontaneous
+    # disable is the Anthem Plus controller's web UI, which writes `warmUpDisabled` to the
+    # valve as a fixed step of its signed-in routine (`docs/gcs/api.md` §3h) — the write
+    # originates in the hub's firmware and the valve is only the recipient. On a
+    # **controller-free account there is no known cause at all**, and every `warmUpDisabled`
+    # in the corpus traces to that routine or to a post-reboot restatement where the mode did
+    # not change. So on a valve-only system this switch defends against nothing observed, and
+    # enabling it only adds an unprompted writer to the valve.
     _attr_entity_registry_enabled_default = False
 
     def __init__(self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve) -> None:
@@ -365,10 +374,16 @@ class WarmupAutoRestoreSwitch(KohlerValveEntity, SwitchEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """What it would restore to, and how long it waits."""
+        """What it would restore to, how long it waits, and whether the fault can occur.
+
+        `hub_present` is the one that decides whether this switch is worth enabling: the only
+        identified cause of a spontaneous disable lives in the Anthem Plus controller's
+        firmware, so `false` means there is nothing here for it to defend against.
+        """
         return {
             "restores_to": self._valve.last_warmup_mode,
             "delay_seconds": WARMUP_AUTO_RESTORE_DELAY_SECONDS,
+            "hub_present": bool(self.coordinator.controllers),
         }
 
     async def async_turn_on(self, **kwargs: Any) -> None:

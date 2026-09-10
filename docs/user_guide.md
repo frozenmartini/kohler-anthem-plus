@@ -596,12 +596,22 @@ and disappears once you change it.
 
 Off by default. Turn it on if your warmup mode keeps turning itself off.
 
-On this installation, warmup kept reverting to **Off** with no visible cause. The cause is now
-identified and documented: **ordinary signed-in use of the Anthem Plus controller's local web
-UI silently writes the valve's warmup mode to disabled** — a PIN sign-in alone is enough —
-every time, as a fixed part of its login routine. It cannot be prevented from outside the
-hub's firmware, so putting the mode back is the fix that exists. Reproduced live six times in
-one day; the full evidence is in [`gcs/api.md`](gcs/api.md) §3h.
+⚠️ **This is a fix for a hub problem.** If your account has no Anthem Plus controller — valves
+only — the known cause below cannot occur, and this switch defends against nothing. Leave it
+off unless you actually observe the mode reverting.
+
+On a hub-attached installation, warmup kept reverting to **Off** with no visible cause. The
+cause is identified and documented: **ordinary signed-in use of the Anthem Plus controller's
+local web UI silently writes the valve's warmup mode to disabled** — a PIN sign-in alone is
+enough — every time, as a fixed part of its login routine. The write originates in the *hub's*
+firmware; the valve is only the recipient. It cannot be prevented from outside that firmware,
+so putting the mode back is the fix that exists. Reproduced live six times in one day; the full
+evidence is in [`gcs/api.md`](gcs/api.md) §3h.
+
+**No cause is known for a controller-free account.** Every `warmUpDisabled` in the corpus
+traces either to that hub routine or to a post-reboot restatement where the mode did not
+actually change. If you see one on a valve-only system, that is a new observation worth
+reporting — it would be the first.
 
 When enabled, this switch sets the mode back sixty seconds after a disable this integration
 did not cause — including one discovered only on reconnect, after it happened while the push
