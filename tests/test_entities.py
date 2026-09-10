@@ -405,3 +405,69 @@ def test_usage_probe_is_read_only():
     assert '"GET"' in source
     for verb in ('"POST"', '"PATCH"', '"PUT"', '"DELETE"'):
         assert verb not in source, verb
+
+
+# --------------------------------------------------------------------------- #
+# Monthly water usage, from Kohler's own history endpoint
+# --------------------------------------------------------------------------- #
+#: A real `gcs-usage` response, trimmed. Captured 2026-09-10 from the owner's Shower Left.
+_REAL_USAGE = {
+    "deviceId": "gcs-test0001",
+    "interval": "Month",
+    "gcsUsageDataDetailsList": [
+        {"intervalKey": "2025-08", "volume": 1319, "onDuration": 14676},
+        {"intervalKey": "2026-08", "volume": 1811, "onDuration": 24371},
+        {"intervalKey": "2026-09", "volume": 415, "onDuration": 5575},
+    ],
+}
+
+
+def _monthly_sensor(usage, *, units="Standard"):
+    from custom_components.kohler_anthem_plus.anthem_plus.models import get_valve_model
+
+    valve = make_valve(get_valve_model("K-28210"), [31, 11, 1])
+    valve.usage = usage
+    coordinator = make_coordinator([valve])
+    coordinator.water_units = units
+    return next(
+        e for e in collect("sensor", coordinator) if e.name == "Water Used This Month"
+    )
+
+
+def test_monthly_water_converts_litres_to_gallons():
+    """`volume` is litres on the wire whatever the account's unit — verified from the app.
+
+    1811 L is August 2026 on the owner's valve, and 478.4 gal is what the Konnect app shows
+    for it. Matching the app to the tenth is the whole point of using its exact constant.
+    """
+    sensor = _monthly_sensor(_REAL_USAGE)
+    assert sensor.extra_state_attributes["history"]["2026-08"] == 478.4
+
+
+def test_monthly_water_leaves_litres_alone_on_a_metric_account():
+    sensor = _monthly_sensor(_REAL_USAGE, units="Liters")
+    assert sensor.extra_state_attributes["history"]["2026-08"] == 1811.0
+
+
+def test_monthly_water_matches_the_month_rather_than_taking_the_last_entry():
+    """The series can end on a month with no data; position is not identity."""
+    from datetime import UTC, datetime
+
+    key = datetime.now(UTC).strftime("%Y-%m")
+    usage = {
+        "gcsUsageDataDetailsList": [
+            {"intervalKey": key, "volume": 100, "onDuration": 600},
+            {"intervalKey": "1999-01", "volume": 9999, "onDuration": 60},
+        ]
+    }
+    sensor = _monthly_sensor(usage)
+    assert sensor.extra_state_attributes["month"] == key
+    assert sensor.native_value == round(100 * 0.264172, 1)
+    assert sensor.extra_state_attributes["running_minutes"] == 10.0
+
+
+def test_monthly_water_is_none_without_a_reading():
+    """A failed read and a month with no entry must both be `unknown`, never a stale number."""
+    assert _monthly_sensor({}).native_value is None
+    assert _monthly_sensor({"gcsUsageDataDetailsList": []}).native_value is None
+    assert _monthly_sensor({"gcsUsageDataDetailsList": "nonsense"}).native_value is None

@@ -16,7 +16,7 @@ hex sensor, where a zero reads as data rather than as a broken entity.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -34,6 +34,7 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .anthem_plus.models import OutletStateSource, resolve_outlet_source
+from .anthem_plus.state import usage_series, usage_volume_gallons
 from .anthem_plus.valve_hex import encode_word
 from .const import DOMAIN, EXPOSE_CONTROLLER_WATER_STATE
 from .coordinator import Controller, KohlerAnthemPlusCoordinator, Valve
@@ -78,6 +79,7 @@ async def async_setup_entry(
             ValveStatusSensor(coordinator, valve),
             ValveSystemStateSensor(coordinator, valve),
             ValveTotalWaterSensor(coordinator, valve),
+            ValveMonthlyWaterSensor(coordinator, valve),
             ValveLastUpdateSensor(coordinator, valve),
             ValveFirmwareSensor(coordinator, valve),
             ValveRegisteredSensor(coordinator, valve),
@@ -318,6 +320,104 @@ class ValveTotalWaterSensor(KohlerValveEntity, SensorEntity):
             "total_volume": state.total_volume,
             "glitch_frames_ignored": state.total_flow_glitches,
         }
+
+
+class ValveMonthlyWaterSensor(KohlerValveEntity, SensorEntity):
+    """Water used in the current calendar month, from Kohler's own usage history.
+
+    **This is the number the Konnect app charts**, not a figure derived from the lifetime
+    counter. It comes from `gcs-usage`, whose per-month series the app reads and which no
+    other integration calls — its query parameters are PascalCase where the rest of the API
+    is camelCase, so it answers a generic 400 to anything else and had gone unsolved.
+
+    `volume` arrives in **litres** whatever the account's unit setting; the app converts with
+    0.264172 when `waterUnits` is `Standard`, and this follows that exactly so the value
+    matches the app rather than merely being close.
+
+    **Read once at setup, not polled.** A monthly total moves slowly and Kohler's own chart
+    is not live either, so this refreshes when Home Assistant restarts or the entry reloads.
+    `TOTAL` rather than `TOTAL_INCREASING`: the figure resets each month by design, and
+    telling Home Assistant otherwise would make every month boundary look like a meter swap.
+    """
+
+    _attr_name = "Water Used This Month"
+    _attr_icon = "mdi:calendar-month"
+    _attr_device_class = SensorDeviceClass.WATER
+    _attr_state_class = SensorStateClass.TOTAL
+
+    def __init__(self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve) -> None:
+        super().__init__(coordinator, valve)
+        self._attr_unique_id = f"{self._device_id}_water_this_month"
+
+    @property
+    def _metric(self) -> bool:
+        return self.coordinator.water_units == "Liters"
+
+    @property
+    def native_unit_of_measurement(self) -> str:
+        return UnitOfVolume.LITERS if self._metric else UnitOfVolume.GALLONS
+
+    @property
+    def _current(self) -> dict[str, Any] | None:
+        """This month's entry, matched on `intervalKey` rather than taken as the last one.
+
+        The series can end on a month the valve reported nothing for, and trusting position
+        would then publish a stale month's total as the current one.
+        """
+        key = datetime.now(UTC).strftime("%Y-%m")
+        for entry in usage_series(self._valve.usage):
+            if entry.get("intervalKey") == key:
+                return entry
+        return None
+
+    @property
+    def native_value(self) -> float | None:
+        entry = self._current
+        if entry is None:
+            return None
+        litres = entry.get("volume")
+        if not isinstance(litres, (int, float)):
+            return None
+        if self._metric:
+            return round(float(litres), 1)
+        return round(usage_volume_gallons(float(litres)), 1)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """The month this covers, how long the valve ran, and the series behind it.
+
+        `history` is every month Kohler returned, in the account's unit — enough to answer
+        "how does this month compare" without a second call, and the reason the whole series
+        is fetched rather than only the current month.
+        """
+        entries = usage_series(self._valve.usage)
+        if not entries:
+            return {}
+
+        def _volume(entry: dict[str, Any]) -> float | None:
+            litres = entry.get("volume")
+            if not isinstance(litres, (int, float)):
+                return None
+            value = (
+                float(litres) if self._metric else usage_volume_gallons(float(litres))
+            )
+            return round(value, 1)
+
+        attributes: dict[str, Any] = {
+            "history": {
+                str(entry.get("intervalKey")): _volume(entry)
+                for entry in entries
+                if entry.get("intervalKey")
+            },
+        }
+        current = self._current
+        if current is not None:
+            attributes["month"] = current.get("intervalKey")
+            duration = current.get("onDuration")
+            if isinstance(duration, (int, float)):
+                # Seconds on the wire; minutes is what a shower is measured in.
+                attributes["running_minutes"] = round(float(duration) / 60, 1)
+        return attributes
 
 
 class ValveDiagnosticSensor(KohlerValveEntity, SensorEntity):

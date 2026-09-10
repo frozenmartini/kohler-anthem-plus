@@ -336,7 +336,35 @@ Response — `AnthemWaterUsageModel`, from its Gson `@SerializedName` annotation
 Each series entry: `timestamp` (long), `volume` (double), `onDuration`,
 `averageBlendTemperature`, `numberOfTimesValveSwitchedOn`, `intervalKey`.
 
-**Not yet live-verified.** The date *format* is the one element the decompile did not pin;
+**Live-verified 2026-09-10.** `FromDate=2025-08-06&ToDate=2026-09-10&Interval=MONTH` returns
+the full series; `Interval=WEEK` and `Interval=YEAR` were both rejected with the generic 400
+on this account, so `MONTH` may be the only one a GCS valve supports. All three date formats
+tried (`yyyy-MM-dd`, ISO-8601 with `Z`, `MM-dd-yyyy`) were accepted and returned identical
+payloads, so the parser is lenient.
+
+**Units, from the app's own bytecode:**
+
+* **`volume` is LITRES**, whatever the account's `waterUnits`. The app multiplies by
+  `0.264172` only when `waterUnits == "Standard"`. This is the field that matters, and
+  getting it wrong is easy — summed over 14 months it reads 14,137, which *exceeds* the
+  lifetime `totalFlow` of 8,224 until the conversion is applied (3,735 gal, which fits).
+* **`onDuration` is SECONDS.** The app's own two consumers disagree on presentation — the
+  graph pre-divides by 60, the summary tiles divide by 3600 — but both treat the wire value
+  as seconds.
+* **`averageBlendTemperature` and `numberOfTimesValveSwitchedOn` have no call sites in the
+  app at all.** It never reads, converts or displays them. The observed temperatures (~78
+  against real setpoints of 104.9 °F) match no plausible unit, so treat both as unexplained
+  and do not surface them.
+* **The `avg*` rollups are per-DAY**, not per-period: `avgVolume` is the range total divided
+  by the inclusive day count (14137/401 = 35.254364…, exact). That makes
+  `avgAverageBlendTemperature: 2.55` a per-day average of a per-month temperature — an
+  artifact, not a measurement. The app displays them uncorrected.
+
+The one thing the app never does is relate this to `totalFlow`: both `totalFlow` and
+`totalVolume` are declared as strings on its state models with **no getters and no call
+sites**, so the app parses and ignores them.
+
+The old note said:
 `kohler_anthem_plus.probe_usage` tries `yyyy-MM-dd` first, then ISO-8601 with a `Z`, then
 `MM-dd-yyyy`, all three of which appear in the app's string pool.
 

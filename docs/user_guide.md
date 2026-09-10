@@ -184,6 +184,7 @@ An outlet whose type the valve has not reported falls back to its position: `Out
 
 | Entity | Type | What it does |
 |---|---|---|
+| `Water Used This Month` | sensor | This calendar month's usage, from **Kohler's own history** — the same figure the Konnect app charts. Carries every month it returned as a `history` attribute |
 | `Shower on` | switch | Turns the shower on or off. From cold it opens **the valve's own default outlets**; if outlets are already open it preserves them |
 | `Rainhead`, `Showerhead`, `Handshower`, `Tub Filler` | switch | One per outlet, named after the fixture the valve reports. See **Outlet names** below |
 | `Temperature` | number | Setpoint for that zone, in your account's unit. `Temperature 1` / `Temperature 2` on a two-zone valve |
@@ -1038,6 +1039,9 @@ affiliated with, authorised by, or endorsed by Kohler Co., and is not a supporte
 has a `gcs-usage` endpoint — it answers HTTP 400 to a bare call while every neighbouring
 guess answers 404, so the route is real — but nothing records what parameters it wants, and
 no integration has ever called it successfully.
+
+**Solved — this endpoint now backs the `Water Used This Month` sensor**, so the action is
+only needed if you want to see the raw responses. The contract below is what it found.
 
 **Update — the contract is now known.** The parameters are `FromDate`, `ToDate` and
 `Interval` (`WEEK`/`MONTH`/`YEAR`), in PascalCase, recovered from the Konnect app itself. A

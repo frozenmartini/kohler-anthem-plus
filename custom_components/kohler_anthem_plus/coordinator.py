@@ -23,7 +23,7 @@ import os
 import time
 import uuid
 from collections import Counter, deque
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -565,6 +565,10 @@ class Valve:
         # yet"; `{}` means the read was attempted and produced nothing usable, which is the
         # documented result on a controller-attached valve and is not an error.
         self.configuration: dict[str, Any] | None = None
+        #: The most recent `gcs-usage` response, or {} when the read failed. Refreshed on
+        #: the seed only — a monthly series does not change between reconnects, and this is
+        #: a diagnostic rather than something an automation waits on.
+        self.usage: dict[str, Any] = {}
         # The flow each zone's Flow number is currently showing, keyed by zone. Written by
         # that entity and read by the outlet switches, so toggling an outlet does not
         # silently reset a flow the user chose — see `async_set_zone_outlet`. Seeded with
@@ -894,6 +898,16 @@ class Valve:
                 # `{}` rather than leaving None, so a failed read is not retried on every
                 # reconnect for data that is static anyway.
                 self.configuration = {}
+
+            # The monthly usage series, read once beside the configuration. Thirteen months
+            # back covers a full year plus the current partial one, which is what a
+            # year-on-year comparison needs.
+            now = datetime.now(UTC)
+            self.usage = await self.client.async_get_usage(
+                self.gcs_device.device_id,
+                from_date=(now - timedelta(days=400)).date().isoformat(),
+                to_date=now.date().isoformat(),
+            )
 
         try:
             payload = await self.client.async_get_gcs_state(self.gcs_device.device_id)

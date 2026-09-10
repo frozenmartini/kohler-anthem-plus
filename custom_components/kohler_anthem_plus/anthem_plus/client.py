@@ -396,6 +396,35 @@ class KohlerClient:
             return {}
         return payload.get("setting") or {}
 
+    async def async_get_usage(
+        self, device_id: str, *, from_date: str, to_date: str, interval: str = "MONTH"
+    ) -> dict[str, Any]:
+        """Per-period water usage — the series behind the Konnect app's chart.
+
+        **`volume` comes back in litres**, whatever the account's unit setting. Verified from
+        the Konnect app, which multiplies it by 0.264172 (litres to US gallons) when the
+        customer's `waterUnits` is `Standard` and shows it raw otherwise. `LITRES_PER_...`
+        callers should use `usage_volume_gallons` rather than repeat the constant.
+
+        `interval` is `WEEK`, `MONTH` or `YEAR`, uppercase. The query parameters are
+        PascalCase — `FromDate`, `ToDate`, `Interval` — which is the whole reason this
+        endpoint went unsolved: every other endpoint in this API is camelCase, and a wrong
+        case is rejected with the same generic 400 as a bare call.
+
+        Returns `{}` rather than raising when the read fails: this feeds a diagnostic sensor,
+        and a setup that already works must not start failing over it.
+        """
+        path = (
+            f"{GCS_USAGE.format(device_id=device_id)}"
+            f"?FromDate={from_date}&ToDate={to_date}&Interval={interval}"
+        )
+        try:
+            payload = await self.async_request("GET", path)
+        except KohlerError as err:
+            _LOGGER.debug("Could not read gcs-usage: %s", err)
+            return {}
+        return payload if isinstance(payload, dict) else {}
+
     async def async_probe_usage(
         self, device_id: str, attempts: list[tuple[str, str]]
     ) -> list[dict[str, Any]]:

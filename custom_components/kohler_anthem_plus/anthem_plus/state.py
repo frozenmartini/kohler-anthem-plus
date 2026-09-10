@@ -232,6 +232,35 @@ class GcsPreset:
         return not self.is_empty and not self.is_experience
 
 
+#: Litres to US gallons. `gcs-usage` reports `volume` in litres regardless of the account's
+#: unit setting; the Konnect app multiplies by this exact constant when `waterUnits` is
+#: `Standard`. Verified from the app's own bytecode, so it matches what the chart shows to
+#: the last digit rather than being a rounder conversion of our own choosing.
+GALLONS_PER_LITRE = 0.264172
+
+
+def usage_volume_gallons(litres: float) -> float:
+    """One `gcs-usage` volume in US gallons."""
+    return litres * GALLONS_PER_LITRE
+
+
+def usage_series(payload: dict[str, object]) -> list[dict[str, object]]:
+    """The per-period entries from a `gcs-usage` response, oldest first.
+
+    Empty for a malformed or failed read, so a caller can treat "no data" and "the call did
+    not work" the same way — which is right for a diagnostic sensor.
+
+    **Only `volume`, `onDuration` and `timestamp` are trustworthy.** The app never reads
+    `averageBlendTemperature` or `numberOfTimesValveSwitchedOn` — they have no call sites in
+    its bytecode at all — and the observed temperature values (~78 against real setpoints of
+    104.9 °F) do not correspond to any plausible unit, so nothing here surfaces them.
+    """
+    entries = payload.get("gcsUsageDataDetailsList")
+    if not isinstance(entries, list):
+        return []
+    return [entry for entry in entries if isinstance(entry, dict)]
+
+
 @dataclass
 class GcsState:
     """Live state of one Anthem digital valve.
