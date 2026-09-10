@@ -30,7 +30,7 @@ from .coordinator import (
     entry_reload_signature,
 )
 from .const import DOMAIN, ISSUE_NOT_SET_UP, ISSUE_OLD_CAPTURE_FOLDER, OLD_CAPTURE_DIR
-from .repairs import inspect_old_capture_folder
+from .repairs import ASIDE_SUFFIX, inspect_old_capture_folder
 from .services import async_register_services, async_unregister_services
 
 _LOGGER = logging.getLogger(__name__)
@@ -140,6 +140,7 @@ async def _async_offer_old_capture_cleanup(hass: HomeAssistant) -> None:
         translation_key=ISSUE_OLD_CAPTURE_FOLDER,
         translation_placeholders={
             "path": f"/config/{OLD_CAPTURE_DIR}",
+            "aside": f"/config/{OLD_CAPTURE_DIR}{ASIDE_SUFFIX}",
             "count": str(count),
             "size_mb": f"{size / (1024 * 1024):.1f}",
         },

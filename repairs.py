@@ -13,15 +13,17 @@ The rules are all about not deleting what is not ours:
   symlink, whatever its name, nor a subdirectory.
 - A symlinked root is never traversed: someone pointed the folder elsewhere on purpose.
 - Nothing foreign is ever deleted. The folder is first *renamed* aside (one atomic step,
-  to a fixed sibling name), inspected again under that name where nothing else can add
-  to it, and only then removed as a whole. Anything foreign puts it back untouched. What
+  to a fixed sibling name), inspected again under that name, and only then emptied —
+  file by file, each unlink guarded by the same name check, so even something that
+  appears after the inspection is left alone and makes the final `rmdir` fail instead.
+  Anything foreign puts the folder back untouched. What
   is *not* promised is that our own files survive a failure part-way: they are the
   leftover being deleted, and losing half of them loses nothing anyone wanted.
 - Every outcome the user is shown is true. A failure that leaves the folder where it was
   says so; a failure that leaves it under the aside name says *that*, with the name. A
   folder that cannot be read is reported as present-and-foreign, not as absent, so the
   card is not cleared over a leftover that is still there — and a folder stranded under
-  the aside name by an interrupted run counts as present too.
+  the aside name by an interrupted run counts as present too, and the card says where.
 
 **Transitional — remove later.** This module, `_async_offer_old_capture_cleanup` in
 `__init__.py`, `ISSUE_OLD_CAPTURE_FOLDER` / `OLD_CAPTURE_DIR` in `const.py` and the
@@ -43,7 +45,6 @@ from __future__ import annotations
 import logging
 import os
 import re
-import shutil
 
 import voluptuous as vol
 from homeassistant import data_entry_flow
@@ -57,9 +58,10 @@ _LOGGER = logging.getLogger(__name__)
 
 # Exactly the names the retired capture wrote: `cutoff_20260910T223325Z_72_6f4e0990.jsonl`.
 # `[0-9]`, not `\d`: Python's `\d` also matches non-ASCII digits, and this decides deletion.
-_OWN_FILE = re.compile(r"^(?:mqtt_raw|cutoff|warmup)_[0-9]{8}T[0-9]{6}Z_[0-9]+_[0-9a-f]{8}\.jsonl$")
+# `fullmatch`, not `$`: `$` also matches before a trailing newline, which a filename may carry.
+_OWN_FILE = re.compile(r"(?:mqtt_raw|cutoff|warmup)_[0-9]{8}T[0-9]{6}Z_[0-9]+_[0-9a-f]{8}\.jsonl")
 _OWN_READMES = frozenset({"README.txt", "README-cutoff.txt", "README-warmup.txt"})
-_ASIDE_SUFFIX = ".deleting"
+ASIDE_SUFFIX = ".deleting"
 
 # `delete_old_capture_folder` outcomes; the failures double as abort reasons in strings.json.
 GONE = "gone"
@@ -69,7 +71,7 @@ STRANDED = "stranded"  # folder (or what is left of it) sits under the aside nam
 
 
 def _is_ours(name: str) -> bool:
-    return name in _OWN_READMES or _OWN_FILE.match(name) is not None
+    return name in _OWN_READMES or _OWN_FILE.fullmatch(name) is not None
 
 
 def _inspect_dir(path: str) -> tuple[int, int, bool] | None:
@@ -107,7 +109,7 @@ def inspect_old_capture_folder(path: str) -> tuple[int, int, bool] | None:
     """
     found = _inspect_dir(path)
     if found is None:
-        found = _inspect_dir(path + _ASIDE_SUFFIX)
+        found = _inspect_dir(path + ASIDE_SUFFIX)
     return found
 
 
@@ -120,10 +122,18 @@ def _put_back(aside: str, path: str) -> bool:
     return True
 
 
-def _remove_tree(aside: str) -> bool:
-    """Remove a folder already verified to hold only our files. False on any error."""
+def _remove_ours(aside: str) -> bool:
+    """Remove our files from a folder already inspected, then the folder. False on any error.
+
+    Each unlink is guarded by name, so something foreign that appears after the inspection
+    is never removed; it makes the final `rmdir` fail instead, and the caller reports that.
+    """
     try:
-        shutil.rmtree(aside)
+        for name in os.listdir(aside):
+            full = os.path.join(aside, name)
+            if _is_ours(name) and not os.path.islink(full) and not os.path.isdir(full):
+                os.remove(full)
+        os.rmdir(aside)
     except OSError as err:
         _LOGGER.warning("Deleting %s failed part-way: %s", aside, err)
         return False
@@ -133,20 +143,21 @@ def _remove_tree(aside: str) -> bool:
 def delete_old_capture_folder(path: str) -> str:
     """Remove the folder if it holds only our files. GONE, NOT_OURS, FAILED or STRANDED.
 
-    Renamed aside first — one atomic step, after which nothing else knows where it is —
-    then inspected again and removed whole. Anything foreign puts it back (NOT_OURS). A
+    Renamed aside first — one atomic step — then inspected again and emptied by name. Anything foreign puts it back (NOT_OURS). A
     failure before anything was removed leaves it where it was (FAILED); a failure after
     the rename that cannot be undone leaves it under the aside name (STRANDED), and the
     abort text names that. Blocking: executor only.
     """
-    if os.path.islink(path):
-        return NOT_OURS
-    aside = path + _ASIDE_SUFFIX
+    aside = path + ASIDE_SUFFIX
     if os.path.lexists(aside):
         # Left by an interrupted run. Ours → clear it first; anything else → hands off.
+        # Before the symlink check so a stale aside is cleared even if the original path
+        # has since become a link.
         stale = _inspect_dir(aside)
-        if stale is not None and (stale[2] or not _remove_tree(aside)):
+        if stale is not None and (stale[2] or not _remove_ours(aside)):
             return STRANDED
+    if os.path.islink(path):
+        return NOT_OURS
     try:
         os.rename(path, aside)
     except FileNotFoundError:
@@ -159,7 +170,7 @@ def delete_old_capture_folder(path: str) -> str:
         return GONE
     if found[2]:
         return NOT_OURS if _put_back(aside, path) else STRANDED
-    if _remove_tree(aside):
+    if _remove_ours(aside):
         return GONE
     return FAILED if _put_back(aside, path) else STRANDED
 
@@ -184,7 +195,7 @@ class OldCaptureFolderFlow(RepairsFlow):
                 # Ignore it once they have looked.
                 return self.async_abort(
                     reason=outcome,
-                    description_placeholders={"path": shown, "aside": shown + _ASIDE_SUFFIX},
+                    description_placeholders={"path": shown, "aside": shown + ASIDE_SUFFIX},
                 )
             ir.async_delete_issue(self.hass, DOMAIN, ISSUE_OLD_CAPTURE_FOLDER)
             return self.async_create_entry(title="", data={})
@@ -196,6 +207,7 @@ class OldCaptureFolderFlow(RepairsFlow):
             data_schema=vol.Schema({}),
             description_placeholders={
                 "path": shown,
+                "aside": shown + ASIDE_SUFFIX,
                 "count": str(count),
                 "size_mb": f"{size / (1024 * 1024):.1f}",
             },
