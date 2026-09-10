@@ -266,6 +266,34 @@ class KohlerClient:
             except json.JSONDecodeError:
                 payload = text
 
+        # ------------------------------------------------------------------ #
+        # API PROBE LOG — diagnostic, OFF BY DEFAULT
+        # ------------------------------------------------------------------ #
+        # Every REST call in this integration funnels through this method, so one line
+        # here captures the whole API surface: which endpoints are reached, what they
+        # return, and — the part no other diagnostic can answer — **fields Kohler sends
+        # that this integration does not read**. `docs/gcs/api.md` was written from
+        # exactly this kind of observation, and the questions it still leaves open (is
+        # there an install date? does a GCS-only valve populate `gcs-configuration`?) are
+        # answerable only by looking at a real response.
+        #
+        # Turn it on without a restart, from Developer Tools → Actions:
+        #
+        #     action: logger.set_level
+        #     data:
+        #       custom_components.kohler_anthem_plus.anthem_plus.client: debug
+        #
+        # Set it back to `info` to stop. The MQTT half of the same picture is
+        # `raw_log.py`; between them every byte the integration receives is capturable.
+        #
+        # **Credentials are redacted, not logged.** `mobile/settings` returns the IoT Hub
+        # SAS password, which is exactly the sort of thing a user pastes into an issue
+        # without looking. `_redact_payload` drops it before this line sees it.
+        if _LOGGER.isEnabledFor(logging.DEBUG):
+            _LOGGER.debug(
+                "API %s %s -> %s %s", method, path, status, _redact_payload(payload)
+            )
+
         self._raise_for_payload(status, path, payload)
         return payload
 
@@ -415,6 +443,46 @@ class KohlerClient:
         return await self.async_request(
             "GET", HUB_CONFIGURATION.format(device_id=device_id)
         )
+
+
+# Keys whose VALUES are credentials or identity, redacted before anything is logged. The
+# match is on the lowercased key containing one of these, so `sasToken`, `SharedAccessKey`
+# and `refresh_token` are all caught without listing every spelling Kohler uses.
+_SECRET_KEY_PARTS = (
+    "password",
+    "token",
+    "secret",
+    "sas",
+    "key",
+    "authorization",
+    "credential",
+)
+
+
+def _redact_payload(value: Any, _depth: int = 0) -> Any:
+    """Copy a payload with credential values replaced, for the API probe log.
+
+    Structure is preserved exactly — every key stays, only secret *values* are swapped —
+    because the whole point of the log is seeing which fields exist. A redacted field still
+    tells you it was there.
+
+    Depth-limited rather than trusting the payload to be shallow: this runs on whatever
+    Kohler returns, and a cycle or a pathological nesting must not take the event loop down
+    with it.
+    """
+    if _depth > 12:
+        return "<too deep>"
+    if isinstance(value, dict):
+        redacted: dict[str, Any] = {}
+        for key, item in value.items():
+            if any(part in str(key).lower() for part in _SECRET_KEY_PARTS):
+                redacted[key] = "**REDACTED**"
+            else:
+                redacted[key] = _redact_payload(item, _depth + 1)
+        return redacted
+    if isinstance(value, list):
+        return [_redact_payload(item, _depth + 1) for item in value]
+    return value
 
 
 def _as_list(value: Any) -> list[Any]:

@@ -651,6 +651,37 @@ detected, what each device is reporting, configured limits — with credentials,
 identity, and device serial numbers redacted. If you're on hardware other than a K-28212,
 attaching that file to an issue is the single most useful thing you can send.
 
+#### Seeing the raw API and MQTT traffic
+
+The diagnostics report describes what the integration *understood*. When the question is
+what Kohler actually **sent** — including fields this integration does not read — two debug
+loggers capture the two halves of the traffic. Both are off by default, neither survives a
+restart, and both are switched on from **Developer Tools → Actions**, `logger.set_level`,
+in YAML mode:
+
+```yaml
+action: logger.set_level
+data:
+  # Every REST call: endpoint, status, and the full response body.
+  custom_components.kohler_anthem_plus.anthem_plus.client: debug
+  # Every MQTT payload, exactly as it arrived and before any decoding.
+  custom_components.kohler_anthem_plus.anthem_plus.raw_log: debug
+```
+
+Set either back to `info` to stop. Read the results in **Settings → System → Logs**, or in
+`home-assistant.log`.
+
+Between them these cover every byte the integration receives, which is how the endpoint
+notes in `docs/gcs/api.md` were written in the first place. Use them to answer questions the
+diagnostics report cannot — whether a field exists at all, what an undocumented value looks
+like on your hardware, or what an endpoint returns on a system unlike the reference install.
+
+**Credentials are redacted** from the API log before it is written: the mobile-settings call
+returns a short-lived IoT Hub password, and any key whose name looks like a password, token,
+key or secret has its value replaced. Everything else is logged in full — including device
+ids and serial numbers, which the *diagnostics report* redacts but a raw log does not. Skim
+a log before attaching it to an issue.
+
 ## Automation examples
 
 **Notify when the shower is up to temperature**
