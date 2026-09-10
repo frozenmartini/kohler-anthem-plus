@@ -234,11 +234,13 @@ def _configuration_report(valve: Valve) -> dict[str, Any]:
         "other_keys": sorted(
             key for key in configuration if key not in structural and key != "about"
         ),
-        "about_keys": sorted(
-            (configuration.get("about") or {})
-            if isinstance(configuration.get("about"), dict)
-            else {}
-        ),
+        # Read through `Valve.about`, which knows both nestings. Reading
+        # `configuration["about"]` directly reported `[]` on hardware that populates the
+        # block in full, because this account nests it under the record's own
+        # `configuration` key — the same depth bug that made `Firmware` report an artwork
+        # version. Key names only; the values are versions and reach the report through
+        # `version_fields`.
+        "about_keys": sorted(valve.about),
         # Timestamps, by value rather than by name. These are the record's own dates —
         # when Kohler's cloud created the device row and when it last changed — and unlike
         # the structural blocks they carry no installation detail, so there is nothing to

@@ -601,31 +601,48 @@ class Valve:
 
     @property
     def firmware(self) -> str | None:
-        """The valve's own firmware version, from ``gcs-configuration``.
+        """The **interface** firmware — the touchscreen's own version.
 
-        **Kohler does not put this in one place.** The reference install reports an ``about``
-        block with a ``firmware`` key; the owner's two K-28210 valves have no ``about`` key at
-        all (confirmed against diagnostics captured 2026-09-10 — ``about_keys: []``), which is
-        why this read ``unknown`` there until 0.7.2. So each known shape is tried in turn and
-        the first that yields a string wins:
+        Kept as `firmware` because it is what the device registry shows and what every
+        earlier release meant by the word. The valve and gateway have their own versions and
+        their own properties; see :meth:`component_firmware`.
 
-        1. ``about.firmware`` — the reference install's shape.
-        2. ``otaReportedProperties`` — the Azure IoT device twin's reported properties, where
-           an OTA-managed device publishes what it is actually running. Checked before
-           ``firmwareUpdate`` because reported-state beats desired-state.
-        3. ``firmwareUpdate`` — the update record. Its *current* version is the valve's, but
-           a ``target``/``desired`` field here is what the cloud wants it to become, so only
-           current-shaped keys are read.
-        4. ``version`` — a bare top-level string, when it is one.
+        ⚠️ **Two bugs lived here until 0.11.0, and both reported a wrong number rather than
+        nothing.** `about` is nested inside the record's own `configuration` block, not at
+        the top level, so `configuration.get("about")` was always `None` and every report
+        said `about_keys: []` on hardware that populates it in full. And `about.firmware` is
+        a *mapping* (`version` / `latestVersion`), not a string, so it would not have parsed
+        even at the right depth. Together they meant this fell through to the OTA blocks,
+        where a valve whose `otaReportedProperties` describes **Assets** — the artwork
+        bundle — reported the artwork version as its firmware: `2.00` where the Konnect app
+        showed 2.2, on one of the owner's two otherwise identical valves.
 
-        None where no shape matches, which is honest: a wrong version in a bug report is
-        worse than a blank one. `00.74` on the reference install.
+        Order, first hit wins:
+
+        1. ``configuration.about.uI2.firmware`` — the interface, where the record nests it.
+        2. ``about.firmware`` at the top level, as a string — the reference install's shape,
+           kept so an install that reads correctly today keeps reading correctly.
+        3. ``otaReportedProperties`` / ``firmwareUpdate``, **Application only**. A block
+           describing Assets is skipped rather than reported: it answers a different
+           question, and that is exactly the confusion above.
+        4. A bare top-level ``version`` string.
+
+        None where no shape matches. A blank is honest; a number that silently means
+        something else is not.
         """
-        configuration = self.configuration or {}
+        about = self.about
+        value = _firmware_string((about.get("uI2") or {}).get("firmware"))
+        if value is not None:
+            return value
 
-        about = configuration.get("about")
-        if isinstance(about, dict):
-            value = _firmware_string(about.get("firmware"))
+        # The reference install's shape: `about.firmware` as a plain string at top level.
+        # Only accepted as a string here — where it is a mapping it is the *gateway's*
+        # version (confirmed 2026-09-10: `about.firmware.version` equals
+        # `about.gateway.firmware`), which `component_firmware("gateway")` reports instead.
+        configuration = self.configuration or {}
+        top_about = configuration.get("about")
+        if isinstance(top_about, dict):
+            value = _firmware_string(top_about.get("firmware"))
             if value is not None:
                 return value
 
@@ -633,10 +650,7 @@ class Valve:
             configuration.get(key)
             for key in ("otaReportedProperties", "firmwareUpdate")
         ]
-
-        # The application build first, wherever it appears. Without this pass a valve whose
-        # `otaReportedProperties` describes Assets (2.00) while its application is 2.20 would
-        # report the artwork version — which is what the owner's valves did.
+        # Application first, wherever it appears.
         for block in blocks:
             if (
                 isinstance(block, dict)
@@ -646,12 +660,62 @@ class Valve:
                 if value is not None:
                     return value
 
+        # Then any block that does not declare itself something else. **An untyped block is
+        # not an Assets block** — the reference install's `otaReportedProperties` carries no
+        # `firmwareType` at all, and skipping it would trade one wrong answer for a blank on
+        # hardware that reads correctly today. Only a block explicitly naming a non-
+        # Application type is refused, which is the case that caused the artwork version to
+        # pass for an interface version.
         for block in blocks:
+            declared = block.get("firmwareType") if isinstance(block, dict) else None
+            if declared is not None and declared != _FIRMWARE_PREFERRED_TYPE:
+                continue
             value = _firmware_from_block(block)
             if value is not None:
                 return value
 
         return _firmware_string(configuration.get("version"))
+
+    @property
+    def about(self) -> dict[str, Any]:
+        """The record's ``about`` block, wherever this account nests it.
+
+        Two shapes are known: nested under the record's own ``configuration`` key (both of
+        the owner's K-28210 valves, 2026-09-10) and at the top level (the reference
+        install). Checked nested-first because that is the shape that carries the full
+        per-component breakdown; a top-level ``about`` on the reference install holds only
+        ``firmware``.
+        """
+        configuration = self.configuration or {}
+        inner = configuration.get("configuration")
+        if isinstance(inner, dict):
+            about = inner.get("about")
+            if isinstance(about, dict):
+                return about
+        about = configuration.get("about")
+        return about if isinstance(about, dict) else {}
+
+    def component_firmware(self, component: str) -> str | None:
+        """The firmware of one named part of the system, or None.
+
+        The Konnect app shows **three different firmwares** for one shower — the touchscreen
+        interface, the valves, and the gateway — and they are genuinely different numbers
+        (2.2, 10 and 00.74 on the owner's system). Collapsing them into a single `Firmware`
+        entity is what let an artwork version pass for an interface version for three
+        releases.
+
+        ``component`` is a key of the ``about`` block: ``uI2``, ``primaryValve``,
+        ``secondaryValve1``, ``gateway``. Each holds ``firmware`` plus, sometimes,
+        ``assetsFirmware`` and ``bleVersion``; only the running firmware is read here.
+
+        ⚠️ **Two valves on one account can differ**, and the app does not show it: the
+        owner's read `10` and `11` on 2026-09-10 while Konnect displayed 10 for both. That is
+        the case this method exists to make visible.
+        """
+        block = self.about.get(component)
+        if not isinstance(block, dict):
+            return None
+        return _firmware_string(block.get("firmware"))
 
     # ------------------------------------------------------------------ #
     # What the moved methods reach for on the coordinator

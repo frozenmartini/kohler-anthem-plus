@@ -177,6 +177,28 @@ def test_zone_active_is_named_shower_active(valve_model):
 # --------------------------------------------------------------------------- #
 # Firmware: Kohler reports it in more than one shape
 # --------------------------------------------------------------------------- #
+def _firmware_holder(configuration):
+    """A minimal object carrying the REAL firmware properties, not the test double's.
+
+    `make_valve` returns a `SimpleNamespace`, which cannot carry a property — it holds a
+    static `firmware` string instead. Asserting against that would test the fake and pass no
+    matter what the integration does, which is how an early draft of this test "passed" one
+    case by coincidence. A `SimpleNamespace` also cannot satisfy `firmware`'s reads of
+    `about`, so the properties are inherited onto a purpose-built class here.
+    """
+    from custom_components.kohler_anthem_plus.coordinator import Valve
+
+    class Holder:
+        about = Valve.about
+        firmware = Valve.firmware
+        component_firmware = Valve.component_firmware
+
+        def __init__(self, config):
+            self.configuration = config
+
+    return Holder(configuration)
+
+
 @pytest.mark.parametrize(
     ("configuration", "expected"),
     [
@@ -205,10 +227,8 @@ def test_firmware_reads_every_known_shape(configuration, expected):
     no matter what the integration does, which is how the first draft of this test "passed"
     one case by coincidence. So the real property is bound to a minimal object here.
     """
-    from custom_components.kohler_anthem_plus.coordinator import Valve
 
-    holder = SimpleNamespace(configuration=configuration)
-    assert Valve.firmware.fget(holder) == expected
+    assert _firmware_holder(configuration).firmware == expected
 
 
 # --------------------------------------------------------------------------- #
@@ -1086,3 +1106,120 @@ def test_version_scan_reads_the_real_block_shapes():
     found = _version_fields(right)
     assert found["otaReportedProperties.updatedVersion"] == "2.00"
     assert all(value in ("2.00", None) for value in found.values())
+
+
+# --------------------------------------------------------------------------- #
+# Three firmwares, not one (0.11.0)
+# --------------------------------------------------------------------------- #
+#
+# The `about` block as both of the owner's K-28210 valves report it, captured 2026-09-10.
+# Nested inside the record's own `configuration` key — the depth bug that made every earlier
+# report say `about_keys: []` on hardware that populates it in full.
+def _real_about(valve_firmware: str) -> dict:
+    return {
+        "configuration": {
+            "about": {
+                "firmware": {"version": "00.74", "latestVersion": "00.74"},
+                "gateway": {"firmware": "00.74", "assetsFirmware": None},
+                "primaryValve": {"firmware": valve_firmware, "assetsFirmware": None},
+                "secondaryValve1": {"firmware": "0", "assetsFirmware": None},
+                "uI2": {"firmware": "2.2", "assetsFirmware": "2.0"},
+                "ui": {"firmware": "0.0", "assetsFirmware": "0.0"},
+                "controllerFirmwareVersion": None,
+            }
+        },
+        # The OTA blocks that sat beside it and were being read instead.
+        "otaReportedProperties": {
+            "firmwareType": "Assets",
+            "updatedVersion": "2.00",
+        },
+        "firmwareUpdate": {"firmwareType": "Assets", "version": "2.00"},
+    }
+
+
+def test_interface_firmware_matches_the_app_not_the_artwork():
+    """The bug this release exists for.
+
+    Shower Right's `otaReportedProperties` describes **Assets** — the artwork bundle — and
+    carries no Application block anywhere, so `Firmware` reported `2.00` where the Konnect
+    app showed 2.2. The interface version was in `about.uI2.firmware` the whole time, one
+    nesting level deeper than the code looked.
+    """
+    holder = _firmware_holder(_real_about("11"))
+    assert holder.firmware == "2.2"
+    assert holder.firmware != "2.00", "the Assets version is not the interface version"
+
+
+def test_each_component_reports_its_own_firmware():
+    """Three different numbers for one shower, which is why there are three entities."""
+    holder = _firmware_holder(_real_about("10"))
+    assert holder.component_firmware("uI2") == "2.2"
+    assert holder.component_firmware("primaryValve") == "10"
+    assert holder.component_firmware("gateway") == "00.74"
+
+
+def test_two_valves_can_be_on_different_firmware():
+    """The app shows 10 for both; the record says 10 and 11.
+
+    Two showers that should be identical are not, and this is the only surface that says so.
+    """
+    left = _firmware_holder(_real_about("10"))
+    right = _firmware_holder(_real_about("11"))
+    assert left.component_firmware("primaryValve") == "10"
+    assert right.component_firmware("primaryValve") == "11"
+    # Everything else matches, which is what makes the valve difference meaningful.
+    for component in ("uI2", "gateway"):
+        assert left.component_firmware(component) == right.component_firmware(component)
+
+
+def test_an_assets_only_record_reports_no_firmware():
+    """With no `about` and only Assets blocks, `unknown` is the honest answer.
+
+    A blank is better than a confidently wrong version in a bug report — and reporting the
+    artwork version here is exactly what this release fixes.
+    """
+    holder = _firmware_holder(
+        {
+            "otaReportedProperties": {
+                "firmwareType": "Assets",
+                "updatedVersion": "2.00",
+            },
+            "firmwareUpdate": {"firmwareType": "Assets", "version": "2.00"},
+        }
+    )
+    assert holder.firmware is None
+
+
+def test_an_untyped_ota_block_is_still_read():
+    """An untyped block is not an Assets block.
+
+    The reference install's `otaReportedProperties` carries no `firmwareType` at all.
+    Refusing it would trade one wrong answer for a blank on hardware that reads correctly
+    today, so only a block explicitly naming a non-Application type is skipped.
+    """
+    holder = _firmware_holder(
+        {"otaReportedProperties": {"currentFirmwareVersion": "01.02"}}
+    )
+    assert holder.firmware == "01.02"
+
+
+def test_a_top_level_about_still_works():
+    """The reference install's shape must keep reading as it always has."""
+    assert _firmware_holder({"about": {"firmware": "00.74"}}).firmware == "00.74"
+
+
+def test_component_firmware_is_none_for_an_absent_part():
+    holder = _firmware_holder(_real_about("10"))
+    assert holder.component_firmware("nosuchpart") is None
+    assert _firmware_holder({}).component_firmware("gateway") is None
+
+
+def test_firmware_entities_keep_their_ids_and_do_not_collide(valve_model):
+    """The interface entity keeps `_firmware`, so history and automations survive."""
+    coordinator = make_coordinator([make_valve(valve_model, [31, 11, 1])])
+    ids = [e.unique_id for e in collect("sensor", coordinator)]
+    assert len(ids) == len(set(ids)), "duplicate unique ids"
+    firmware_ids = sorted(i for i in ids if "firmware" in i)
+    assert any(i.endswith("_firmware") for i in firmware_ids), firmware_ids
+    assert any(i.endswith("_firmware_valve") for i in firmware_ids), firmware_ids
+    assert any(i.endswith("_firmware_gateway") for i in firmware_ids), firmware_ids

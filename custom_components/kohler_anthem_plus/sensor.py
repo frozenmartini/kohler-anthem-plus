@@ -82,12 +82,32 @@ async def async_setup_entry(
             ValveMonthlyWaterSensor(coordinator, valve),
             ValveLastUpdateSensor(coordinator, valve),
             ValveFirmwareSensor(coordinator, valve),
+            # The other two firmwares the Konnect app shows. Separate entities rather than
+            # attributes: they update independently, and a valve that differs from its
+            # sibling is the kind of thing worth being able to graph and alert on.
+            ValveComponentFirmwareSensor(
+                coordinator, valve, "primaryValve", "Valve Firmware", slug="valve"
+            ),
+            ValveComponentFirmwareSensor(
+                coordinator, valve, "gateway", "Gateway Firmware", slug="gateway"
+            ),
             ValveRegisteredSensor(coordinator, valve),
             ValveHexSensor(coordinator, valve, 1),
             OutletMaxRunTimeSensor(coordinator, valve, 1),
         ]
         if valve.model.uses_valve2:
             entities.append(ValveHexSensor(coordinator, valve, 2))
+            # Only where a second valve exists: `about.secondaryValve1.firmware` reads `0`
+            # on a single-valve system, which is a placeholder rather than a version.
+            entities.append(
+                ValveComponentFirmwareSensor(
+                    coordinator,
+                    valve,
+                    "secondaryValve1",
+                    "Second Valve Firmware",
+                    slug="valve2",
+                )
+            )
 
     # Controller-only accounts get the zone temperature from SHOWER_VALVE_STS. Not created
     # where a valve exists: the valve reports its own setpoint per zone, and the controller
@@ -464,26 +484,25 @@ class ValveLastUpdateSensor(ValveDiagnosticSensor):
 
 
 class ValveFirmwareSensor(ValveDiagnosticSensor):
-    """The valve's own firmware version, from ``gcs-configuration``.
+    """The **interface** firmware — the touchscreen's own version.
 
-    Read once at the first seed — installation-time data that cannot change while Home
-    Assistant runs, so a reconnect does not spend a call on it. Diagnostic and disabled by
-    default, like everything else here: it matters when comparing behaviour across
-    firmwares in a bug report, not day to day.
+    One of three, and the reason there are now three: the Konnect app shows an interface
+    version, a valve version and a gateway version for a single shower, and they are
+    genuinely different numbers (2.2, 10 and 00.74 on the reference hardware). Until 0.11.0
+    this was a lone `Firmware` entity reporting whichever version it found first, which on
+    one valve was the **artwork bundle** version — `2.00` where the app showed 2.2.
 
-    Kohler does not report this in one place: the reference install has an `about.firmware`,
-    while the owner's K-28210 valves have no `about` block at all. `Valve.firmware` tries each
-    known shape in turn — see its docstring for the order and for why a *desired* version is
-    never reported as the running one.
+    Keeps the `_firmware` unique id it has always had, so the entity, its history and any
+    automation referring to it survive the split. Its *name* changes from `Firmware` to
+    `Interface Firmware`, which is what it always meant.
 
-    Still reads `unknown` where none of those shapes is present, or where the read failed.
-    That is deliberate: a blank is better than a confidently wrong version in a bug report.
-    A report from such an install now carries the raw `version_blocks`, which is what a fix
-    needs.
+    Reads `unknown` where the record carries no interface version, which is honest: a blank
+    is better than a confidently wrong version in a bug report, and a report from such an
+    install carries `version_fields`, which is what a fix needs.
     """
 
-    _attr_name = "Firmware"
-    _attr_icon = "mdi:chip"
+    _attr_name = "Interface Firmware"
+    _attr_icon = "mdi:monitor"
 
     def __init__(self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve) -> None:
         super().__init__(coordinator, valve)
@@ -492,6 +511,40 @@ class ValveFirmwareSensor(ValveDiagnosticSensor):
     @property
     def native_value(self) -> str | None:
         return self._valve.firmware
+
+
+class ValveComponentFirmwareSensor(ValveDiagnosticSensor):
+    """The firmware of one named part of the system — the valve or the gateway.
+
+    ⚠️ **Two valves on one account can be on different firmware, and the app hides it.** The
+    reference system reads `10` on one valve and `11` on the other while Konnect shows 10 for
+    both. Two showers that should be identical are not, and nothing else surfaces that.
+
+    The gateway version is per-account rather than per-valve — both valves report the same
+    `00.74` — but it is published on each valve's device anyway, because that is where a
+    reader looking at one shower will look for it, and a single shared entity would have no
+    obvious device to live on.
+    """
+
+    _attr_icon = "mdi:chip"
+
+    def __init__(
+        self,
+        coordinator: KohlerAnthemPlusCoordinator,
+        valve: Valve,
+        component: str,
+        name: str,
+        *,
+        slug: str,
+    ) -> None:
+        super().__init__(coordinator, valve)
+        self._component = component
+        self._attr_name = name
+        self._attr_unique_id = f"{self._device_id}_firmware_{slug}"
+
+    @property
+    def native_value(self) -> str | None:
+        return self._valve.component_firmware(self._component)
 
 
 class ValveRegisteredSensor(ValveDiagnosticSensor):

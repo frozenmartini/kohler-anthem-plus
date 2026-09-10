@@ -256,7 +256,10 @@ the valve's own byte is authoritative, including a change made at the panel mid-
 | `Rainhead Max Run Time` | valve | The valve's configured run-time ceiling, in seconds — named after outlet 1's fixture. **One sensor, not one per outlet**: every outlet observed reports the same figure, and the valve times the limit per zone rather than per outlet. Enabled by default, unlike the rest of this table |
 | `Zone N Active` | valve | Whether that zone is currently running water |
 | `Preset Active` | valve | Whether a stored preset is driving the valve |
-| `Firmware` | valve | The valve's own firmware version. Reads `unknown` where the valve reports no `about` block — including every controller-free account observed so far |
+| `Interface Firmware` | valve | The touchscreen's own version — what the Konnect app calls the interface firmware. Reads `unknown` where the record carries no interface version |
+| `Valve Firmware` | valve | The valve's own version. **Two valves on one account can differ** — the reference system reads 10 and 11 while the app shows 10 for both |
+| `Second Valve Firmware` | valve | The second valve's version, on two-valve systems only |
+| `Gateway Firmware` | valve | The gateway's version. Per-account rather than per-valve, but published on each valve's device, which is where a reader looking at one shower will look for it |
 | `Registered` | valve | When Kohler's cloud created this device's record. **A registration date, not an installation date** — a valve replaced under warranty reads as newer than the plumbing |
 | `Warmup Auto-Restore` | valve | Switch; puts warmup back when something silently disables it |
 
