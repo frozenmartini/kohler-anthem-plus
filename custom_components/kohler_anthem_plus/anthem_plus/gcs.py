@@ -416,4 +416,3 @@ class GcsDevice:
             "warmUp": mode,
         }
         return await self._client.async_request("POST", GCS_WARMUP, json_body=payload)
-

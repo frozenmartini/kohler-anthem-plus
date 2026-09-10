@@ -50,7 +50,9 @@ REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=30)
 class KohlerError(Exception):
     """A Kohler API call failed."""
 
-    def __init__(self, message: str, payload: Any = None, status: int | None = None) -> None:
+    def __init__(
+        self, message: str, payload: Any = None, status: int | None = None
+    ) -> None:
         super().__init__(message)
         self.payload = payload
         #: HTTP status when this came from a response, else None. Lets a caller tell apart
@@ -430,7 +432,9 @@ class KohlerClient:
 
     async def async_get_hub_favorites(self, device_id: str) -> dict[str, Any]:
         """The HUB's saved favourites — the unit of control for this device."""
-        return await self.async_request("GET", HUB_FAVORITES.format(device_id=device_id))
+        return await self.async_request(
+            "GET", HUB_FAVORITES.format(device_id=device_id)
+        )
 
     async def async_get_hub_experiences(self, device_id: str) -> dict[str, Any]:
         """The HUB's firmware experience programs, grouped by category."""

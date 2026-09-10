@@ -117,15 +117,70 @@ TEMPERATURE_STEP_C = 0.1
 # Outside 59–122 °F the app returns 0, which for a device that opens water valves would mean
 # "full cold". `unit_to_celsius` falls back to the arithmetic rather than doing that.
 FAHRENHEIT_TO_TENTHS_C = {
-    59: 150, 60: 156, 61: 161, 62: 167, 63: 172, 64: 178, 65: 183, 66: 189,
-    67: 194, 68: 200, 69: 206, 70: 211, 71: 217, 72: 222, 73: 228, 74: 233,
-    75: 239, 76: 244, 77: 250, 78: 256, 79: 261, 80: 267, 81: 272, 82: 278,
-    83: 283, 84: 289, 85: 294, 86: 300, 87: 305, 88: 311, 89: 316, 90: 322,
-    91: 327, 92: 333, 93: 338, 94: 344, 95: 350, 96: 355, 97: 361, 98: 366,
-    99: 372, 100: 377, 101: 383, 102: 388, 103: 394, 104: 400, 105: 405,
-    106: 411, 107: 416, 108: 422, 109: 427, 110: 433, 111: 438, 112: 444,
-    113: 450, 114: 455, 115: 461, 116: 466, 117: 472, 118: 477, 119: 483,
-    120: 488, 121: 494, 122: 500,
+    59: 150,
+    60: 156,
+    61: 161,
+    62: 167,
+    63: 172,
+    64: 178,
+    65: 183,
+    66: 189,
+    67: 194,
+    68: 200,
+    69: 206,
+    70: 211,
+    71: 217,
+    72: 222,
+    73: 228,
+    74: 233,
+    75: 239,
+    76: 244,
+    77: 250,
+    78: 256,
+    79: 261,
+    80: 267,
+    81: 272,
+    82: 278,
+    83: 283,
+    84: 289,
+    85: 294,
+    86: 300,
+    87: 305,
+    88: 311,
+    89: 316,
+    90: 322,
+    91: 327,
+    92: 333,
+    93: 338,
+    94: 344,
+    95: 350,
+    96: 355,
+    97: 361,
+    98: 366,
+    99: 372,
+    100: 377,
+    101: 383,
+    102: 388,
+    103: 394,
+    104: 400,
+    105: 405,
+    106: 411,
+    107: 416,
+    108: 422,
+    109: 427,
+    110: 433,
+    111: 438,
+    112: 444,
+    113: 450,
+    114: 455,
+    115: 461,
+    116: 466,
+    117: 472,
+    118: 477,
+    119: 483,
+    120: 488,
+    121: 494,
+    122: 500,
 }
 # The byte accepts up to 0xFF, but the Konnect app never sends above 0xE8 (48.8 °C /
 # 119.8 °F). Whether the firmware enforces that cap or only the app does is untested, so
@@ -194,8 +249,8 @@ FLOW_BYTE_MAX = 0xC8
 # The library's "0x40 = preset-mode" and "0x01 = SHOWER mode" were both misreads of this byte.
 OUTLET_MASK_BITS = 0x07
 VALVE_PAUSE_FLAG = 0x40
-VALVE_SKIP_WARMUP_FLAG = 0x80   # write meaning of bit 0x80
-VALVE_ERROR_FLAG = 0x80         # read meaning of the same bit
+VALVE_SKIP_WARMUP_FLAG = 0x80  # write meaning of bit 0x80
+VALVE_ERROR_FLAG = 0x80  # read meaning of the same bit
 VALVE_STOP_MASK = 0x00
 OUTLETS_PER_VALVE = 3
 
@@ -617,7 +672,9 @@ def preset_valve_to_command(valve_detail: dict, prefix: int) -> str:
     stored = str(valve_detail.get("hexString") or "").strip().upper()
     if PRESET_WORD.fullmatch(stored):
         if temperature_c is None:
-            temperature_c = TEMPERATURE_BASE_C + int(stored[2:4], 16) * TEMPERATURE_STEP_C
+            temperature_c = (
+                TEMPERATURE_BASE_C + int(stored[2:4], 16) * TEMPERATURE_STEP_C
+            )
         if flow_native is None:
             flow_native = int(stored[4:6], 16) / FLOW_PER_SETPOINT
 
@@ -639,16 +696,16 @@ def preset_opens_anything(valve_details: list[dict]) -> bool:
         if not isinstance(detail, dict):
             continue
         for outlet in detail.get("outlets") or []:
-            if isinstance(outlet, dict) and str(
-                outlet.get("value", "0")
-            ).strip() in {"1", "true", "True"}:
+            if isinstance(outlet, dict) and str(outlet.get("value", "0")).strip() in {
+                "1",
+                "true",
+                "True",
+            }:
                 return True
     return False
 
 
-def preset_to_pair(
-    model: ValveModel, valve_details: list[dict]
-) -> tuple[str, str]:
+def preset_to_pair(model: ValveModel, valve_details: list[dict]) -> tuple[str, str]:
     """Build both command words for a preset.
 
     **Every valve the model has gets a real, addressed word**, even one whose outlets are

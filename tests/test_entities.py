@@ -34,7 +34,9 @@ def collect(name: str, coordinator) -> list:
     hass = SimpleNamespace(data={"kohler_anthem_plus": {"test": coordinator}})
     entry = SimpleNamespace(entry_id="test", data={}, options={})
     asyncio.run(
-        platform(name).async_setup_entry(hass, entry, lambda e, *a, **k: added.extend(e))
+        platform(name).async_setup_entry(
+            hass, entry, lambda e, *a, **k: added.extend(e)
+        )
     )
     return added
 

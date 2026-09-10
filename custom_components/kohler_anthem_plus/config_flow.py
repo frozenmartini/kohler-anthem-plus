@@ -197,7 +197,9 @@ class KohlerAnthemPlusConfigFlow(ConfigFlow, domain=DOMAIN):
                 )
                 if detected:
                     _LOGGER.debug(
-                        "Topology from controller %s: %s", controller.device_id, detected
+                        "Topology from controller %s: %s",
+                        controller.device_id,
+                        detected,
                     )
                     return detected
             except (AuthError, KohlerError) as err:
@@ -270,9 +272,7 @@ class KohlerAnthemPlusConfigFlow(ConfigFlow, domain=DOMAIN):
     # ------------------------------------------------------------------ #
     # Reauth
     # ------------------------------------------------------------------ #
-    async def async_step_reauth(
-        self, entry_data: dict[str, Any]
-    ) -> ConfigFlowResult:
+    async def async_step_reauth(self, entry_data: dict[str, Any]) -> ConfigFlowResult:
         """The stored refresh token expired or was revoked; ask for the password again."""
         self._kohler_reauth = True
         return await self.async_step_reauth_confirm()
@@ -281,9 +281,7 @@ class KohlerAnthemPlusConfigFlow(ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         entry_id = self.context.get("entry_id")
-        entry = (
-            self.hass.config_entries.async_get_entry(entry_id) if entry_id else None
-        )
+        entry = self.hass.config_entries.async_get_entry(entry_id) if entry_id else None
         username = (entry.data.get(CONF_USERNAME) if entry else "") or ""
         if user_input is not None:
             merged = {CONF_USERNAME: username, **user_input}

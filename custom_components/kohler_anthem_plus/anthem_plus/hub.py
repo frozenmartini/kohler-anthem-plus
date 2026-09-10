@@ -203,13 +203,17 @@ class HubDevice:
     async def async_set_shower(self, on: bool) -> Any:
         """Run or stop the controller's default shower configuration."""
         return await self._client.async_request(
-            "POST", HUB_VALVE_CONTROL, json_body={**self._base(), "valveOnOff": ON if on else OFF}
+            "POST",
+            HUB_VALVE_CONTROL,
+            json_body={**self._base(), "valveOnOff": ON if on else OFF},
         )
 
     async def async_set_steam(self, on: bool) -> Any:
         """Run or stop the controller's default steam configuration."""
         return await self._client.async_request(
-            "POST", HUB_STEAM_CONTROL, json_body={**self._base(), "steamOnOff": ON if on else OFF}
+            "POST",
+            HUB_STEAM_CONTROL,
+            json_body={**self._base(), "steamOnOff": ON if on else OFF},
         )
 
     async def async_stop_all(self) -> Any:

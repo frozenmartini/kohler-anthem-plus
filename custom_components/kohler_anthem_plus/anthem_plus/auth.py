@@ -253,7 +253,9 @@ class KohlerAuth:
             settings: dict[str, Any] = json.loads(match.group(1))
             return settings["csrf"], settings["transId"], referer
         except (json.JSONDecodeError, KeyError) as err:
-            raise AuthError(f"Could not read Kohler's sign-in parameters: {err}") from err
+            raise AuthError(
+                f"Could not read Kohler's sign-in parameters: {err}"
+            ) from err
 
     async def _async_submit_credentials(
         self,
@@ -386,9 +388,7 @@ class KohlerAuth:
                     _raise_for_b2c_error(str(detail))
                     raise AuthError(f"Kohler token request failed: {detail}")
         except aiohttp.ClientError as err:
-            raise AuthUnavailable(
-                f"Network error during token request: {err}"
-            ) from err
+            raise AuthUnavailable(f"Network error during token request: {err}") from err
 
         access_token = payload.get("access_token")
         refresh_token = payload.get("refresh_token") or self.refresh_token

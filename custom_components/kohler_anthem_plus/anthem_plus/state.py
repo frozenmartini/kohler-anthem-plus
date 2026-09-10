@@ -114,7 +114,9 @@ def outlet_limits_from_settings(payload: Any) -> dict[int, OutletLimits]:
     # does not. Cheaper than making every caller remember which one it is holding.
     source = payload if isinstance(payload, dict) else {}
     if "valveSettings" not in source:
-        source = source.get("setting") if isinstance(source.get("setting"), dict) else {}
+        source = (
+            source.get("setting") if isinstance(source.get("setting"), dict) else {}
+        )
     if not isinstance(source, dict):
         return limits
     for valve in source.get("valveSettings") or []:
@@ -439,7 +441,10 @@ class GcsState:
         for word in (self.valve1, self.valve2):
             if word is None or word.measured_temperature_celsius is None:
                 continue
-            if word.measured_temperature_celsius > 0 or (word.measured_flow_percent or 0) > 0:
+            if (
+                word.measured_temperature_celsius > 0
+                or (word.measured_flow_percent or 0) > 0
+            ):
                 return word
         return None
 
@@ -800,7 +805,9 @@ class GcsState:
         if (system := state.get("currentSystemState")) is not None:
             self.system_state = str(system)
         if "presetOrExperienceId" in state:
-            self.active_preset_id = _preset_id_or_none(state.get("presetOrExperienceId"))
+            self.active_preset_id = _preset_id_or_none(
+                state.get("presetOrExperienceId")
+            )
         self.last_update = time.time()
 
     def apply_preset_list(self, payload: dict[str, Any]) -> bool:
@@ -975,7 +982,9 @@ class HubState:
                 changed = True
         return changed
 
-    def _status_flag(self, envelope: Envelope, component: str | None = None) -> bool | None:
+    def _status_flag(
+        self, envelope: Envelope, component: str | None = None
+    ) -> bool | None:
         for attribute in envelope.attributes:
             if component and attribute.get("component") not in (component, None):
                 continue

@@ -91,7 +91,9 @@ _FLOW_MAX_PERCENT = FLOW_BYTE_MAX // FLOW_PER_PERCENT
 # are accepted so a value can be pasted straight out of that sensor without being edited.
 # Any other length is a typo, and `async_send_valve_hex` re-checks it there too: this layer
 # only exists so the UI can reject one without a round trip.
-_HEX_WORD = vol.All(cv.string, cv.matches_regex(r"^(?:[0-9A-Fa-f]{8}|[0-9A-Fa-f]{16})$"))
+_HEX_WORD = vol.All(
+    cv.string, cv.matches_regex(r"^(?:[0-9A-Fa-f]{8}|[0-9A-Fa-f]{16})$")
+)
 
 SEND_VALVE_HEX_SCHEMA = vol.Schema(
     {
@@ -167,7 +169,7 @@ _CUSTOM_SHOWER_DESCRIPTION = (
     "one command. This is the reliable way to open an outlet and set its temperature from "
     "a single automation step. Outlets you leave off are closed, and leaving every outlet "
     "off stops the shower. On a valve with warm-up enabled the valve warms up first and "
-    "then pauses for two minutes, just as it always does; turn on \"No pausing warm-up\" "
+    'then pauses for two minutes, just as it always does; turn on "No pausing warm-up" '
     "(beta) to have it carry on with your outlets and temperature the moment "
     "that pause begins. WARNING: this can start water."
 )
@@ -370,7 +372,9 @@ def _async_describe_custom_shower(
         fields[ATTR_DEVICE_ID] = _FIELD_DEVICE
     zones = [1, 2] if any(model.uses_valve2 for model in models) else [1]
     for zone in zones:
-        widest = max(model.outlets_in_zone(zone) for model in models if zone in model.zones)
+        widest = max(
+            model.outlets_in_zone(zone) for model in models if zone in model.zones
+        )
         keys = _ZONE_OUTLET_FIELDS[zone][:widest]
         section = _ZONE_SECTIONS[zone]
         fields[section] = {

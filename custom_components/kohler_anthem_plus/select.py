@@ -580,7 +580,8 @@ class HubFavouriteSelect(OptimisticOptionMixin, KohlerControllerEntity, SelectEn
             # its Off should stop water and leave music, steam, and lighting alone. The
             # whole-system stop lives on the System switch.
             await self._async_command(
-                OPTION_OFF, self.coordinator.async_set_hub_shower(self._controller, False)
+                OPTION_OFF,
+                self.coordinator.async_set_hub_shower(self._controller, False),
             )
             return
         wanted = option.strip().lower()

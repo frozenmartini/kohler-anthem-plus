@@ -57,7 +57,8 @@ async def async_setup_entry(
         # One per zone the model actually has. A single-zone valve must not get a "Zone 2"
         # that is permanently off — `model.zones` is the only correct source for this.
         entities += [
-            ValveZoneActiveSensor(coordinator, valve, zone) for zone in valve.model.zones
+            ValveZoneActiveSensor(coordinator, valve, zone)
+            for zone in valve.model.zones
         ]
 
     # Everything derived from SHOWER_VALVE_STS is created on a controller-only account,
@@ -258,9 +259,7 @@ class MqttConnectionMixin:
         if stream is not None:
             attributes["warming_up"] = stream.warming_up
             attributes["last_message_at"] = (
-                datetime.fromtimestamp(
-                    stream.last_message_at, tz=UTC
-                ).isoformat()
+                datetime.fromtimestamp(stream.last_message_at, tz=UTC).isoformat()
                 if stream.last_message_at
                 else None
             )

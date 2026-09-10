@@ -161,7 +161,9 @@ class ValveStatusSensor(KohlerValveEntity, SensorEntity):
     def _paired(self) -> bool:
         """Whether the account has exactly one valve and one controller — the only case in
         which the two can be assumed to be the same shower."""
-        return len(self.coordinator.controllers) == 1 and len(self.coordinator.valves) == 1
+        return (
+            len(self.coordinator.controllers) == 1 and len(self.coordinator.valves) == 1
+        )
 
     @property
     def native_value(self) -> str | None:
@@ -696,7 +698,10 @@ class ControllerZoneTemperatureSensor(KohlerControllerEntity, SensorEntity):
     _attr_device_class = SensorDeviceClass.TEMPERATURE
 
     def __init__(
-        self, coordinator: KohlerAnthemPlusCoordinator, controller: Controller, zone: int
+        self,
+        coordinator: KohlerAnthemPlusCoordinator,
+        controller: Controller,
+        zone: int,
     ) -> None:
         super().__init__(coordinator, controller)
         self._zone = zone

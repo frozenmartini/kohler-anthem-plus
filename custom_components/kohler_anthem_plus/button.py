@@ -113,7 +113,9 @@ class ValveNewCaptureButton(_NewCaptureMixin, KohlerValveEntity, ButtonEntity):
         return self.coordinator.last_update_success
 
 
-class ControllerNewCaptureButton(_NewCaptureMixin, KohlerControllerEntity, ButtonEntity):
+class ControllerNewCaptureButton(
+    _NewCaptureMixin, KohlerControllerEntity, ButtonEntity
+):
     """Capture button on a controller-only account. See :class:`ValveNewCaptureButton`."""
 
     def __init__(

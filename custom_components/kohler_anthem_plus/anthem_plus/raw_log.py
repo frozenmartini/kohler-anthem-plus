@@ -206,7 +206,9 @@ class RawMqttLog:
                 except OSError as err:
                     _LOGGER.warning("Raw MQTT capture could not open a file: %s", err)
 
-    def write(self, topic: str, payload: bytes, *, qos: int = 0, retain: bool = False) -> None:
+    def write(
+        self, topic: str, payload: bytes, *, qos: int = 0, retain: bool = False
+    ) -> None:
         """Record one message. Cheap no-op when switched off."""
         if not self.enabled:
             # Handles the on->off transition: releases the file the moment capture stops,

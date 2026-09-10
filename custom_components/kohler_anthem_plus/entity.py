@@ -83,9 +83,7 @@ def outlet_name(valve: Valve, zone: int, outlet: int) -> str:
     def fixture_at(position: int) -> str | None:
         """The confirmed fixture name for a 1-based outlet in this zone, or None."""
         flat = (
-            (position - 1)
-            if zone == 1
-            else valve.model.outlets_valve1 + position - 1
+            (position - 1) if zone == 1 else valve.model.outlets_valve1 + position - 1
         )
         limits = valve.gcs_state.outlet_limits.get(flat)
         code = None if limits is None else limits.outlet_type

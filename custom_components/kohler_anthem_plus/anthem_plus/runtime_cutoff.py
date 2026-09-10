@@ -186,6 +186,7 @@ class _NullJournal:
     def note(self, event: str, **fields: Any) -> None:
         return
 
+
 # How far from `maximumRunTime` a pause may land and still count as the timer firing.
 #
 # Every cutoff ever measured landed within **1.32 s** of the limit, and all but one within
@@ -293,6 +294,7 @@ def suspected_controller_limit(duration: float) -> int | None:
 # not license ignoring one. Scoping by zone matters for the same reason — adjusting zone 2
 # should never blind zone 1. See `note_local_write`.
 LOCAL_WRITE_GRACE_SECONDS = 30.0
+
 
 # ---------------------------------------------------------------------------
 # Self-diagnosis: noticing a limit we do not know about
@@ -499,7 +501,9 @@ class ZoneCutoffDetector:
         def suppressed(zone: int) -> bool:
             """Did *we* close this zone recently enough to explain its close?"""
             closed_at = self._local_close.get(zone)
-            return closed_at is not None and (now - closed_at) < LOCAL_WRITE_GRACE_SECONDS
+            return (
+                closed_at is not None and (now - closed_at) < LOCAL_WRITE_GRACE_SECONDS
+            )
 
         for zone, mask in masks.items():
             is_paused = paused.get(zone, False)
@@ -611,9 +615,7 @@ class ZoneCutoffDetector:
                 # check whether it looks like the *other* product's ceiling — the one this
                 # feature cannot act on and which, until 2026-08-19, ended showers with no
                 # explanation anywhere in the log. See `docs/case_studies/conclusions.md` B4.
-                suspected = (
-                    None if is_paused else suspected_controller_limit(duration)
-                )
+                suspected = None if is_paused else suspected_controller_limit(duration)
                 # WARNING only when the controller PREEMPTED the valve — suspected below
                 # every valve limit means the hub's Max Shower Duration is set lower than
                 # the valve's, Endless Shower is silently defeated, and a fix exists on the
@@ -644,8 +646,11 @@ class ZoneCutoffDetector:
                     "duration is not within %.0fs of any limit"
                     % CUTOFF_TOLERANCE_SECONDS,
                     off_by=min(abs(duration - limit) for limit in candidates),
-                    **({"controller_limit_suspected": suspected}
-                       if suspected is not None else {}),
+                    **(
+                        {"controller_limit_suspected": suspected}
+                        if suspected is not None
+                        else {}
+                    ),
                 )
                 continue
             if not is_paused:

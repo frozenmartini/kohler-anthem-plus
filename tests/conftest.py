@@ -24,7 +24,9 @@ DOMAIN = "kohler_anthem_plus"
 class FakeWord:
     """One decoded valve word, with the fields entities read."""
 
-    def __init__(self, flow: float = 100.0, mask: int = 0, paused: bool = False) -> None:
+    def __init__(
+        self, flow: float = 100.0, mask: int = 0, paused: bool = False
+    ) -> None:
         self.temperature_celsius = 40.5
         self.flow_percent = flow
         self.outlet_mask = mask
@@ -170,7 +172,7 @@ def make_coordinator(valves):
         stream=SimpleNamespace(connected=True),
         entry=SimpleNamespace(data={}, options={}, entry_id="test"),
         last_update_success=True,
-        async_add_listener=lambda *a, **k: (lambda: None),
+        async_add_listener=lambda *a, **k: lambda: None,
     )
 
 

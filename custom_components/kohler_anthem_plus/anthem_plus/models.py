@@ -114,9 +114,7 @@ def model_for_topology(outlets_valve1: int, outlets_valve2: int) -> ValveModel:
         ):
             return model
     label = (
-        f"{outlets_valve1}+{outlets_valve2}"
-        if outlets_valve2
-        else str(outlets_valve1)
+        f"{outlets_valve1}+{outlets_valve2}" if outlets_valve2 else str(outlets_valve1)
     )
     return ValveModel(
         sku="detected",

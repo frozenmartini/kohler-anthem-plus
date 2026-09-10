@@ -377,9 +377,7 @@ def _device_names(devices: list[Device], base: str) -> dict[str, str]:
     seen = Counter(labels.values())
     return {
         device_id: (
-            f"{base} {label}"
-            if label and seen[label] == 1
-            else f"{base} {device_id}"
+            f"{base} {label}" if label and seen[label] == 1 else f"{base} {device_id}"
         )
         for device_id, label in labels.items()
     }
@@ -603,9 +601,9 @@ class Valve:
     # ------------------------------------------------------------------ #
     def stored(self, key: str, default: Any = None) -> Any:
         """A per-valve value from `entry.data[CONF_VALVES][device_id]`."""
-        return (
-            (self.entry.data.get(CONF_VALVES) or {}).get(self.device_id) or {}
-        ).get(key, default)
+        return ((self.entry.data.get(CONF_VALVES) or {}).get(self.device_id) or {}).get(
+            key, default
+        )
 
     def store(self, key: str, value: Any) -> None:
         """Write a per-valve value into `entry.data`. Reload-ignored, like the flat key was."""
@@ -763,9 +761,7 @@ class Valve:
                 self.configuration = {}
 
         try:
-            payload = await self.client.async_get_gcs_state(
-                self.gcs_device.device_id
-            )
+            payload = await self.client.async_get_gcs_state(self.gcs_device.device_id)
             if self.cloud_watch is not None:
                 # CLOUD CONNECTION WATCH. `connectionState` is a sibling of `state` in
                 # this payload, and `apply_rest_state` below reads only `state` — so
@@ -776,7 +772,9 @@ class Valve:
                 # `notify=False` — this runs during `async_setup`, before the platforms
                 # exist; every caller of this method pushes a snapshot of its own.
                 self.cloud_watch.note_rest_payload(
-                    payload, "REST seed (setup, reconnect or update_entity)", notify=False
+                    payload,
+                    "REST seed (setup, reconnect or update_entity)",
+                    notify=False,
                 )
             was_warmup = self.gcs_state.warmup_mode
             self.gcs_state.apply_rest_state(payload)
@@ -836,13 +834,10 @@ class Valve:
         except KohlerError as err:
             _LOGGER.debug("Could not seed GCS state: %s", err)
 
-
         # Presets push over MQTT on every create, edit, rename, and delete, so this is
         # only the seed — nothing re-reads them on a clock.
         try:
-            presets = await self.client.async_get_gcs_presets(
-                self.gcs_device.device_id
-            )
+            presets = await self.client.async_get_gcs_presets(self.gcs_device.device_id)
             self.gcs_state.apply_preset_list(presets)
             # Kept for `_async_sync_default_preset_timer`, which needs the *raw* record
             # — title, volume and each valve's `hexString` — none of which survive
@@ -949,7 +944,9 @@ class Valve:
         compare its run length against — so callers that report readiness must consult this
         rather than assuming the feature is live.
         """
-        return {outlet_id + 1: seconds for outlet_id, seconds in self._run_times.items()}
+        return {
+            outlet_id + 1: seconds for outlet_id, seconds in self._run_times.items()
+        }
 
     @property
     def armed_zones(self) -> list[int]:
@@ -1110,7 +1107,9 @@ class Valve:
             )
         else:
             _LOGGER.debug(
-                "Preset %s run timer needs no change (%s)", DEFAULT_PRESET_ID, plan.reason
+                "Preset %s run timer needs no change (%s)",
+                DEFAULT_PRESET_ID,
+                plan.reason,
             )
 
     def _zone_limits(self) -> dict[int, tuple[int, ...]]:
@@ -1354,7 +1353,9 @@ class Valve:
             # Never retried: a failed restart leaves the water off, which is the safe end
             # state, and a retry loop against a valve that is refusing is not.
             _LOGGER.warning("Restart after run-time cutoff failed: %s", err)
-            self._journal("restore_failed", zones=[cut.zone for cut in fired], error=str(err))
+            self._journal(
+                "restore_failed", zones=[cut.zone for cut in fired], error=str(err)
+            )
             return
         restored = sorted(
             outlet
@@ -1448,7 +1449,9 @@ class Valve:
         valve1 = encode_word(VALVE1_PREFIX, celsius1, flow1, masks[1], paused=paused)
         if self.model.uses_valve2:
             celsius2, flow2 = resolve(2, zone2_temperature, zone2_flow)
-            valve2 = encode_word(VALVE2_PREFIX, celsius2, flow2, masks[2], paused=paused)
+            valve2 = encode_word(
+                VALVE2_PREFIX, celsius2, flow2, masks[2], paused=paused
+            )
         else:
             valve2 = UNUSED_VALVE_WORD
 
@@ -1696,7 +1699,9 @@ class Valve:
                     _LOGGER.info("custom_shower: %s", outcome.reason)
                 return
         except HomeAssistantError as err:
-            _LOGGER.warning("custom_shower: could not resume after the warm-up: %s", err)
+            _LOGGER.warning(
+                "custom_shower: could not resume after the warm-up: %s", err
+            )
         finally:
             remove()
 
@@ -2018,8 +2023,13 @@ class Valve:
         single field, and the journal should say a second trigger arrived rather than let
         the tasks interleave silently.
         """
-        if self._warmup_restore_task is not None and not self._warmup_restore_task.done():
-            self._warmup_journal("restore_skipped", reason="a restore is already pending")
+        if (
+            self._warmup_restore_task is not None
+            and not self._warmup_restore_task.done()
+        ):
+            self._warmup_journal(
+                "restore_skipped", reason="a restore is already pending"
+            )
             return
         self._warmup_restore_task = self.hass.async_create_task(
             self._async_restore_warmup(taken_away)
@@ -2101,7 +2111,9 @@ class Valve:
             auto_restore=self.warmup_auto_restore,
             restores_to=restore_target(before, self.last_warmup_mode),
             water_running=None if state is None else state.is_running,
-            before_window=self._message_window(now - WARMUP_CONTEXT_BEFORE_SECONDS, now),
+            before_window=self._message_window(
+                now - WARMUP_CONTEXT_BEFORE_SECONDS, now
+            ),
             window_seconds=WARMUP_CONTEXT_BEFORE_SECONDS,
         )
         # The after-window is worth having whether or not we restore — an unrestored disable
@@ -2166,7 +2178,9 @@ class Valve:
         await asyncio.sleep(WARMUP_AUTO_RESTORE_DELAY_SECONDS)
 
         if not self.warmup_auto_restore:
-            self._warmup_journal("restore_skipped", reason="switched off during the wait")
+            self._warmup_journal(
+                "restore_skipped", reason="switched off during the wait"
+            )
             return
         state = self.gcs_state
         if state is None or state.warmup_mode != WARMUP_DISABLED:
@@ -2487,7 +2501,9 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         # The Repairs card used to be keyed by entry alone; it is per valve now, and an
         # upgrade must not leave the old one standing. Deleting a missing issue is a no-op.
-        ir.async_delete_issue(self.hass, DOMAIN, f"{ISSUE_NOT_SET_UP}_{self.entry.entry_id}")
+        ir.async_delete_issue(
+            self.hass, DOMAIN, f"{ISSUE_NOT_SET_UP}_{self.entry.entry_id}"
+        )
         for valve in self.valves:
             valve.announce_readiness()
             # Arms trigger B's countdown. Nothing is asked of Kohler until the valve has
@@ -2532,7 +2548,9 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             valves = dict(options.get(CONF_VALVES) or {})
             valves[device_id] = {**moved_options, **(valves.get(device_id) or {})}
             options[CONF_VALVES] = valves
-        self.hass.config_entries.async_update_entry(self.entry, data=data, options=options)
+        self.hass.config_entries.async_update_entry(
+            self.entry, data=data, options=options
+        )
         _LOGGER.info(
             "Moved per-valve settings (%s) under valve %s",
             ", ".join(sorted([*moved_data, *moved_options])),
@@ -2966,4 +2984,3 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raise HomeAssistantError(_controller_offline(controller)) from err
         except KohlerError as err:
             raise HomeAssistantError(f"Kohler command failed: {err}") from err
-

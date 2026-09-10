@@ -142,9 +142,7 @@ class ZoneTemperatureNumber(ZoneNumberBase):
         if word is None:
             return None
         return round(
-            celsius_to_unit(
-                word.temperature_celsius, self.coordinator.temperature_unit
-            )
+            celsius_to_unit(word.temperature_celsius, self.coordinator.temperature_unit)
         )
 
     async def async_set_native_value(self, value: float) -> None:
@@ -276,4 +274,3 @@ class ZoneFlowNumber(ZoneNumberBase):
         # only after the write is accepted.
         self._valve.zone_flow[self._zone] = float(value)
         self.async_write_ha_state()
-

@@ -99,7 +99,9 @@ def restore_target(taken_away: str | None, remembered: str | None) -> str | None
     return None
 
 
-def journal_event(before: str | None, after: str | None, *, announced: bool) -> str | None:
+def journal_event(
+    before: str | None, after: str | None, *, announced: bool
+) -> str | None:
     """Which journal record one warmup observation deserves, or ``None`` for silence.
 
     ``before`` / ``after`` are the modes either side of applying one MQTT message.

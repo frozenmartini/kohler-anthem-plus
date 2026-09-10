@@ -27,7 +27,9 @@ CLIENT_ID = "8caf9530-1d13-48e6-867c-0f082878debc"
 API_RESOURCE = "f5d87f3d-bdeb-4933-ab70-ef56cc343744"
 B2C_TENANT = "konnectkohler.onmicrosoft.com"
 B2C_SIGNIN_POLICY = "B2C_1A_signin"
-B2C_AUTHORITY = f"https://konnectkohler.b2clogin.com/tfp/{B2C_TENANT}/{B2C_SIGNIN_POLICY}"
+B2C_AUTHORITY = (
+    f"https://konnectkohler.b2clogin.com/tfp/{B2C_TENANT}/{B2C_SIGNIN_POLICY}"
+)
 B2C_AUTHORIZE_URL = f"{B2C_AUTHORITY}/oauth2/v2.0/authorize"
 B2C_TOKEN_URL = f"{B2C_AUTHORITY}/oauth2/v2.0/token"
 B2C_SCOPE = f"openid offline_access https://{B2C_TENANT}/{API_RESOURCE}/apiaccess"
@@ -46,9 +48,7 @@ B2C_SCOPE = f"openid offline_access https://{B2C_TENANT}/{API_RESOURCE}/apiacces
 B2C_REDIRECT_URI = "msauth.com.kohler.hermoth://auth"
 
 # Server-side sign-in endpoints (B2C custom-policy "SelfAsserted" flow).
-B2C_POLICY_BASE = (
-    f"https://konnectkohler.b2clogin.com/{B2C_TENANT}/{B2C_SIGNIN_POLICY}"
-)
+B2C_POLICY_BASE = f"https://konnectkohler.b2clogin.com/{B2C_TENANT}/{B2C_SIGNIN_POLICY}"
 B2C_SELF_ASSERTED_URL = f"{B2C_POLICY_BASE}/SelfAsserted"
 B2C_CONFIRMED_URL = f"{B2C_POLICY_BASE}/api/CombinedSigninAndSignup/confirmed"
 

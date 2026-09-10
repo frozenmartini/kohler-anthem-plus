@@ -110,9 +110,7 @@ def _configuration_report(valve: Valve) -> dict[str, Any]:
         "read": True,
         "firmware": valve.firmware,
         # True where the key is present AND not null — the distinction the question turns on.
-        "populated": {
-            key: configuration.get(key) is not None for key in structural
-        },
+        "populated": {key: configuration.get(key) is not None for key in structural},
         # Every other key the record carried, named but not dumped, so a field nobody has
         # seen before shows up in a report without its contents going with it.
         "other_keys": sorted(
@@ -333,7 +331,9 @@ def _build(
     if reports:
         # Defensive: an out-of-range index would be a caller bug, but a diagnostics report
         # that raises is a report nobody can attach to an issue.
-        primary = reports[valve_index] if 0 <= valve_index < len(reports) else reports[0]
+        primary = (
+            reports[valve_index] if 0 <= valve_index < len(reports) else reports[0]
+        )
         payload["valve"] = {
             k: v for k, v in primary.items() if k not in ("endless_shower", "warmup")
         }

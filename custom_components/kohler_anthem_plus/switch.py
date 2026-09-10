@@ -419,9 +419,7 @@ class ZoneOutletSwitch(KohlerValveEntity, SwitchEntity):
         # entity id naming the fixture is worth more than one naming a position, and Home
         # Assistant keeps the registry entry keyed on this string. See `entity.outlet_name`
         # for what happens when the fixture is not known.
-        self._attr_unique_id = (
-            f"{self._device_id}_{slug(self._attr_name)}"
-        )
+        self._attr_unique_id = f"{self._device_id}_{slug(self._attr_name)}"
         # Holds the requested position until the valve reports back. None means "no
         # pending command — show what the valve says".
         self._optimistic: bool | None = None
@@ -473,8 +471,10 @@ class ZoneOutletSwitch(KohlerValveEntity, SwitchEntity):
         rather than assuming the two numbering schemes line up.
         """
         model = self._valve.model
-        flat = (self._outlet - 1) if self._zone == 1 else (
-            model.outlets_valve1 + self._outlet - 1
+        flat = (
+            (self._outlet - 1)
+            if self._zone == 1
+            else (model.outlets_valve1 + self._outlet - 1)
         )
         limits = state.outlet_limits.get(flat)
         return None if limits is None else limits.outlet_type

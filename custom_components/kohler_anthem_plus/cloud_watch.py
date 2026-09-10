@@ -130,9 +130,7 @@ class CloudConnectionWatch:
     :meth:`_async_check`.
     """
 
-    def __init__(
-        self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve
-    ) -> None:
+    def __init__(self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve) -> None:
         self._coordinator = coordinator
         self._valve = valve
         self._hass = coordinator.hass
@@ -177,7 +175,9 @@ class CloudConnectionWatch:
     def attributes(self) -> dict[str, Any]:
         """Everything needed to judge how much the boolean above is worth."""
         now = time.monotonic()
-        quiet_for = None if self._last_gcs_at is None else round(now - self._last_gcs_at, 1)
+        quiet_for = (
+            None if self._last_gcs_at is None else round(now - self._last_gcs_at, 1)
+        )
         return {
             "connection_state": self._reported,
             "last_checked": _utc_iso(self._checked_at),
@@ -348,7 +348,9 @@ class CloudConnectionWatch:
         """
         device = self._valve.gcs_device
         try:
-            payload = await self._coordinator.client.async_get_gcs_state(device.device_id)
+            payload = await self._coordinator.client.async_get_gcs_state(
+                device.device_id
+            )
         except (AuthError, KohlerError) as err:
             # Explicitly not a verdict about the valve. `_connected` keeps its previous value.
             self._last_error = f"{type(err).__name__}: {err}"
