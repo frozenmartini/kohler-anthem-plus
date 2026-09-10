@@ -233,15 +233,9 @@ class FavouriteSelect(OptimisticOptionMixin, KohlerValveEntity, SelectEntity):
             "active_preset_id": state.active_preset_id,
             "favourite_count": len(self._presets),
         }
-        # **Why the dropdown can look empty.** A valve whose slots are all experiences
-        # offers nothing but `Off`, which reads as a broken entity rather than as a
-        # correct one. Naming them here — with the reason — turns "this is broken" into
-        # "these exist and cannot be started", without putting options in the list that
-        # would raise the moment anyone picked one.
-        #
-        # Not merely cosmetic: on the account this was written for, one valve holds 6
-        # slots of which 5 are experiences, and the single remaining favourite made the
-        # picker look like it had failed to load.
+        # Experiences share the slot space but cannot be started, so they are named rather
+        # than offered — see `_experiences`. This is *not* the usual reason the dropdown is
+        # empty; see `_empty_reason` below for that.
         experiences = self._experiences
         if experiences:
             attributes["experiences"] = experiences
@@ -250,7 +244,46 @@ class FavouriteSelect(OptimisticOptionMixin, KohlerValveEntity, SelectEntity):
                 "they cannot be started from Home Assistant — the shower ignores the "
                 "command. Start them from the Konnect app or the touchscreen."
             )
+        # **Why the dropdown is empty, when it is.** An `Off`-only picker is
+        # indistinguishable from one that failed to load, and the difference matters:
+        # usually nothing is wrong and no favourite has been created yet.
+        reason = self._empty_reason
+        if reason is not None:
+            attributes["no_favourites_reason"] = reason
         return attributes
+
+    @property
+    def _empty_reason(self) -> str | None:
+        """Why `options` holds nothing but `Off`, or None when it holds a favourite.
+
+        A GCS valve has **ten preset slots**, of which slot 1 is the mandatory default
+        shower — hidden here because the Konnect app hides it too, and because it is the
+        Shower switch's business rather than a scene to pick (`PRESET_HIDDEN_IDS`). So a
+        valve on which nobody has created a favourite has every offerable slot empty, and
+        this entity correctly offers nothing. That is the ordinary case, not a fault.
+
+        Written after mistaking exactly this for a bug: diagnostics reported
+        ``selectable: 1`` and the picker still offered nothing, because `selectable`
+        counts before slot 1 is hidden and the picker offers after. Both numbers are now
+        in diagnostics, and this attribute says which case a user is looking at.
+        """
+        if self._presets:
+            return None
+        state = self._state
+        if state is None:
+            return None
+        if self._experiences:
+            return (
+                "No favourites to start. This valve's stored slots are experiences, "
+                "which carry no valve settings and cannot be started from Home "
+                "Assistant, plus the default-shower slot, which the Shower switch runs. "
+                "Create a favourite in the Kohler Konnect app and it appears here."
+            )
+        return (
+            "No favourites have been created on this valve. The default-shower slot is "
+            "run by the Shower switch rather than listed here. Create a favourite in the "
+            "Kohler Konnect app and it appears here — no reload needed."
+        )
 
     async def async_select_option(self, option: str) -> None:
         """Start the named favourite, or stop the shower.
