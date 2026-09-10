@@ -14,9 +14,13 @@ The rules are all about not deleting what is not ours:
 - A symlinked root is never traversed: someone pointed the folder elsewhere on purpose.
 - Nothing foreign is ever deleted. The folder is first *renamed* aside (one atomic step,
   to a fixed sibling name), inspected again under that name, and only then emptied —
-  file by file, each unlink guarded by the same name check, so even something that
-  appears after the inspection is left alone and makes the final `rmdir` fail instead.
-  Anything foreign puts the folder back untouched. What
+  file by file, each unlink guarded by the same name-and-regular-file check, so even
+  something that appears after the inspection is left alone and makes the final `rmdir`
+  fail instead. Anything foreign puts the folder back untouched. One delete runs at a time.
+- Not defended: something racing to create an entry at the *exact* original or aside path
+  in the milliseconds a rename takes. `os.rename` may replace an empty directory or a
+  same-type file there; Python has no portable no-replace rename. Anything that can write
+  into the Home Assistant config directory at that precision can do worse than this. What
   is *not* promised is that our own files survive a failure part-way: they are the
   leftover being deleted, and losing half of them loses nothing anyone wanted.
 - Every outcome the user is shown is true. A failure that leaves the folder where it was
@@ -45,6 +49,8 @@ from __future__ import annotations
 import logging
 import os
 import re
+import stat
+import threading
 
 import voluptuous as vol
 from homeassistant import data_entry_flow
@@ -70,8 +76,23 @@ FAILED = "failed"  # folder untouched, where it was
 STRANDED = "stranded"  # folder (or what is left of it) sits under the aside name
 
 
+# One delete at a time: two Repairs flows submitted together (two browser tabs) must not
+# both be moving the same folder around.
+_DELETE_LOCK = threading.Lock()
+
+
 def _is_ours(name: str) -> bool:
     return name in _OWN_READMES or _OWN_FILE.fullmatch(name) is not None
+
+
+def _is_our_file(full: str, name: str) -> bool:
+    """Ours by name *and* a regular file — not a symlink, directory, FIFO, socket or device."""
+    if not _is_ours(name):
+        return False
+    try:
+        return stat.S_ISREG(os.lstat(full).st_mode)
+    except OSError:
+        return False
 
 
 def _inspect_dir(path: str) -> tuple[int, int, bool] | None:
@@ -88,7 +109,7 @@ def _inspect_dir(path: str) -> tuple[int, int, bool] | None:
     foreign = False
     for name in names:
         full = os.path.join(path, name)
-        if os.path.islink(full) or os.path.isdir(full) or not _is_ours(name):
+        if not _is_our_file(full, name):
             foreign = True
             continue
         count += 1
@@ -131,7 +152,7 @@ def _remove_ours(aside: str) -> bool:
     try:
         for name in os.listdir(aside):
             full = os.path.join(aside, name)
-            if _is_ours(name) and not os.path.islink(full) and not os.path.isdir(full):
+            if _is_our_file(full, name):
                 os.remove(full)
         os.rmdir(aside)
     except OSError as err:
@@ -148,6 +169,11 @@ def delete_old_capture_folder(path: str) -> str:
     the rename that cannot be undone leaves it under the aside name (STRANDED), and the
     abort text names that. Blocking: executor only.
     """
+    with _DELETE_LOCK:
+        return _delete_old_capture_folder_locked(path)
+
+
+def _delete_old_capture_folder_locked(path: str) -> str:
     aside = path + ASIDE_SUFFIX
     if os.path.lexists(aside):
         # Left by an interrupted run. Ours → clear it first; anything else → hands off.
