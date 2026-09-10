@@ -608,3 +608,59 @@ def test_services_yaml_describes_every_registered_service():
     path = Path(services.__file__).parent / "services.yaml"
     described = set(yaml.safe_load(path.read_text(encoding="utf-8")))
     assert registered <= described, sorted(registered - described)
+
+
+# --------------------------------------------------------------------------- #
+# Flow percent is a ratio against the outlet's ceiling, not a fixed divisor
+# --------------------------------------------------------------------------- #
+def test_flow_conversion_matches_the_app_formula():
+    """`percent = byte * 100 / max` — what `jj.h$a.X` does in the Konnect app.
+
+    A hardcoded `/2` agrees with this only where the ceiling is 200. Both of the owner's
+    valves report 200, so their hardware cannot tell the two apart; the app's bytecode can,
+    and does.
+    """
+    from custom_components.kohler_anthem_plus.anthem_plus.valve_hex import (
+        flow_byte_to_percent,
+        flow_percent_to_byte,
+    )
+
+    # Ceiling 200: must be indistinguishable from the old divisor, including the odd bytes
+    # the owner's valves actually carry.
+    for byte in (16, 49, 53, 100, 200):
+        assert flow_byte_to_percent(byte, 200) == byte / 2
+
+    # A lower ceiling is where they diverge — and where the old formula sent double.
+    assert flow_byte_to_percent(100, 100) == 100.0
+    assert flow_percent_to_byte(100, 100) == 100
+    assert flow_percent_to_byte(100, 200) == 200
+
+    # Exact inverses across every legal byte, at both ceilings.
+    for ceiling in (100, 200):
+        for byte in range(16, ceiling + 1):
+            assert (
+                flow_percent_to_byte(flow_byte_to_percent(byte, ceiling), ceiling)
+                == byte
+            )
+
+
+def test_flow_slider_bounds_come_from_the_ceiling(valve_model):
+    """The maximum is 100 % by definition — percent is a ratio against the ceiling."""
+    coordinator = make_coordinator([make_valve(valve_model, [31, 11, 1])])
+    flow = next(e for e in collect("number", coordinator) if e.name == "Flow")
+    assert flow.native_max_value == 100
+    assert flow.native_min_value == 8
+    assert flow.extra_state_attributes["maximum_flow_byte"] == 200
+
+
+def test_flow_display_is_unchanged_on_a_200_ceiling(valve_model):
+    """The owner's hardware must read exactly as it did before 0.8.2."""
+    from custom_components.kohler_anthem_plus.anthem_plus.valve_hex import decode_word
+
+    valve = make_valve(valve_model, [31, 11, 1])
+    flow = next(
+        e for e in collect("number", make_coordinator([valve])) if e.name == "Flow"
+    )
+    valve.gcs_state.valve1 = decode_word("0195310100000001")  # byte 49 = 24.5 %
+    assert valve.gcs_state.flow_is_live
+    assert flow.native_value == 24

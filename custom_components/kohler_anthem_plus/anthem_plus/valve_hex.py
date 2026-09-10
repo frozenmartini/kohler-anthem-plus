@@ -206,14 +206,11 @@ TEMPERATURE_BYTE_MAX = 0xE8
 # 26.5 %). The reference integration hardcodes the same 2 and additionally truncates with
 # `byte // 2`, losing the half-percent on the odd bytes both of these valves actually carry.
 #
-# **Still an assumption for other installs.** The app derives percent as a ratio against the
-# reported `maximumFlowRate`, so a valve with a lower ceiling would need `byte / (max / 100)`
-# — writing "100 %" here would send double the intended flow on such a device. `OutletLimits`
-# already reads the real ceiling and `zone_flow_limits()` already bounds the slider with it;
-# finishing the job means threading that ceiling into `encode_word`/`decode_word`, which have
-# no per-valve context today. Deliberately not done blind: the change is a no-op on every
-# device in the corpus (200/100 == 2), so it cannot be verified here, and it writes to
-# hardware that runs water.
+# **Only a default, since 0.8.2.** Percent is a ratio against the outlet's own
+# `maximumFlowRate` — see `flow_byte_to_percent` below — and the Flow entity uses this zone's
+# real ceiling. This constant remains for callers with no per-outlet context (`decode_word`
+# and `encode_word` have 28 call sites and no per-valve context), where it reproduces exactly
+# what every release before 0.8.2 did.
 FLOW_PER_PERCENT = 2
 FLOW_PER_SETPOINT = 4
 
@@ -243,6 +240,33 @@ FLOW_PER_SETPOINT = 4
 FLOW_BYTE_MIN = 0x10
 FLOW_SETPOINT_MAX = 50
 FLOW_BYTE_MAX = 0xC8
+
+
+def flow_byte_to_percent(byte: int, max_flow_byte: int = FLOW_BYTE_MAX) -> float:
+    """Flow byte to percent, as a ratio against the outlet's own ceiling.
+
+    **This is what the Konnect app does**, confirmed from its bytecode: `jj.h$a.X(value, max)`
+    computes `value * 100 / max`, where `max` is that outlet's `maximumFlowrate` read at
+    runtime from the device's own settings. There is no divisor of 2 anywhere in the app's
+    flow path — `byte / 2` is only correct because a ceiling of 200 makes the two agree.
+
+    `max_flow_byte` defaults to 200 so a caller without per-outlet limits behaves exactly as
+    every release before 0.8.2 did.
+    """
+    if max_flow_byte <= 0:  # pragma: no cover - defensive
+        return 0.0
+    return round(byte * 100 / max_flow_byte, 1)
+
+
+def flow_percent_to_byte(percent: float, max_flow_byte: int = FLOW_BYTE_MAX) -> int:
+    """Percent to flow byte — the exact inverse, matching `jj.h$a.Y(percent, max)`.
+
+    The app computes `percent * max / 100` and rounds; so does this.
+    """
+    if max_flow_byte <= 0:  # pragma: no cover - defensive
+        return FLOW_BYTE_MIN
+    return round(percent * max_flow_byte / 100)
+
 
 # Byte 3 = [0x80][pause 0x40][0 0 0][outlet3 0x04][outlet2 0x02][outlet1 0x01]
 #

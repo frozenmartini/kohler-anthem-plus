@@ -43,6 +43,8 @@ from .anthem_plus.valve_hex import (
     FLOW_BYTE_MIN,
     FLOW_PER_PERCENT,
     celsius_to_unit,
+    flow_byte_to_percent,
+    flow_percent_to_byte,
     unit_to_celsius,
 )
 from .const import (
@@ -259,12 +261,12 @@ class ZoneFlowNumber(ZoneNumberBase):
         state = self._state
         if state is None:
             return FLOW_BYTE_MIN / FLOW_PER_PERCENT
-        low, _ = state.zone_flow_limits(self._zone)
+        low, high = state.zone_flow_limits(self._zone)
         # Rounded UP, and away from the forbidden side: an odd limit byte would otherwise put
-        # the bound on a half (byte 17 -> 8.5 %) and, with a whole-number step, every position
-        # on the slider would carry that .5 — defeating the point. Ceiling rather than round,
-        # so the bound never sits below what the valve will accept.
-        return math.ceil(low / FLOW_PER_PERCENT)
+        # the bound on a half and, with a whole-number step, every position on the slider
+        # would carry that .5 — defeating the point. Ceiling rather than round, so the bound
+        # never sits below what the valve will accept.
+        return math.ceil(flow_byte_to_percent(low, high))
 
     @property
     def native_max_value(self) -> float:
@@ -272,9 +274,10 @@ class ZoneFlowNumber(ZoneNumberBase):
         if state is None:
             return FLOW_BYTE_MAX / FLOW_PER_PERCENT
         _, high = state.zone_flow_limits(self._zone)
-        # Floored, mirroring the minimum: rounding a half-valued ceiling upwards would offer
-        # a percent the valve clamps back down, so the slider would not hold its own maximum.
-        return math.floor(high / FLOW_PER_PERCENT)
+        # The ceiling **is** 100 % by definition — percent is a ratio against it, so the
+        # maximum can only be 100. Kept as arithmetic rather than a literal so the two bounds
+        # visibly come from the same place.
+        return math.floor(flow_byte_to_percent(high, high))
 
     @property
     def native_value(self) -> float | None:
@@ -286,10 +289,21 @@ class ZoneFlowNumber(ZoneNumberBase):
         if state is not None and state.flow_is_live:
             word = self._word
             if word is not None:
-                # Rounded to the step. The valve resolves to 0.5 % and this control does not,
-                # so an unrounded 24.5 % would sit between two positions the slider can
-                # occupy — Home Assistant would render a value the user cannot return to.
-                return round(word.flow_percent)
+                # Re-derived from the raw byte against **this zone's own ceiling** rather
+                # than read off `word.flow_percent`, which `decode_word` computes with the
+                # 200 default. Identical wherever the ceiling is 200; correct where it is
+                # not. See `flow_byte_to_percent`.
+                _, high = state.zone_flow_limits(self._zone)
+                # Rounded to the step. The valve resolves finer than this control does, so an
+                # unrounded value would sit between two positions the slider can occupy —
+                # Home Assistant would render a number the user cannot return to.
+                # `word.flow_percent` was decoded against the 200 default, so multiplying
+                # it back recovers the raw byte exactly — `decode_word` does `byte * 100 /
+                # 200`, and this undoes precisely that. Cheaper and less invasive than
+                # threading per-valve limits through the decoder, which has 28 call sites
+                # and no per-valve context.
+                byte = round(word.flow_percent * FLOW_PER_PERCENT)
+                return round(flow_byte_to_percent(byte, high))
         return self._valve.zone_flow.get(self._zone, DEFAULT_FLOW_PERCENT)
 
     @property
@@ -308,14 +322,18 @@ class ZoneFlowNumber(ZoneNumberBase):
             return {}
         low, high = state.zone_flow_limits(self._zone)
         return {
+            # The outlet's own ceiling, in raw byte units. Published because percent is a
+            # ratio against it: two valves showing "50 %" are at the same fraction of their
+            # own maximum, not necessarily the same flow.
+            "maximum_flow_byte": high,
             # False means the value above is what Home Assistant last wrote, not a reading
             # from the valve — see the class docstring.
             "flow_is_live": state.flow_is_live,
             # The byte the valve is actually holding, whatever it means. Published so the
             # idle-byte behaviour stays observable rather than merely asserted.
             "reported_flow_percent": state.flow_percent,
-            "minimum_percent": low / FLOW_PER_PERCENT,
-            "maximum_percent": high / FLOW_PER_PERCENT,
+            "minimum_percent": flow_byte_to_percent(low, high),
+            "maximum_percent": flow_byte_to_percent(high, high),
             # True where the valve reports a single-point range — flow control is off at
             # the fixture, so the slider is fixed and that is the hardware's doing.
             "flow_control_available": low != high,
@@ -323,6 +341,16 @@ class ZoneFlowNumber(ZoneNumberBase):
 
     async def async_set_native_value(self, value: float) -> None:
         key = "zone1_flow" if self._zone == 1 else "zone2_flow"
+        # `async_apply_valve` takes a percent and encodes it against the 200 default, so a
+        # zone with a different ceiling needs the percent restated in those terms: the byte
+        # this percent means on **this** zone, expressed as the percent that produces the
+        # same byte at 200. Identity wherever the ceiling is 200, which is every device in
+        # the corpus.
+        state = self._state
+        if state is not None:
+            _, high = state.zone_flow_limits(self._zone)
+            byte = flow_percent_to_byte(float(value), high)
+            value = flow_byte_to_percent(byte, FLOW_BYTE_MAX)
         await self._valve.async_apply_valve(**{key: float(value)})
         # Remembered on the valve so an idle entity shows what was asked for rather than
         # the byte it happens to be holding, and so an outlet toggle preserves it. Recorded

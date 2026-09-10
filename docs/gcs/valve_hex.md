@@ -354,10 +354,17 @@ maps to a fourth in the real world. The first three are the most likely source o
 > percentage as `h.B(flow, maxFlow)` — a ratio against that outlet's `maximumFlowRate`, which
 > is itself divided by 4 (`AnthemCustomizationActivity:1932`). So **`byte ÷ 2` is correct here
 > only because this install reports `maximumFlowRate` `0xC8` (200) on all six outlets.**
-> `FLOW_PER_PERCENT = 2` in `valve_hex.py` carries that assumption. It is right for this
-> system and wrong for any install with a lower ceiling, where writing "100%" would send
-> double the intended flow. `OutletLimits` already reads the real ceiling; wiring it into the
-> percent conversion is an open item, deliberately not done blind on a device that runs water.
+> **Implemented in 0.8.2.** `flow_byte_to_percent` / `flow_percent_to_byte` in `valve_hex.py`
+> do exactly what the app does, and the Flow entity reads this zone's real ceiling from
+> `OutletLimits` for its bounds, its displayed value, and its writes. `FLOW_PER_PERCENT = 2`
+> survives only as the default for callers with no per-outlet context, where it reproduces
+> the previous behaviour exactly.
+>
+> This was recorded as needing hardware with a different ceiling to verify. That was wrong —
+> the app is the arbiter and was always readable. Confirmed 2026-09-10 from the APK's
+> bytecode: `jj.h$a.X(value, max)` is `value * 100 / max`, `jj.h$a.Y(percent, max)` is
+> `percent * max / 100`, and `max` is `AnthemOutletConfigurationsModel.maximumFlowrate` read
+> at runtime. **No divisor of 2 exists anywhere in the app's flow path.**
 
 On the reference install **flow byte `0xC8` (200, 100%) works out at ~13 gpm**, and byte
 `0x10` (16, the floor) at ~1.04 gpm. That maximum is **system-wide, shared by both zones**,
