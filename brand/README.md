@@ -1,5 +1,13 @@
 # Brand icons
 
+**The shipped PNGs live in `custom_components/kohler_anthem_plus/brand/`.** This folder
+holds the design workbench — `src/` and this README — which is repository-only and
+deliberately not shipped to installs. The two PNGs must sit inside the integration
+directory: Home Assistant's brands proxy reads *the integration's own* `brand/` folder,
+and HACS's `brands` validation looks for `custom_components/<domain>/brand/icon.png`.
+Before the 0.7.0 restructure the integration was the repository root, so a root-level
+`brand/` was inside it; afterwards it was not, which broke both until 0.7.1.
+
 `icon.png` (256×256) and `icon@2x.png` (512×512) are the integration's icons in the
 Home Assistant UI — the integrations dashboard, the config-flow dialog, and the device
 pages. Both are built from `src/icon-v27.svg` — the violet three-tone mark, chosen by
@@ -14,8 +22,8 @@ in `src/variants/`.
 Home Assistant **2026.3** added a brands proxy: brand images are served through the
 local API at `/api/brands/integration/{domain}/{image}` instead of being fetched from
 the CDN by the browser, and **a custom integration's own `brand/` folder takes priority
-over the CDN**. Dropping the PNGs here is the whole setup — no `manifest.json` change,
-no PR to anyone. Confirmed working on this install.
+over the CDN**. Dropping the PNGs in `custom_components/kohler_anthem_plus/brand/` is the
+whole setup — no `manifest.json` change, no PR to anyone. Confirmed working on this install.
 
 This replaces the old route of submitting to `home-assistant/brands` under
 `custom_integrations/`. That folder is now marked *legacy* in the brands repo README,
