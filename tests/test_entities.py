@@ -15,11 +15,12 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from .conftest import make_coordinator, make_valve
+from .conftest import make_controller, make_coordinator, make_valve
 
 PLATFORMS = ("number", "switch", "sensor", "binary_sensor", "select", "button")
 
@@ -471,3 +472,139 @@ def test_monthly_water_is_none_without_a_reading():
     assert _monthly_sensor({}).native_value is None
     assert _monthly_sensor({"gcsUsageDataDetailsList": []}).native_value is None
     assert _monthly_sensor({"gcsUsageDataDetailsList": "nonsense"}).native_value is None
+
+
+# --------------------------------------------------------------------------- #
+# Controller (Anthem Plus) entities
+# --------------------------------------------------------------------------- #
+def _hub(entities, controller_id="hub-test0001"):
+    return [e for e in entities if controller_id in (e.unique_id or "")]
+
+
+def test_every_controller_platform_constructs():
+    """Roughly half the entity classes are controller-side and none was ever built here.
+
+    The 0.6.6 regression — a deleted base-class body, `py_compile` clean, two entities
+    silently missing — was a valve-side class. Nothing would have caught the same mistake on
+    the controller side until this test.
+    """
+    from custom_components.kohler_anthem_plus.anthem_plus.models import get_valve_model
+
+    model = get_valve_model("K-28210")
+    coordinator = make_coordinator(
+        [make_valve(model, [31, 11, 1])], [make_controller(model)]
+    )
+    built = {name: _hub(collect(name, coordinator)) for name in PLATFORMS}
+    # Every platform that has controller entities must produce them; the two that have none
+    # are asserted empty so this notices if that ever changes silently.
+    assert {name for name, entities in built.items() if entities} == {
+        "switch",
+        "sensor",
+        "binary_sensor",
+        "select",
+    }, {name: len(entities) for name, entities in built.items()}
+    total = sum(len(entities) for entities in built.values())
+    assert total >= 10, built
+
+
+def test_controller_and_valve_entities_never_share_an_id():
+    """Both devices carry a Shower switch and a temperature; only the device id separates."""
+    from custom_components.kohler_anthem_plus.anthem_plus.models import get_valve_model
+
+    model = get_valve_model("K-28210")
+    coordinator = make_coordinator(
+        [make_valve(model, [31, 11, 1])], [make_controller(model)]
+    )
+    for name in PLATFORMS:
+        ids = [e.unique_id for e in collect(name, coordinator)]
+        assert len(ids) == len(set(ids)), f"{name}: {sorted(ids)}"
+
+
+def test_two_controllers_do_not_share_ids():
+    """One controller per bathroom is the ordinary case on a large account."""
+    from custom_components.kohler_anthem_plus.anthem_plus.models import get_valve_model
+
+    model = get_valve_model("K-28210")
+    coordinator = make_coordinator(
+        [make_valve(model, [31, 11, 1])],
+        [
+            make_controller(model, device_id="hub-left", name="Anthem Plus Left"),
+            make_controller(model, device_id="hub-right", name="Anthem Plus Right"),
+        ],
+    )
+    for name in PLATFORMS:
+        ids = [e.unique_id for e in collect(name, coordinator)]
+        assert len(ids) == len(set(ids)), f"{name}: {sorted(ids)}"
+
+
+def test_controller_zone_names_match_the_valve_scheme():
+    """0.8.1: a controller said `Zone 1 Temperature` beside the valve's plain `Temperature`.
+
+    Two views of one shower should not read as two different things.
+    """
+    from custom_components.kohler_anthem_plus.anthem_plus.models import get_valve_model
+
+    single = get_valve_model("K-28210")
+    coordinator = make_coordinator(
+        [make_valve(single, [31, 11, 1])], [make_controller(single)]
+    )
+    assert "Temperature" in {e.name for e in _hub(collect("sensor", coordinator))}
+
+    double = get_valve_model("K-28211")
+    coordinator = make_coordinator(
+        [make_valve(double, [31, 11, 1, 31])],
+        [make_controller(double, zones=tuple(double.zones))],
+    )
+    names = {e.name for e in _hub(collect("sensor", coordinator))}
+    assert {"Temperature 1", "Temperature 2"} <= names, sorted(names)
+
+
+# --------------------------------------------------------------------------- #
+# Services
+# --------------------------------------------------------------------------- #
+def test_every_registered_service_is_also_unregistered():
+    """0.7.7 added `probe_usage` to registration and forgot the unload path.
+
+    The action then outlived the last unload with nothing behind it, and calling it reported
+    "no Anthem valve on this account" rather than simply not existing. Asserted by reading
+    both functions' source, so a future service that is registered and never removed fails
+    here rather than becoming a ghost in someone's UI.
+    """
+    import inspect
+    import re
+
+    from custom_components.kohler_anthem_plus import services
+
+    registered = set(
+        re.findall(
+            r"SERVICE_[A-Z_]+", inspect.getsource(services.async_register_services)
+        )
+    )
+    removed = set(
+        re.findall(
+            r"SERVICE_[A-Z_]+", inspect.getsource(services.async_unregister_services)
+        )
+    )
+    assert registered, "no services found — the regex or the function shape changed"
+    assert registered <= removed, sorted(registered - removed)
+
+
+def test_services_yaml_describes_every_registered_service():
+    """A service with no YAML entry appears in the UI with no name, description or fields."""
+    import inspect
+    import re
+
+    import yaml
+
+    from custom_components.kohler_anthem_plus import const, services
+
+    registered = {
+        getattr(const, name)
+        for name in re.findall(
+            r"SERVICE_[A-Z_]+", inspect.getsource(services.async_register_services)
+        )
+        if hasattr(const, name)
+    }
+    path = Path(services.__file__).parent / "services.yaml"
+    described = set(yaml.safe_load(path.read_text(encoding="utf-8")))
+    assert registered <= described, sorted(registered - described)

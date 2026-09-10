@@ -226,20 +226,6 @@ def entry_reload_signature(entry: ConfigEntry) -> tuple[Any, ...]:
     )
 
 
-def describe_zones(zones: list[int]) -> str:
-    """Name a set of zones the way the owner's hardware actually looks.
-
-    A two-zone K-28212 has zones worth naming; a single-zone K-28209/K-28210 has exactly one
-    and "zone(s) 1" reads like a template nobody finished. Shared with `switch.py` so both
-    log paths phrase it identically.
-    """
-    if not zones:
-        return "no zones"
-    if len(zones) == 1:
-        return f"zone {zones[0]}"
-    return f"zones {', '.join(str(zone) for zone in zones)}"
-
-
 def describe_duration(run_times: dict[int, int]) -> str:
     """Max Shower Duration in minutes, the way the Konnect app states it.
 
@@ -523,6 +509,8 @@ class Valve:
         self._warmup_self_write_mode: str | None = None
         self._warmup_restore_task: asyncio.Task | None = None
         self._warmup_restores = 0
+        #: Latches the give-up warning so a persistent fight logs once, not every attempt.
+        self._warmup_gave_up_reported = False
         self._warmup_restored_at: float | None = None
         # CUSTOM SHOWER: the "No pausing warm-up" watcher, one at a time, and
         # a serial that every command sent from here bumps, so the watcher can tell that
@@ -2141,6 +2129,9 @@ class Valve:
             return
         self._warmup_restores = 0
         self._warmup_restored_at = None
+        # Cleared with the counter, so a fight that stops and later restarts is reported
+        # again rather than staying silent for the rest of the run.
+        self._warmup_gave_up_reported = False
         if mode != self.option(CONF_LAST_WARMUP_MODE):
             self.set_option(CONF_LAST_WARMUP_MODE, mode)
 
@@ -2310,6 +2301,20 @@ class Valve:
             and time.monotonic() - self._warmup_restored_at
             < WARMUP_AUTO_RESTORE_SETTLED_SECONDS
         ):
+            # **This is where giving up actually happens**, and until 0.8.1 it happened
+            # silently — the warning lived below, behind a `>` test on a counter this gate
+            # stops at `>=`, so it could not fire. Something rewriting the valve's warmup
+            # mode is exactly what the owner needs told, and it was only ever written to the
+            # journal nobody reads until they already suspect a problem.
+            #
+            # Latched so a persistent fight logs once rather than every time it recurs; the
+            # latch clears in `_remember_warmup_mode` beside the counter, so a fight that
+            # genuinely stops and restarts is reported again.
+            if not self._warmup_gave_up_reported:
+                self._warmup_gave_up_reported = True
+                _LOGGER.warning(
+                    WARMUP_AUTO_RESTORE_GIVING_UP, WARMUP_AUTO_RESTORE_MAX_CONSECUTIVE
+                )
             self._warmup_journal(
                 "restore_skipped",
                 reason="gave up after %d restores that did not stick"
@@ -2345,15 +2350,6 @@ class Valve:
 
         self._warmup_restores += 1
         self._warmup_restored_at = time.monotonic()
-        if self._warmup_restores > WARMUP_AUTO_RESTORE_MAX_CONSECUTIVE:
-            _LOGGER.warning(
-                WARMUP_AUTO_RESTORE_GIVING_UP, WARMUP_AUTO_RESTORE_MAX_CONSECUTIVE
-            )
-            self._warmup_journal(
-                "restore_gave_up", attempts=WARMUP_AUTO_RESTORE_MAX_CONSECUTIVE
-            )
-            return
-
         _LOGGER.warning(
             "Warmup was disabled by something other than Home Assistant. Setting it back "
             "to %s (attempt %d).",

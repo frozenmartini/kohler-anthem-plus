@@ -32,7 +32,6 @@ from .const import (
     MSG_HUB_STEAM,
     SKU_GCS,
     SKU_HUB,
-    WARMUP_DISABLED,
     WARMUP_IN_PROGRESS,
 )
 from .hub import outlet_flags, zone_number
@@ -454,55 +453,22 @@ class GcsState:
                 codes[f"zone{number}"] = word.error_code
         return codes
 
-    @property
-    def _measuring_word(self) -> ValveWord | None:
-        """The first valve actually reporting live measurements, if any.
-
-        The "not populated" signature is the whole measurement block reading zero —
-        temperature AND flow together. Gating on temperature alone would be wrong: the
-        encoding represents sub-25.6 C fine (4.0 C is ``0028C8xx``), and an ice-shower
-        session could legitimately report a very low temperature while water is flowing.
-        Requiring flow to be zero as well keeps that case trustworthy.
-
-        Without this, a unit that never populates the block shows a confident 32 F on a
-        dashboard, which is worse than showing nothing.
-        """
-        for word in (self.valve1, self.valve2):
-            if word is None or word.measured_temperature_celsius is None:
-                continue
-            if (
-                word.measured_temperature_celsius > 0
-                or (word.measured_flow_percent or 0) > 0
-            ):
-                return word
-        return None
-
-    @property
-    def reports_measurements(self) -> bool:
-        """Whether this valve populates the live-feedback half of its status word."""
-        return self._measuring_word is not None
-
-    @property
-    def measured_temperature(self) -> float | None:
-        """Actual water temperature the valve measures, in the account's unit.
-
-        Distinct from the setpoint — the difference is a real drift signal. ``None`` when
-        the valve does not report measurements.
-        """
-        word = self._measuring_word
-        if word is None or word.measured_temperature_celsius is None:
-            return None
-        return celsius_to_unit(word.measured_temperature_celsius, self.temperature_unit)
-
-    @property
-    def measured_flow_percent(self) -> float | None:
-        """Actual flow the valve measures, as a percentage.
-
-        Gated on the temperature reading, because a measured flow of 0 is legitimate for a
-        closed valve and cannot itself distinguish "closed" from "not reported".
-        """
-        word = self._measuring_word
-        return None if word is None else word.measured_flow_percent
+    # ---------------------------------------------------------------- #
+    # The measurement block: decoded, but not surfaced
+    # ---------------------------------------------------------------- #
+    # `ValveWord.measured_temperature_celsius` and `.measured_flow_percent` are decoded from
+    # bytes 5-6 and published as attributes on the Hex sensor and in diagnostics. Four
+    # `GcsState` properties used to wrap them — `_measuring_word`, `reports_measurements`,
+    # `measured_temperature`, `measured_flow_percent` — for a binary sensor that was removed
+    # in 0.6.x; nothing has called them since, so they went with 0.8.1.
+    #
+    # **The knowledge in them is worth keeping.** A valve that does not populate the block
+    # reports the whole thing as zero, temperature AND flow together, and any future reader
+    # must gate on both: the encoding represents sub-25.6 C fine (4.0 C is `0028C8xx`), so an
+    # ice-shower session can legitimately report a very low temperature while water flows.
+    # Gating on temperature alone would discard that case, and gating on flow alone cannot
+    # distinguish "closed" from "not reported". Without the pair, a unit that never populates
+    # the block shows a confident 32 F on a dashboard — worse than showing nothing.
 
     @property
     def temperature(self) -> float | None:
@@ -615,18 +581,6 @@ class GcsState:
         changed |= reading != previous
         self.total_flow_filtered = reading
         return changed
-
-    @property
-    def warmup_enabled(self) -> bool | None:
-        """Whether warmup is enabled on the fixture.
-
-        When disabled, Kohler's cloud accepts a warmup command with HTTP 200 and the device
-        ignores it — so surfacing this is the difference between a silent no-op and a clear
-        message.
-        """
-        if self.warmup_mode is None:
-            return None
-        return self.warmup_mode != WARMUP_DISABLED
 
     def apply_envelope(self, envelope: Envelope) -> bool:
         """Apply a GCS message. Returns True if Home Assistant should re-render.

@@ -48,8 +48,8 @@ def slug(name: str) -> str:
     return "_".join(part.lower() for part in name.split())
 
 
-def zone_label(valve: Valve, zone: int, label: str) -> str:
-    """`Temperature` on a single-zone valve, `Temperature 2` on a two-zone one.
+def zone_label(device: Valve | Controller, zone: int, label: str) -> str:
+    """`Temperature` on a single-zone device, `Temperature 2` on a two-zone one.
 
     With one zone there is nothing to disambiguate, and a number on every entity of a
     3-outlet valve is noise. A multi-zone valve appends the zone number, because a bare
@@ -59,8 +59,13 @@ def zone_label(valve: Valve, zone: int, label: str) -> str:
     in every Home Assistant list — `Temperature`, `Temperature 2` rather than `Temperature`
     stranded away from `Zone 2 Temperature` — and it reads the way the fixtures do
     (`Showerhead 1`, `Showerhead 2`).
+
+    Takes a valve or a controller — both carry a `model`, and only the zone count is read,
+    so the controller's own zone entities are named the same way the valve's are. They were
+    not, until 0.8.1: a controller showed `Zone 1 Temperature` beside the valve's plain
+    `Temperature`, which read as two different things rather than two views of one shower.
     """
-    if len(valve.model.zones) <= 1:
+    if len(device.model.zones) <= 1:
         return label
     return f"{label} {zone}"
 

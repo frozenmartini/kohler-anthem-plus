@@ -162,10 +162,47 @@ def make_valve(model, types, *, device_id="gcs-test0001", run_time=1800):
     )
 
 
-def make_coordinator(valves):
+def make_controller(model, *, device_id="hub-test0001", name="Anthem Plus", zones=(1,)):
+    """A `Controller` stand-in carrying what controller entities touch.
+
+    `HubState` and `HubCapabilities` are the **real** classes rather than fakes — they are
+    plain dataclasses with no I/O, so constructing them exercises the actual decode paths an
+    entity reads through, which is the point of the exercise. Everything a `Controller`
+    reaches out to (the cloud command surface) is stubbed.
+    """
+    from custom_components.kohler_anthem_plus.anthem_plus.hub import HubCapabilities
+    from custom_components.kohler_anthem_plus.anthem_plus.state import HubState, HubZone
+
+    state = HubState(model=model)
+    for zone in zones:
+        state.zones[zone] = HubZone(
+            outlets=[False] * model.outlets_in_zone(zone),
+            temperature=38.0,
+        )
+    state.last_update = 1_700_000_000.0
+
+    return SimpleNamespace(
+        device=SimpleNamespace(device_id=device_id, serial_number="HUB-SN-TEST"),
+        device_id=device_id,
+        hub=SimpleNamespace(device_id=device_id),
+        state=state,
+        name=name,
+        model=model,
+        # `known=True` so capability-gated entities are actually created; an unknown
+        # controller creates almost nothing, which would defeat the point of the test.
+        capabilities=HubCapabilities(
+            water=True, music=True, light=True, steam=True, known=True
+        ),
+        favorites=[],
+        water_is_running=False,
+        report_log=SimpleNamespace(enabled=False, path=None),
+    )
+
+
+def make_coordinator(valves, controllers=()):
     return SimpleNamespace(
         valves=list(valves),
-        controllers=[],
+        controllers=list(controllers),
         temperature_unit="Fahrenheit",
         water_units="Standard",
         model=valves[0].model,

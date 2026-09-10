@@ -815,7 +815,7 @@ class ControllerZoneTemperatureSensor(KohlerControllerEntity, SensorEntity):
     ) -> None:
         super().__init__(coordinator, controller)
         self._zone = zone
-        self._attr_name = f"Zone {zone} Temperature"
+        self._attr_name = zone_label(controller, zone, "Temperature")
         self._attr_unique_id = f"{self._device_id}_zone_{zone}_temperature"
         fahrenheit = coordinator.temperature_unit.lower().startswith("f")
         self._attr_native_unit_of_measurement = (

@@ -658,6 +658,14 @@ def async_unregister_services(hass: HomeAssistant) -> None:
     Tolerates never having been registered — a HUB-only account gets here having skipped
     registration entirely.
     """
-    for service in (SERVICE_SEND_VALVE_HEX, SERVICE_CUSTOM_SHOWER):
+    # Every service registered above belongs here. `probe_usage` was missed when it was
+    # added in 0.7.7, so it outlived the last unload: the action stayed in the registry with
+    # nothing behind it, and calling it reported "no Anthem valve on this account" — an error
+    # about the wrong thing entirely — instead of simply not existing.
+    for service in (
+        SERVICE_SEND_VALVE_HEX,
+        SERVICE_CUSTOM_SHOWER,
+        SERVICE_PROBE_USAGE,
+    ):
         if hass.services.has_service(DOMAIN, service):
             hass.services.async_remove(DOMAIN, service)
