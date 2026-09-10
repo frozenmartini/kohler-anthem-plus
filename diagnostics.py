@@ -41,6 +41,7 @@ from .const import (
     CONF_REFRESH_TOKEN,
     CONF_TENANT_ID,
     DOMAIN,
+    OUTLET_TYPE_NAMES,
     PRESET_HIDDEN_IDS,
 )
 from .coordinator import Controller, KohlerAnthemPlusCoordinator, Valve
@@ -140,6 +141,14 @@ def _valve_report(valve: Valve) -> dict[str, Any]:
                 # app shows for the same fixture — only three of them are documented, and
                 # a name map has to be built from evidence rather than guessed.
                 "outlet_type": lim.outlet_type,
+                # None for a code this integration cannot name yet — which is the useful
+                # signal in a hardware report, since it says exactly which codes still
+                # need an owner to confirm what the fixture is.
+                "outlet_type_name": (
+                    None
+                    if lim.outlet_type is None
+                    else OUTLET_TYPE_NAMES.get(lim.outlet_type)
+                ),
             }
             for outlet_id, lim in sorted(gcs.outlet_limits.items())
         },

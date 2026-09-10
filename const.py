@@ -406,6 +406,39 @@ RELOAD_IGNORED_DATA_KEYS = frozenset(
 #
 # Consequence to keep in mind: if the wall panel sets a temperature below the minimum, the
 # entity still *reports* it, but the slider cannot represent it accurately.
+# ---------------------------------------------------------------------------
+# Outlet type codes
+# ---------------------------------------------------------------------------
+# The valve reports a type code per outlet in `outLetType`. These are the codes whose
+# meaning is **confirmed**, not the full set — an unrecognised code is published as a bare
+# number and given no name, because a wrong fixture name is worse than an honest number.
+#
+# Provenance, because it decides how much these can be trusted:
+#
+# * `1`, `11`, `21` — documented in `docs/hub/cloud_api.md` §"Outlet position → physical
+#   outlet", which also warns that other codes are install-specific.
+# * `62`, `52` — resolved 2026-09-10 from an owner-confirmed K-28210 whose zone 1 reads
+#   Rainhead / Showerhead / Handshower against ids 0/1/2. The third of those, type `1`,
+#   independently reproduced the documented `1 = handshower`, which is what makes the
+#   other two credible rather than merely plausible.
+# * `39`, `38` — seen in the corpus but **never confirmed against a fixture**, so they are
+#   deliberately absent. The two devices also disagree about id 4 (39 on the valve, 38 on
+#   the controller) for the same physical outlet, so guessing here would be doubly unsafe.
+#
+# **This is a label, not behaviour.** The valve derives no flow envelope from the type; the
+# controller does. Nothing in this integration reads these names to decide anything.
+#
+# The Konnect app's own outlet names are *not* here because they are not transmitted: no
+# name string appears anywhere in the captured API surface, so a rename in the app cannot
+# be read back. These are fixture types, which is the closest the hardware gets.
+OUTLET_TYPE_NAMES: dict[int, str] = {
+    1: "Handshower",
+    11: "Showerhead",
+    21: "Tub Filler",
+    52: "Showerhead",
+    62: "Rainhead",
+}
+
 UI_TEMPERATURE_MIN_F = 80
 UI_TEMPERATURE_MAX_F = 113
 

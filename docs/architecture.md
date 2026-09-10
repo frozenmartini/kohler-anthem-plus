@@ -123,6 +123,24 @@ describes the zones of the first unit and is what a 6-outlet system actually has
 Both devices store an **outlet type** per outlet (codes like 62, 52, 1, 11, 39, 21 —
 handshower, rainshower, tub filler, and so on). What the type *does* differs:
 
+| Code | Fixture | Provenance |
+|---|---|---|
+| `1` | Handshower | `docs/hub/cloud_api.md` |
+| `11` | Showerhead | `docs/hub/cloud_api.md` |
+| `21` | Tub filler | `docs/hub/cloud_api.md`; matches the owner-confirmed tub filler at zone 2 outlet 3 |
+| `52` | Showerhead | Owner-confirmed, K-28210, 2026-09-10 |
+| `62` | Rainhead | Owner-confirmed, K-28210, 2026-09-10 |
+| `38`, `39` | **unknown** | Seen in the corpus, never confirmed against a fixture |
+
+The 2026-09-10 install reads Rainhead / Showerhead / Handshower across ids 0/1/2, and its
+third outlet is type `1` — independently reproducing the documented `1 = handshower`, which
+is what makes `62` and `52` credible rather than merely plausible. `OUTLET_TYPE_NAMES` in
+`const.py` carries exactly the confirmed rows; an unrecognised code is published as a bare
+number with no name.
+
+**The Konnect app's outlet names are not these.** No name string is transmitted anywhere in
+either API, so a rename made in the app cannot be read back. These are fixture types.
+
 | Device | How flow limits are derived | Does outlet type matter? |
 |---|---|---|
 | **Anthem** (GCS valve) | From the **flow calibration figure alone** | **No** — the type is a label |

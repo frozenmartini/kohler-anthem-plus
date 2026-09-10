@@ -39,6 +39,7 @@ from .const import (
     DOMAIN,
     ENDLESS_SHOWER_NOT_SET_UP,
     ENDLESS_SHOWER_ON,
+    OUTLET_TYPE_NAMES,
     SHOWER_ON_PRESET_ID,
     WARMUP_AUTO_RESTORE_DELAY_SECONDS,
     WARMUP_AUTO_RESTORE_NO_TARGET,
@@ -428,6 +429,12 @@ class ZoneOutletSwitch(KohlerValveEntity, SwitchEntity):
         outlet_type = self._outlet_type(state)
         if outlet_type is not None:
             attributes["outlet_type"] = outlet_type
+            # Only for codes whose meaning is confirmed — see `OUTLET_TYPE_NAMES`. An
+            # unrecognised code leaves this key absent rather than inventing a fixture
+            # name, so a missing name reads as "not known" and never as a wrong answer.
+            name = OUTLET_TYPE_NAMES.get(outlet_type)
+            if name is not None:
+                attributes["outlet_type_name"] = name
         return attributes
 
     def _outlet_type(self, state: Any) -> int | None:
