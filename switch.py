@@ -121,10 +121,18 @@ class ShowerSwitch(KohlerValveEntity, SwitchEntity):
     """
 
     _attr_icon = "mdi:shower"
-    _attr_name = "Shower"
+    # **Renamed from "Shower" in 0.6.5.** Beside the outlet switches — `Rainhead`,
+    # `Showerhead`, `Handshower` — a plain "Shower" read as one more outlet, when it is the
+    # opposite: the whole-shower control that drives the valves themselves. The name says
+    # which thing it acts on rather than what the water comes out of.
+    _attr_name = "Shower Valves"
 
     def __init__(self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve) -> None:
         super().__init__(coordinator, valve)
+        # Unchanged deliberately: the entity id follows this, and `_shower` is what every
+        # existing automation and dashboard refers to. A friendlier label is not worth
+        # breaking them — unlike the outlet rename, which replaced a name that carried no
+        # information at all.
         self._attr_unique_id = f"{self._device_id}_shower"
         self._optimistic: bool | None = None
 

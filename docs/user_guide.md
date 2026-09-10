@@ -168,7 +168,7 @@ becomes `switch.anthem_plus_master_bath_shower` and `switch.anthem_valve_shower`
 
 | Entity | Type | What it does |
 |---|---|---|
-| `Shower` | switch | Turns the shower on or off. From cold it opens **the valve's own default outlets**; if outlets are already open it preserves them |
+| `Shower Valves` | switch | Turns the shower on or off. From cold it opens **the valve's own default outlets**; if outlets are already open it preserves them |
 | `Zone N Outlet M` | switch | One per outlet |
 | `Zone N Temperature` | number | Setpoint for that zone, in your account's unit |
 | `Favourite` | select | Presets **stored on the valve**, added in the Konnect app or at the first-generation touchscreen |
@@ -217,8 +217,8 @@ two views of one set of settings. Each stores its own, and they can differ.
 **Default outlets.** Press the dial on the first-generation touchscreen and the **valve's**
 default outlets open. Press the dial on the Anthem+ screen and the **controller's** defaults
 open. These are separate settings, so the same gesture on two screens in the same room can
-start two different showers. The `Shower` switch on each Home Assistant device does exactly
-what that device's dial does.
+start two different showers. The `Shower Valves` switch on the valve, and `Shower` on
+the controller, each do exactly what that device's dial does.
 
 **Favourites.** Both lists can be built either in the Konnect app or at the matching
 touchscreen, but they are stored in different places — valve favourites live on the valve,
@@ -293,7 +293,7 @@ twice, once per device:
 
 | Name | On the valve | On the controller |
 |---|---|---|
-| `Shower` | switch — opens **the valve's own default outlets** | switch — opens **the controller's own default outlets**, a separate setting |
+| `Shower Valves` / `Shower` | switch — opens **the valve's own default outlets** | switch — opens **the controller's own default outlets**, a separate setting |
 | `Favourite` | select — presets **stored on the valve** | select — favourites **stored on the controller**; a different list |
 | `Status` | sensor — `Water Running` / `Paused` / `Warming Up` / `Idle` | sensor — `Water Running` / `Warming Up` / `Idle` |
 | `Zone N Temperature` | **number** — the setpoint, writable | **sensor** — read-only |
