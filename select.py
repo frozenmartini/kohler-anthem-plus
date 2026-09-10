@@ -408,10 +408,25 @@ class ValveWarmupSelect(OptimisticOptionMixin, KohlerValveEntity, SelectEntity):
         state = self._state
         if state is None:
             return {}
-        return {
+        attributes: dict[str, Any] = {
             "warmup_mode": state.warmup_mode,
             "warmup_in_progress": state.warmup_in_progress,
         }
+        # **A valve that has never reported a mode is not the same as one set to Off**, and
+        # the difference is not otherwise visible: both read blank here. Seen on a
+        # controller-free K-28210 pair where one valve reports `warmUpDisabled` and the
+        # other reports nothing at all — no `warmUpState` in its REST seed and no
+        # `GCS_WARM_STS` since. A write to such a valve is accepted by the cloud with
+        # HTTP 200 and may simply be ignored, which looks identical to it working.
+        if state.warmup_mode is None:
+            attributes["mode_never_reported"] = True
+            attributes["note"] = (
+                "This valve has not reported a warm-up mode. The cloud accepts a warm-up "
+                "command with HTTP 200 whether or not the valve applies it, so a change "
+                "made here may silently do nothing. Watch this entity after setting it: "
+                "if the value does not stick, the valve is not honouring the command."
+            )
+        return attributes
 
     async def async_select_option(self, option: str) -> None:
         """Write the mode behind the chosen label.

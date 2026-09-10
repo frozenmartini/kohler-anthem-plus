@@ -483,12 +483,27 @@ class GcsState:
 
     @property
     def flow_is_live(self) -> bool:
-        """Whether `flow_percent` is the flow somebody actually asked for.
+        """Whether water is actually moving, so the flow byte describes a running shower.
 
-        The flow byte is only meaningful while an outlet is open. On an idle valve it is
-        not the commanded flow: 296 words in the corpus carry a flow other than 100 % with
-        nothing open, in recurring pairs like 34.5 %/82.5 %. So anything presenting "the
-        flow setting" must gate on this, or it will show a number nobody chose.
+        **Advisory, not a reason to hide the value.** This says "an outlet is open and the
+        valve is not paused" — nothing more. It was originally documented as deciding
+        whether the byte was meaningful at all, and that is too strong a reading of the
+        evidence:
+
+        * On the capture-corpus install, 296 idle words carry a flow nobody selected, in
+          *recurring pairs* like 34.5 %/82.5 %, with the value collapsing and returning
+          seconds later. There the idle byte genuinely is noise.
+        * On a controller-free K-28210 pair (2026-09-10), the idle bytes are **stable** —
+          24.5 % and 26.5 %, byte-identical across reports 2 h 23 m apart, one value per
+          valve. Nothing there looks transient, and they read as stored per-zone settings.
+
+        Both observations are real; neither generalises to the other install. So a consumer
+        should present the byte and *flag* whether water is moving, rather than blanking a
+        number that may be the valve's actual setting. A control especially cannot hide it:
+        a slider with no value cannot be dragged.
+
+        See `docs/gcs/api.md` for the corpus evidence and `docs/architecture.md` for the
+        contrast between the two installs.
         """
         word = self.valve1
         if word is None:

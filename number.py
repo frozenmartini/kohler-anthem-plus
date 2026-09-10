@@ -167,10 +167,13 @@ class ZoneFlowNumber(ZoneNumberBase):
     > between 2026-08-13 and 2026-09-10. If yours behaves that way, disable this entity —
     > the protocol layer is unaffected either way.
 
-    Reading is honest about the same caveat the Flow sensor documented: the flow byte is
-    only meaningful while an outlet is open. Unlike a sensor, though, a number must always
-    return a value — a control that reads `unknown` cannot be dragged — so it reports the
-    byte the valve is holding and flags whether that is live in `flow_is_live`.
+    **The value is always the byte the valve is holding**, with `flow_is_live` saying
+    whether water is moving. That flag is advisory and not a reason to distrust the number:
+    on the capture-corpus install an idle valve carries a flow nobody chose, transient and
+    collapsing within seconds, but on a controller-free K-28210 pair the idle bytes are
+    stable to the half-percent across hours (24.5 % and 26.5 %, one per valve) and read as
+    stored per-zone settings. A control cannot hide a value it may need to be dragged from,
+    and on the second kind of install hiding it would be wrong anyway.
     """
 
     _attr_icon = "mdi:water-percent"
@@ -214,14 +217,27 @@ class ZoneFlowNumber(ZoneNumberBase):
 
     @property
     def extra_state_attributes(self) -> dict[str, object]:
-        """Whether the reading is the flow somebody actually chose.
+        """Whether water is moving, and the valve's own bounds for this zone.
 
-        On an idle valve the byte is not the commanded flow — 296 words in the capture
-        corpus carry a flow nobody selected with no outlet open. The sensor this replaced
-        hid the value in that case; a control cannot, so it is flagged instead.
+        `flow_is_live` is **information, not a warning**: it says an outlet is open, which
+        is worth knowing when reading history, but the value is trustworthy either way on
+        hardware whose idle byte is stable. See `GcsState.flow_is_live`.
+
+        The bounds are published too, because a valve with flow control disabled reports a
+        narrow range and a slider that will not move needs to say why.
         """
         state = self._state
-        return {"flow_is_live": bool(state and state.flow_is_live)}
+        if state is None:
+            return {}
+        low, high = state.zone_flow_limits(self._zone)
+        return {
+            "flow_is_live": state.flow_is_live,
+            "minimum_percent": low / FLOW_PER_PERCENT,
+            "maximum_percent": high / FLOW_PER_PERCENT,
+            # True where the valve reports a single-point range — flow control is off at
+            # the fixture, so the slider is fixed and that is the hardware's doing.
+            "flow_control_available": low != high,
+        }
 
     async def async_set_native_value(self, value: float) -> None:
         key = "zone1_flow" if self._zone == 1 else "zone2_flow"
