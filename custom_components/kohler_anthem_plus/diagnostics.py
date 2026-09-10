@@ -273,10 +273,11 @@ def _valve_report(valve: Valve) -> dict[str, Any]:
         "system_state": gcs.system_state,
         "water": {
             # Raw and filtered both, so a report shows whether the glitch filter fired and
-            # by how much — see `GcsState._accept_total_flow`.
+            # `totalFlow` exactly as the cloud sent it. **Not a meter** — it takes three
+            # distinct values and shifts between two scales 4x apart with no water running
+            # (see `GcsState.total_flow`). Reported because it is the evidence for that open
+            # question, not because it means anything.
             "total_flow_raw": gcs.total_flow,
-            "total_flow_published": gcs.total_flow_gallons,
-            "glitch_frames_ignored": gcs.total_flow_glitches,
             # Undocumented unit; recorded so the question can be settled from real reports.
             "total_volume": gcs.total_volume,
         },

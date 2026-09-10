@@ -309,20 +309,22 @@ class GcsState:
     # messages and does not behave like a monotonic counter, so any statistics built on it
     # would be meaningless.
     total_volume: str | None = None
-    # Lifetime water total in US gallons, from `totalFlow`. **Not trustworthy frame by
-    # frame** — the corpus has it collapsing to `2` and returning to its previous value
-    # seconds later, three times on separate days. `total_flow` holds the raw reading;
-    # `total_flow_gallons` below is the filtered one, and is what an entity should read.
+    # 🚫 **`totalFlow`, and it is not a water meter.** Recorded raw for diagnostics only; no
+    # entity publishes it, and `Total Water Used` was retired in 0.14.0 because it did.
+    #
+    # Across the whole reference corpus — ten captures over two days, both valves — this field
+    # took **three distinct values** (2056.0, 6283.25, 8224.0 on one valve) and cycled among
+    # them with **no water running and every outlet closed**. Worse, the values come in pairs
+    # exactly 4x apart: 2056/8224, 6488.75/25955, 3659.25/14637 — so the cloud serves one
+    # underlying number at two scales and which one arrives varies per read.
+    #
+    # ⚠️ **That 4x is what produced the 0.7.3 divide-by-four bug.** Two captures a day apart
+    # showed a clean 4.0 ratio and it was read as a unit conversion. It was two members of a
+    # repeating set, and a divisor was right half the time and wrong the other half.
+    #
+    # Water figures come from `gcs-usage` instead — Kohler's own per-month series, in litres,
+    # the same data the app charts. See `ValveMonthlyWaterSensor`, `ValveYearlyWaterSensor`.
     total_flow: float | None = None
-    # The last reading accepted as real, and how many frames have been rejected since the
-    # integration started. Both exist so the filter can be audited from an entity attribute
-    # rather than only from a log.
-    total_flow_filtered: float | None = None
-    total_flow_glitches: int = 0
-    # The reading rejected immediately before this one, if any. A second low reading that
-    # is consistent with the first means the drop is real, not a glitch — see
-    # `_accept_total_flow`.
-    _total_flow_pending: float | None = None
     # `currentSystemState` — `normalOperation` or `showerInProgress`, as the valve itself
     # reports it. Kept as the device's own string rather than folded into the four-state
     # `Status` vocabulary, because it is a second, independent opinion: it is the valve's
@@ -539,77 +541,19 @@ class GcsState:
             return False
         return bool(word.outlet_mask) and not word.paused
 
-    @property
-    def total_flow_gallons(self) -> float | None:
-        """Lifetime water total in US gallons, with the known glitch frames filtered out.
+    def _accept_total_flow_raw(self, value: object) -> bool:
+        """Record `totalFlow` verbatim. True if it changed.
 
-        This is the value an entity should publish. `total_flow` is the raw reading and
-        keeps whatever the device last said, glitch included.
-
-        **Reported as-is.** 0.7.3 divided this by four and 0.7.6 reverted that. The owner's
-        Konnect app read 2056.00 and 6488.75 for the two valves, which are exactly the raw
-        counter values from the capture taken at 01:59Z that day — so the app agrees with the
-        raw field and no divisor belongs here. The 4x that appeared between that capture and
-        the one at 11:44Z was the counter moving during the day, not a change of unit, and
-        treating it as a scale made the sensor read a quarter of the truth.
-        """
-        return self.total_flow_filtered
-
-    def _accept_total_flow(self, value: object) -> bool:
-        """Fold one `totalFlow` reading into the raw and filtered totals.
-
-        Returns True if anything changed. The filter exists because the device emits an
-        occasional frame where `totalFlow` collapses to near-zero and is back at its
-        previous value seconds later — see `docs/gcs/valve_hex.md`. Published unfiltered
-        as a `total_increasing` sensor, one such frame tells Home Assistant the meter was
-        replaced and injects a phantom ~1650-gallon spike into long-term statistics, which
-        is effectively permanent once recorded.
-
-        A reading is rejected when it drops **below half** the last accepted one. That
-        threshold is deliberately loose: every observed glitch is a collapse to ~0 from
-        four figures.
-
-        **A low reading is only ever rejected once.** A genuine counter reset — a valve
-        replaced, or firmware zeroing the total — also arrives as a collapse, and would
-        otherwise be rejected for ever, freezing the sensor at a value the device has
-        stopped reporting. So the first low reading is held aside; if the *next* one is
-        also low, the drop is treated as real and adopted. A glitch costs nothing, because
-        the frame after it is back at the old value and clears the hold. A real reset
-        costs one frame of delay.
+        No filtering, because there is nothing coherent to filter — see the field's own note.
+        It is kept solely so a diagnostics report still carries what the cloud sent, which is
+        the evidence for the open question about what this field actually is.
         """
         try:
             reading = float(str(value))
         except (TypeError, ValueError):
             return False
-
         changed = reading != self.total_flow
         self.total_flow = reading
-
-        previous = self.total_flow_filtered
-        if previous is not None and reading < previous / 2:
-            if self._total_flow_pending is None:
-                # First low reading: hold it aside and publish nothing.
-                self._total_flow_pending = reading
-                self.total_flow_glitches += 1
-                _LOGGER.debug(
-                    "Holding totalFlow drop: %s after %s (%d rejected so far)",
-                    reading,
-                    previous,
-                    self.total_flow_glitches,
-                )
-                # The raw field moved even though the published one did not, so an
-                # enabled diagnostic attribute still reflects it.
-                return changed
-            # Two low readings in a row — the drop is real. Fall through and adopt it.
-            _LOGGER.info(
-                "totalFlow has stayed low (%s then %s); treating as a counter reset",
-                self._total_flow_pending,
-                reading,
-            )
-
-        self._total_flow_pending = None
-        changed |= reading != previous
-        self.total_flow_filtered = reading
         return changed
 
     def apply_envelope(self, envelope: Envelope) -> bool:
@@ -763,7 +707,7 @@ class GcsState:
             changed |= volume != self.total_volume
             self.total_volume = volume
         if (flow_total := attribute.get("totalFlow")) is not None:
-            changed |= self._accept_total_flow(flow_total)
+            changed |= self._accept_total_flow_raw(flow_total)
         if (system := attribute.get("currentSystemState")) is not None:
             system = str(system)
             changed |= system != self.system_state
@@ -848,7 +792,7 @@ class GcsState:
             self.warmup_in_progress = _is_warmup_in_progress(progress)
         self.total_volume = state.get("totalVolume") or self.total_volume
         if (flow_total := state.get("totalFlow")) is not None:
-            self._accept_total_flow(flow_total)
+            self._accept_total_flow_raw(flow_total)
         if (system := state.get("currentSystemState")) is not None:
             self.system_state = str(system)
         if "presetOrExperienceId" in state:

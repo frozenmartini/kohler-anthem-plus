@@ -78,7 +78,6 @@ async def async_setup_entry(
         entities += [
             ValveStatusSensor(coordinator, valve),
             ValveSystemStateSensor(coordinator, valve),
-            ValveTotalWaterSensor(coordinator, valve),
             ValveMonthlyWaterSensor(coordinator, valve),
             ValveYearlyWaterSensor(coordinator, valve),
             ValveLastUpdateSensor(coordinator, valve),
@@ -273,74 +272,6 @@ class ValveSystemStateSensor(KohlerValveEntity, SensorEntity):
             # yet know about.
             "reported": reported,
             "recognised": reported in self._attr_options if reported else None,
-        }
-
-
-class ValveTotalWaterSensor(KohlerValveEntity, SensorEntity):
-    """Lifetime water used, from the valve's `totalFlow`, in the account's unit.
-
-    **Glitch-filtered.** The device emits an occasional frame where `totalFlow` collapses
-    to near-zero and is back at its previous value seconds later — three times on separate
-    days in the corpus. As a `total_increasing` sensor, one such frame reads to Home
-    Assistant as a meter replacement and injects a phantom spike the size of the whole
-    counter into long-term statistics, which cannot easily be undone once recorded. So the
-    published value comes from `total_flow_gallons`, which holds the last good reading
-    across a collapse; `GcsState._accept_total_flow` carries the rule and the reasoning.
-
-    `totalFlow` is reported in US gallons and is converted for a `Liters` account. It is
-    published as the device sends it: 0.7.3 divided it by four on a misreading and 0.7.6
-    reverted that — see `GcsState.total_flow_gallons`.
-
-    This is a **lifetime** total: Kohler exposes no per-session volume, and `totalVolume` —
-    the other counter in the same message, reading in the hundreds of millions — has no
-    established unit and is published only as an attribute here.
-    """
-
-    _attr_name = "Total Water Used"
-    _attr_icon = "mdi:water"
-    _attr_device_class = SensorDeviceClass.WATER
-    _attr_state_class = SensorStateClass.TOTAL_INCREASING
-
-    def __init__(self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve) -> None:
-        super().__init__(coordinator, valve)
-        self._attr_unique_id = f"{self._device_id}_total_water"
-
-    @property
-    def _metric(self) -> bool:
-        return self.coordinator.water_units == "Liters"
-
-    @property
-    def native_unit_of_measurement(self) -> str:
-        return UnitOfVolume.LITERS if self._metric else UnitOfVolume.GALLONS
-
-    @property
-    def native_value(self) -> float | None:
-        state = self._state
-        if state is None:
-            return None
-        gallons = state.total_flow_gallons
-        if gallons is None:
-            return None
-        if self._metric:
-            return round(gallons * _LITERS_PER_GALLON, 1)
-        return round(gallons, 1)
-
-    @property
-    def extra_state_attributes(self) -> dict[str, object]:
-        """The raw counters and the filter's own tally, so it can be audited.
-
-        `raw_total_flow` is what the last message actually carried — during a glitch frame
-        it differs from the published state, which is the one case where seeing both
-        matters.
-        """
-        state = self._state
-        if state is None:
-            return {}
-        return {
-            "raw_total_flow": state.total_flow,
-            # Undocumented unit; exposed for anyone wanting to settle what it counts.
-            "total_volume": state.total_volume,
-            "glitch_frames_ignored": state.total_flow_glitches,
         }
 
 

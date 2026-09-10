@@ -322,24 +322,49 @@ def test_multi_zone_names_stay_unique_across_every_platform():
 # --------------------------------------------------------------------------- #
 # Water total: published exactly as the device reports it
 # --------------------------------------------------------------------------- #
-@pytest.mark.parametrize(
-    ("raw", "expected"),
-    [
-        # The owner's Konnect app read 2056.00 and 6488.75 for the two valves, which are
-        # exactly these raw counter values. 0.7.3 divided by four on a misreading of which
-        # capture those app figures matched; 0.7.6 reverted it. No scaling belongs here.
-        (2056.0, 2056.0),
-        (6488.75, 6488.75),
-        (8224.0, 8224.0),
-        (413.25, 413.25),
-        (None, None),
-    ],
-)
-def test_total_flow_is_published_unscaled(raw, expected):
+def test_the_total_water_sensor_is_gone():
+    """`Total Water Used` was retired in 0.14.0 — `totalFlow` is not a meter.
+
+    Across the reference corpus that field took three distinct values and cycled among them
+    with no water running, in pairs exactly 4x apart. As a `total_increasing` sensor every
+    shift read as a meter replacement. The 0.7.3 divide-by-four bug came from reading that
+    same 4x as a unit conversion.
+    """
+    import custom_components.kohler_anthem_plus.sensor as sensor_module
+
+    assert not hasattr(sensor_module, "ValveTotalWaterSensor")
+
+
+def test_no_entity_publishes_total_flow(valve_model):
+    """The field is kept for diagnostics only; nothing may publish it again."""
+    coordinator = make_coordinator([make_valve(valve_model, [31, 11, 1])])
+    ids = [e.unique_id for e in collect("sensor", coordinator)]
+    assert not any(i.endswith("_total_water") for i in ids), sorted(ids)
+
+
+def test_the_retired_sensor_is_purged_from_the_registry():
+    """A removed entity leaves a permanently unavailable registry row unless purged.
+
+    `_async_purge_removed_diagnostics` clears them by unique-id suffix; without the suffix
+    listed there, every existing install keeps a dead `Total Water Used` row for ever.
+    """
+    from custom_components.kohler_anthem_plus import _REMOVED_UNIQUE_ID_SUFFIXES
+
+    assert "_total_water" in _REMOVED_UNIQUE_ID_SUFFIXES
+
+
+def test_total_flow_is_still_recorded_raw_for_diagnostics(valve_model):
+    """It is the evidence for the open question, so the raw value must survive."""
     from custom_components.kohler_anthem_plus.anthem_plus.state import GcsState
 
-    holder = SimpleNamespace(total_flow_filtered=raw)
-    assert GcsState.total_flow_gallons.fget(holder) == expected
+    state = GcsState(valve_model, "Fahrenheit")
+    assert state._accept_total_flow_raw("8224.0") is True
+    assert state.total_flow == 8224.0
+    # Unfiltered now: a value the old glitch filter would have held is taken verbatim.
+    assert state._accept_total_flow_raw("2.0") is True
+    assert state.total_flow == 2.0
+    assert state._accept_total_flow_raw("rubbish") is False
+    assert state.total_flow == 2.0
 
 
 # --------------------------------------------------------------------------- #

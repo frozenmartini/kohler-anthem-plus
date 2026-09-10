@@ -195,7 +195,6 @@ An outlet whose type the valve has not reported falls back to its position: `Out
 | `Endless Shower` | switch | Re-open a zone the valve closed on its run-time limit |
 | `Status` | sensor | `Water Running`, `Paused`, `Warming Up`, `Idle` |
 | `System State` | sensor | The valve's own `normalOperation` / `showerInProgress` flag — a second opinion to `Status`, decoded differently, and worth comparing when the two disagree |
-| `Total Water Used` | sensor | Lifetime water in your account's unit. Feeds the water dashboard |
 | `At Temperature` | binary sensor | Whether the water has reached its setpoint |
 | `Problem` | binary sensor | Whether the valve reports a fault. **Never yet observed set** on any captured system — see `fault_detection_verified` on the entity |
 
@@ -1070,12 +1069,15 @@ This runs a list of candidate query strings against it and writes what each retu
 every call is a GET, and nothing on the valve changes. Most candidates are expected to fail —
 that is the point, and the failures narrow the search.
 
-**Why it matters.** `Total Water Used` is a lifetime counter whose origin is undocumented. On
-the reference account Shower Left reads 8224 gal while the Konnect app's monthly chart sums to
-5613.49 — a gap of roughly five months at the observed rate. Pre-charting usage (factory test,
-commissioning) is the likeliest explanation, but nothing available proves it. A per-month
-series from this endpoint would settle it, and would let the integration expose monthly usage
-rather than only a running total.
+**Why it mattered.** ✅ **Solved** — the endpoint's contract was recovered and it now feeds
+`Water Used This Month` and `Water Used This Year`.
+
+It also settled the question it was aimed at, in the opposite direction to the one expected.
+The old `Total Water Used` sensor read 8224 gal on the reference valve against a monthly chart
+summing to 5613.49, and the gap was assumed to be pre-charting usage. It was not: `totalFlow`
+takes only **three distinct values** across the whole corpus and cycles among them with no
+water running, in pairs exactly 4x apart. It is not a meter at all, and the sensor was retired
+in 0.14.0. This action is kept for probing the endpoint further.
 
 Run it from **Developer Tools → Actions**, pick the valve, and attach the resulting file to an
 issue. Skim it first — it contains your device id.

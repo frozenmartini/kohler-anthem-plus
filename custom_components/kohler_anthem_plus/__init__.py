@@ -60,6 +60,13 @@ _REMOVED_UNIQUE_ID_SUFFIXES = (
     "_reboot_count",
     "_local_outages",
     "_local_reachable",
+    # `Total Water Used`, retired in 0.14.0. It published `totalFlow`, which is not a meter:
+    # across the whole reference corpus it took **three distinct values** and shifted between
+    # two scales exactly 4x apart, with no water running. As a `total_increasing` sensor every
+    # shift read as a meter replacement and injected a phantom spike into long-term
+    # statistics. `Water Used This Year` and `Water Used This Month` publish Kohler's own
+    # usage series instead, in units that are actually established.
+    "_total_water",
 )
 
 
