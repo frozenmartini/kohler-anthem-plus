@@ -29,6 +29,7 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import (
+    ServiceValidationError,
     ConfigEntryAuthFailed,
     ConfigEntryNotReady,
     HomeAssistantError,
@@ -285,6 +286,11 @@ class Controller:
         #: Which accessories are attached. Latched by the first successful configuration
         #: read; `known` is what says whether that read has happened.
         self.capabilities = HubCapabilities()
+        # Set once `_apply_controller_topology` has seen a configuration with a layout in
+        # it — separate from `capabilities.known`, which any successful read sets, so an
+        # incomplete first response cannot pin the entry's layout on this controller
+        # (Copilot's review of #3, 2026-09-10).
+        self.topology_checked = False
         #: This controller's favourites — seeded over REST, then replaced wholesale by every
         #: `FAVORITES_SNAPSHOT`. Ids are reassigned on delete, so always resolve by name.
         self.favorites: list[dict[str, Any]] = []
@@ -631,24 +637,30 @@ class Valve:
         self.cloud_watch.async_stop()
 
     @callback
-    def _apply_topology(self, settings: dict[str, Any]) -> None:
+    def _apply_topology(self, settings: dict[str, Any]) -> bool:
         """Give this valve the outlet layout its own settings report.
 
         The entry's model came from the config flow, which asked the *first* valve — right
         for it, and not necessarily for a second one on the account. Same reasoning as
         `KohlerAnthemPlusCoordinator._apply_controller_topology`, and the same fallback:
         a read that yields nothing leaves the entry's model in place.
+
+        Returns whether the read said anything. `False` means the caller should not latch
+        `_topology_checked`: a response with no layout in it used to pin the entry's model
+        for the life of the entry (Copilot's review of #3, 2026-09-10), which on a two-valve
+        account can be the wrong layout. The read runs on every seed, so the next reconnect
+        gets another chance — though entities already built keep their count until a reload.
         """
         detected = topology_from_valve_settings(settings)
         if not detected:
-            return
+            return False
         model = model_for_topology(*detected)
         current = self.model
         if (model.outlets_valve1, model.outlets_valve2) == (
             current.outlets_valve1,
             current.outlets_valve2,
         ):
-            return
+            return True
         _LOGGER.info(
             "%s (%s) reports %s; using that for this valve instead of the entry's %s",
             self.name,
@@ -660,6 +672,7 @@ class Valve:
         self.gcs.model = model
         if not model.uses_valve2:
             self.gcs_state.valve2 = None
+        return True
 
     async def async_seed(self) -> None:
         """Read this valve's state, limits and presets over REST.
@@ -693,8 +706,8 @@ class Valve:
             # this valve decodes and encodes every word with — its own layout, not the
             # entry's. See `_apply_topology`; once is enough, plumbing does not change.
             if not self._topology_checked:
-                self._topology_checked = True
-                self._apply_topology(settings)
+                # Latched only once the read actually said something — see `_apply_topology`.
+                self._topology_checked = self._apply_topology(settings)
             limits = outlet_limits_from_settings(settings)
             if limits:
                 self.gcs_state.outlet_limits.update(limits)
@@ -1437,7 +1450,12 @@ class Valve:
         (`docs/gcs/api.md`). So a blank zone 2 filled with zeroes would silently throw away
         the zone 1 word the caller had just carefully built. A valve that should stay shut
         gets a well-formed word with mask ``0x00``; only a valve that does not physically
-        exist gets the sentinel, which is why a single-zone model still sends it here.
+        exist gets the sentinel, which is why a single-zone model still sends it here — and
+        why a single-zone model **refuses** a supplied zone 2 word (2026-09-10, Copilot's
+        review of #3): with several valves on an account the form shows Zone 2 whenever any
+        of them has one, and what a valve does with a word for a zone it does not have is
+        not something anyone has measured. All zeroes is accepted as "no zone 2", since that
+        is exactly what gets sent.
 
         The protocol has no partial write — every POST carries both zones — so "leave zone 2
         alone" can only be expressed by sending zone 2's own current word, which is what this
@@ -1462,6 +1480,14 @@ class Valve:
                 "re-sending zone 2's current state instead so the command is not discarded"
             )
             zone2_hex = None
+
+        if zone2_hex and not self.model.uses_valve2:
+            if zone2_hex.strip("0") == "":
+                zone2_hex = None
+            else:
+                raise ServiceValidationError(
+                    f"{self.name} has a single zone; leave Zone 2 empty (got {zone2_hex!r})"
+                )
 
         if zone2_hex:
             word2 = _command_half(zone2_hex, "zone2_hex")
@@ -2623,14 +2649,21 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # how many outlets each of this controller's zones has, which decides how its
             # state decodes the zone arrays in everything that follows. See
             # `_apply_controller_topology`.
-            if not controller.capabilities.known:
+            if not controller.capabilities.known or not controller.topology_checked:
                 try:
                     config = await self.client.async_get_hub_configuration(device_id)
                     configuration = config.get("configuration") or {}
-                    controller.capabilities = HubCapabilities.from_configuration(
-                        configuration
-                    )
-                    self._apply_controller_topology(controller, configuration)
+                    if not controller.capabilities.known:
+                        controller.capabilities = HubCapabilities.from_configuration(
+                            configuration
+                        )
+                    if not controller.topology_checked:
+                        # Latched only once the read said something; a later seed can still
+                        # correct the model, though entities already built keep their count
+                        # until a reload.
+                        controller.topology_checked = self._apply_controller_topology(
+                            controller, configuration
+                        )
                 except KohlerError as err:
                     _LOGGER.debug(
                         "Could not read HUB configuration for %s: %s", device_id, err
@@ -2667,7 +2700,7 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     @callback
     def _apply_controller_topology(
         self, controller: Controller, configuration: dict[str, Any]
-    ) -> None:
+    ) -> bool:
         """Give a controller the outlet layout its own configuration reports.
 
         The entry's model is what the config flow detected — from the valve where there is
@@ -2679,19 +2712,22 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         nothing — which is exactly the case in which the config flow would have asked.
 
         The model decides how many outlet entities the controller gets, which is why this
-        runs inside the setup seed, before the platforms are built, and never again:
-        `capabilities.known` gates the read, and a plumber's visit needs a reload anyway.
+        runs inside the setup seed, before the platforms are built. Returns whether the
+        configuration said anything: `controller.topology_checked` latches on `True` only,
+        so a response with no layout in it is retried on the next seed rather than pinning
+        the entry's model for the life of the entry (Copilot's review of #3, 2026-09-10).
+        A plumber's visit still needs a reload — the entity set is built once.
         """
         detected = topology_from_hub_configuration(configuration)
         if not detected:
-            return
+            return False
         model = model_for_topology(*detected)
         current = controller.model
         if (model.outlets_valve1, model.outlets_valve2) == (
             current.outlets_valve1,
             current.outlets_valve2,
         ):
-            return
+            return True
         _LOGGER.info(
             "%s (%s) reports %s; using that for this controller instead of the entry's %s",
             controller.name,
@@ -2700,6 +2736,7 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             current.sku,
         )
         controller.state.model = model
+        return True
 
     # ------------------------------------------------------------------ #
     # Helpers
