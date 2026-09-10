@@ -75,6 +75,7 @@ async def async_setup_entry(
             ValveFlowSensor(coordinator, valve),
             ValveTotalWaterSensor(coordinator, valve),
             ValveLastUpdateSensor(coordinator, valve),
+            ValveFirmwareSensor(coordinator, valve),
             ValveHexSensor(coordinator, valve, 1),
             OutletMaxRunTimeSensor(coordinator, valve, 1),
         ]
@@ -381,6 +382,30 @@ class ValveLastUpdateSensor(ValveDiagnosticSensor):
         if state is None or state.last_update is None:
             return None
         return datetime.fromtimestamp(state.last_update, tz=timezone.utc)
+
+
+class ValveFirmwareSensor(ValveDiagnosticSensor):
+    """The valve's own firmware version, from ``gcs-configuration``.
+
+    Read once at the first seed — installation-time data that cannot change while Home
+    Assistant runs, so a reconnect does not spend a call on it. Diagnostic and disabled by
+    default, like everything else here: it matters when comparing behaviour across
+    firmwares in a bug report, not day to day.
+
+    Reads `unknown` where the record has no `about.firmware`, which includes any account
+    where that read failed. `00.74` on the reference install.
+    """
+
+    _attr_name = "Firmware"
+    _attr_icon = "mdi:chip"
+
+    def __init__(self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve) -> None:
+        super().__init__(coordinator, valve)
+        self._attr_unique_id = f"{self._device_id}_firmware"
+
+    @property
+    def native_value(self) -> str | None:
+        return self._valve.firmware
 
 
 class ValveHexSensor(ValveDiagnosticSensor):

@@ -28,6 +28,7 @@ from .const import (
     APIM_SUBSCRIPTION_KEY,
     CUSTOMER_DEVICE,
     GCS_ADVANCE_STATE,
+    GCS_CONFIGURATION,
     GCS_PRESETS,
     GCS_STATE,
     HUB_CONFIGURATION,
@@ -363,6 +364,29 @@ class KohlerClient:
         if not isinstance(payload, dict):
             return {}
         return payload.get("setting") or {}
+
+    async def async_get_gcs_configuration(self, device_id: str) -> dict[str, Any]:
+        """Read the valve's configuration record — firmware, and possibly nothing else.
+
+        **Not the outlet topology source.** ``async_get_gcs_settings`` above is, and the
+        two are easy to confuse: on the reference install — a valve wired to an Anthem Plus
+        controller — every structural field here (``zoneone``, ``zonetwo``, ``parts``,
+        ``valve1Settings``, ``valve2Settings``, ``systemConfiguration``, ``systemSettings``)
+        comes back ``null``, because such a valve reports its configuration through the
+        controller. Only ``about.firmware`` and ``firmwareOTADetails`` carry data there.
+
+        Whether a **GCS-only** install populates the rest has never been captured — see
+        ``docs/gcs/api.md``. This method exists so a report from such an account can answer
+        that, and so the firmware version is readable at all; nothing in the integration
+        depends on the structural fields being present.
+
+        Returns ``{}`` rather than raising when the read fails: this is diagnostic, and a
+        setup that already works must not start failing over it.
+        """
+        payload = await self.async_request(
+            "GET", GCS_CONFIGURATION.format(device_id=device_id)
+        )
+        return payload if isinstance(payload, dict) else {}
 
     async def async_get_hub_state(self, device_id: str) -> dict[str, Any]:
         """Live HUB status: per-zone shower, steam, music, light."""

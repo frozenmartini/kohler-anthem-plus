@@ -80,6 +80,52 @@ def _word(word: Any) -> dict[str, Any] | None:
     }
 
 
+def _configuration_report(valve: Valve) -> dict[str, Any]:
+    """What `gcs-configuration` returned, summarised rather than reproduced.
+
+    Deliberately **not** the raw record. The structural blocks describe someone's plumbing
+    and, on an account that populates them, could carry more identity than a hardware report
+    needs — while the open question only asks *which* fields are populated. So this reports
+    the key names and whether each block is null, plus firmware in full.
+
+    `read: false` distinguishes "the call has not run or failed" from "it ran and everything
+    was null" — indistinguishable otherwise, and the whole point of the exercise.
+    """
+    configuration = valve.configuration
+    if not configuration:
+        return {"read": configuration is not None, "populated": {}, "firmware": None}
+
+    # The structural fields the docs list as null on a controller-attached valve. Reported
+    # by name so a GCS-only account's report says plainly which of them arrived.
+    structural = (
+        "zoneone",
+        "zonetwo",
+        "parts",
+        "valve1Settings",
+        "valve2Settings",
+        "systemConfiguration",
+        "systemSettings",
+    )
+    return {
+        "read": True,
+        "firmware": valve.firmware,
+        # True where the key is present AND not null — the distinction the question turns on.
+        "populated": {
+            key: configuration.get(key) is not None for key in structural
+        },
+        # Every other key the record carried, named but not dumped, so a field nobody has
+        # seen before shows up in a report without its contents going with it.
+        "other_keys": sorted(
+            key for key in configuration if key not in structural and key != "about"
+        ),
+        "about_keys": sorted(
+            (configuration.get("about") or {})
+            if isinstance(configuration.get("about"), dict)
+            else {}
+        ),
+    }
+
+
 def _valve_report(valve: Valve) -> dict[str, Any]:
     """One valve's state, limits, and its own Endless Shower and warm-up settings."""
     gcs = valve.gcs_state
@@ -154,6 +200,18 @@ def _valve_report(valve: Valve) -> dict[str, Any]:
         },
         "last_update": gcs.last_update,
         "cloud_connected": valve.cloud_watch.connected,
+        # `gcs-configuration`, read once at the first seed.
+        #
+        # **This block exists to settle an open question.** On the reference install — a
+        # valve wired to an Anthem Plus controller — every structural field comes back
+        # null, because such a valve reports its configuration through the controller, and
+        # `docs/gcs/api.md` records that whether a **GCS-only** install populates them is
+        # unknown and untested. A report from a controller-free account answers it.
+        #
+        # `field_names` rather than the values: the structural blocks would carry
+        # installation detail, and what the question needs is which keys are populated, not
+        # what is in them. Firmware is named in full because it is the useful part today.
+        "configuration": _configuration_report(valve),
         "endless_shower": {
             "enabled": valve.restart_on_runtime_cutoff,
             "run_times_seconds": {

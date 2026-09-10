@@ -490,9 +490,26 @@ class Valve:
         }
         # Whether the valve's own outlet split has been read yet — see `async_seed`.
         self._topology_checked = False
+        # The `gcs-configuration` record, read once at the first seed. None means "not read
+        # yet"; `{}` means the read was attempted and produced nothing usable, which is the
+        # documented result on a controller-attached valve and is not an error.
+        self.configuration: dict[str, Any] | None = None
 
     def __repr__(self) -> str:
         return f"<Valve {self.device_id} {self.name!r}>"
+
+    @property
+    def firmware(self) -> str | None:
+        """The valve's own firmware version, from ``gcs-configuration``'s ``about`` block.
+
+        None until the first seed has run, and None on any account where the read failed or
+        the block is absent. `00.74` on the reference install.
+        """
+        about = (self.configuration or {}).get("about")
+        if not isinstance(about, dict):
+            return None
+        firmware = about.get("firmware")
+        return None if firmware in (None, "") else str(firmware)
 
     # ------------------------------------------------------------------ #
     # What the moved methods reach for on the coordinator
@@ -707,6 +724,21 @@ class Valve:
                 self._learn_run_times(self.gcs_state)
         except KohlerError as err:
             _LOGGER.debug("Could not read outlet limits over REST: %s", err)
+
+        # Firmware, and — on a controller-free account — possibly the structural fields no
+        # capture has ever covered. **First seed only:** this is installation-time data
+        # that cannot change while Home Assistant runs, so a reconnect must not spend a
+        # call on it. Entirely diagnostic; a failure is logged and setup continues.
+        if self.configuration is None:
+            try:
+                self.configuration = await self.client.async_get_gcs_configuration(
+                    self.gcs_device.device_id
+                )
+            except KohlerError as err:
+                _LOGGER.debug("Could not read gcs-configuration: %s", err)
+                # `{}` rather than leaving None, so a failed read is not retried on every
+                # reconnect for data that is static anyway.
+                self.configuration = {}
 
         try:
             payload = await self.client.async_get_gcs_state(

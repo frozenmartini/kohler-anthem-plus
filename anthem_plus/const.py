@@ -87,6 +87,11 @@ GCS_STATE = f"{DEVICE_API}/gcs-state/{{device_id}}"
 # The valve's settings block — the only source of outlet topology that does not need a
 # controller. Distinct from gcs-configuration, which is null on a controller-attached valve.
 GCS_ADVANCE_STATE = f"{DEVICE_API}/gcs-state/gcsadvancestate/{{device_id}}"
+# The valve's own configuration record. **Not** the source of outlet topology — on a
+# controller-attached valve every structural field comes back null and `GCS_ADVANCE_STATE`
+# above is what to read instead. This is here for `about` (firmware) and to settle whether
+# a GCS-only install populates the rest, which no capture has ever covered.
+GCS_CONFIGURATION = f"{DEVICE_API}/gcs-configuration/{{device_id}}"
 
 # ---------------------------------------------------------------------------
 # Commands — /platform/api/v1/commands/
