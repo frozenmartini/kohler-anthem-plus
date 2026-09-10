@@ -49,18 +49,24 @@ def slug(name: str) -> str:
 
 
 def zone_label(valve: Valve, zone: int, label: str) -> str:
-    """`Temperature` on a single-zone valve, `Zone 2 Temperature` on a two-zone one.
+    """`Temperature` on a single-zone valve, `Temperature 2` on a two-zone one.
 
-    With one zone there is nothing to disambiguate, and `Zone 1` on every entity of a
-    3-outlet valve is noise. A two-zone valve keeps the prefix, because a bare
+    With one zone there is nothing to disambiguate, and a number on every entity of a
+    3-outlet valve is noise. A multi-zone valve appends the zone number, because a bare
     `Temperature` would be ambiguous across zones.
+
+    **The number is a suffix, not a `Zone N` prefix.** It sorts the related entities together
+    in every Home Assistant list — `Temperature`, `Temperature 2` rather than `Temperature`
+    stranded away from `Zone 2 Temperature` — and it reads the way the fixtures do
+    (`Showerhead 1`, `Showerhead 2`).
     """
-    prefix = f"Zone {zone} " if len(valve.model.zones) > 1 else ""
-    return f"{prefix}{label}"
+    if len(valve.model.zones) <= 1:
+        return label
+    return f"{label} {zone}"
 
 
 def outlet_name(valve: Valve, zone: int, outlet: int) -> str:
-    """`Rainhead`, `Zone 2 Rainhead`, or `Zone 1 Outlet 1` when the fixture is unknown.
+    """`Rainhead`, `Rainhead 2` on a multi-zone valve, or `Outlet 1` when unknown.
 
     Lives here rather than on the switch because the outlet's run-time sensor needs the
     same name — `Rainhead Max Run Time` beside `Rainhead` — and a sensor platform reaching
@@ -70,7 +76,7 @@ def outlet_name(valve: Valve, zone: int, outlet: int) -> str:
 
     * **The fixture name wins** where the valve's `outLetType` maps to a confirmed one —
       `Rainhead` says what the entity does in a way `Outlet 1` never can.
-    * **The zone prefix is dropped on a single-zone valve**, per :func:`zone_label`.
+    * **The zone number is dropped on a single-zone valve**, per :func:`zone_label`.
     * **An unknown code falls back to the position** — `Zone 1 Outlet 3`. Naming an outlet
       after a code nobody has confirmed would be inventing a fixture; the number is honest.
 
@@ -91,9 +97,12 @@ def outlet_name(valve: Valve, zone: int, outlet: int) -> str:
 
     fixture = fixture_at(outlet)
     if fixture is None:
-        # No confirmed fixture: keep the position, and keep the zone even on a single-zone
-        # valve so the fallback reads the way it always has.
-        return f"Zone {zone} Outlet {outlet}"
+        # No confirmed fixture: name it by position. `Outlet 1` on a single-zone valve, and
+        # `Outlet 1.2` on a multi-zone one, matching the fixture numbering below rather than
+        # reintroducing a `Zone N` prefix the rest of the scheme has dropped.
+        if len(valve.model.zones) > 1:
+            return f"Outlet {zone}.{outlet}"
+        return f"Outlet {outlet}"
 
     # **Two outlets of the same fixture type in one zone is legal** — a pair of body sprays,
     # or the two showerheads a K-28212 can carry. Naming both `Showerhead` would build the
@@ -106,7 +115,15 @@ def outlet_name(valve: Valve, zone: int, outlet: int) -> str:
         if fixture_at(position) == fixture
     ]
     if len(same) > 1:
-        return f"{zone_label(valve, zone, fixture)} {same.index(outlet) + 1}"
+        # Both this suffix and `zone_label`'s are bare numbers, so applying them together
+        # would read `Showerhead 2 1` — two numbers meaning different things, in an order
+        # nobody can guess. The zone leads, because that is the coarser grouping: the second
+        # showerhead in zone 2 is `Showerhead 2.2`, and in a single-zone valve just
+        # `Showerhead 2`.
+        position = same.index(outlet) + 1
+        if len(valve.model.zones) > 1:
+            return f"{fixture} {zone}.{position}"
+        return f"{fixture} {position}"
     return zone_label(valve, zone, fixture)
 
 

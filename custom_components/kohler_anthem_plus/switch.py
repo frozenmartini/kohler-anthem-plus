@@ -129,7 +129,7 @@ class ShowerSwitch(KohlerValveEntity, SwitchEntity):
     # `Showerhead`, `Handshower` — a plain "Shower" read as one more outlet, when it is the
     # opposite: the whole-shower control that drives the valves themselves. The name says
     # which thing it acts on rather than what the water comes out of.
-    _attr_name = "Shower Valves"
+    _attr_name = "Shower on"
 
     def __init__(self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve) -> None:
         super().__init__(coordinator, valve)
@@ -531,7 +531,7 @@ class HubShowerSwitch(KohlerControllerEntity, SwitchEntity):
     (51 of 95 immediately, 12 late, 32 never; preset-driven ones never). That is the
     intended reading, not a gap: the switch shows what the controller knows, and its own
     ``valvecontrol OFF`` can only stop a session the controller is party to. For whether
-    water is physically running, read the **Anthem Valve** device's Shower Valves switch and
+    water is physically running, read the **Anthem Valve** device's Shower on switch and
     sensors, which are authoritative.
 
     See ``Controller.water_is_running`` for the 2026-08-18 measurement that made this

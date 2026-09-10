@@ -148,6 +148,10 @@ _LOGGER = logging.getLogger(__name__)
 #: ``firmwareUpdate`` can carry the version the cloud wants installed, and reporting that as
 #: the running version would be worse than reporting nothing.
 _FIRMWARE_CURRENT_KEYS = (
+    # Kohler's own shape, confirmed 2026-09-10 against two K-28210 valves: an OTA record
+    # reports `updatedVersion` (what is now running) alongside `initialVersion` (what it was
+    # before). `updatedVersion` leads for that reason.
+    "updatedVersion",
     "currentFirmwareVersion",
     "currentVersion",
     "firmwareVersion",
@@ -155,6 +159,13 @@ _FIRMWARE_CURRENT_KEYS = (
     "firmware",
     "version",
 )
+
+#: A valve reports several OTA payloads, distinguished by `firmwareType`. `Application` is
+#: the valve's actual firmware; `Assets` is the bundled UI artwork, which carries its own
+#: unrelated version — 2.00 while the application is 2.20 on the owner's left valve. Reading
+#: whichever arrived first gave the Assets number, so the application build is preferred and
+#: anything else is only a fallback.
+_FIRMWARE_PREFERRED_TYPE = "Application"
 
 
 def _firmware_string(value: Any) -> str | None:
@@ -610,8 +621,25 @@ class Valve:
             if value is not None:
                 return value
 
-        for key in ("otaReportedProperties", "firmwareUpdate"):
-            value = _firmware_from_block(configuration.get(key))
+        blocks = [
+            configuration.get(key)
+            for key in ("otaReportedProperties", "firmwareUpdate")
+        ]
+
+        # The application build first, wherever it appears. Without this pass a valve whose
+        # `otaReportedProperties` describes Assets (2.00) while its application is 2.20 would
+        # report the artwork version — which is what the owner's valves did.
+        for block in blocks:
+            if (
+                isinstance(block, dict)
+                and block.get("firmwareType") == _FIRMWARE_PREFERRED_TYPE
+            ):
+                value = _firmware_from_block(block)
+                if value is not None:
+                    return value
+
+        for block in blocks:
+            value = _firmware_from_block(block)
             if value is not None:
                 return value
 

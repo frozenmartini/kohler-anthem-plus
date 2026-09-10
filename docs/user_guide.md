@@ -164,14 +164,30 @@ controllers the default name already carries the Konnect name, so `switch.anthem
 becomes `switch.anthem_plus_master_bath_shower` and `switch.anthem_valve_shower` becomes
 `switch.anthem_valve_master_bath_shower`.
 
+### How entities are named
+
+**On a single-zone valve — K-28209 and K-28210 — nothing carries a zone number.** There is one
+shower, so `Temperature`, `Flow` and `Shower Active` say everything a number would.
+
+**A multi-zone valve numbers each zone as a suffix:** `Temperature 1` and `Temperature 2`,
+`Rainhead 1` and `Rainhead 2`. The number trails rather than leading (`Zone 2 Temperature`)
+so related entities sort together in every Home Assistant list.
+
+Where one zone has **two outlets of the same fixture**, the fixture takes its own number —
+`Showerhead 1`, `Showerhead 2` — and on a multi-zone valve the two numbers combine as
+`Showerhead 1.2`, meaning the second showerhead in zone 1.
+
+An outlet whose type the valve has not reported falls back to its position: `Outlet 1`, or
+`Outlet 2.1` on a multi-zone valve.
+
 ### Anthem valve
 
 | Entity | Type | What it does |
 |---|---|---|
-| `Shower Valves` | switch | Turns the shower on or off. From cold it opens **the valve's own default outlets**; if outlets are already open it preserves them |
+| `Shower on` | switch | Turns the shower on or off. From cold it opens **the valve's own default outlets**; if outlets are already open it preserves them |
 | `Rainhead`, `Showerhead`, `Handshower`, `Tub Filler` | switch | One per outlet, named after the fixture the valve reports. See **Outlet names** below |
-| `Temperature` | number | Setpoint for that zone, in your account's unit. `Zone N Temperature` on a two-zone valve |
-| `Flow` | number | Flow as a percentage, bounded by the limits the valve itself reports. `Zone N Flow` on a two-zone valve. See **Flow** below |
+| `Temperature` | number | Setpoint for that zone, in your account's unit. `Temperature 1` / `Temperature 2` on a two-zone valve |
+| `Flow` | number | Flow as a percentage, bounded by the limits the valve itself reports. `Flow 1` / `Flow 2` on a two-zone valve. See **Flow** below |
 | `Favourite` | select | Presets **stored on the valve**, added in the Konnect app or at the first-generation touchscreen |
 | `Warmup` | select | Off / All outlets / Selected outlets |
 | `Endless Shower` | switch | Re-open a zone the valve closed on its run-time limit |
@@ -253,7 +269,7 @@ two views of one set of settings. Each stores its own, and they can differ.
 **Default outlets.** Press the dial on the first-generation touchscreen and the **valve's**
 default outlets open. Press the dial on the Anthem+ screen and the **controller's** defaults
 open. These are separate settings, so the same gesture on two screens in the same room can
-start two different showers. The `Shower Valves` switch on the valve, and `Shower` on
+start two different showers. The `Shower on` switch on the valve, and `Shower` on
 the controller, each do exactly what that device's dial does.
 
 **Favourites.** Both lists can be built either in the Konnect app or at the matching
@@ -329,7 +345,7 @@ twice, once per device:
 
 | Name | On the valve | On the controller |
 |---|---|---|
-| `Shower Valves` / `Shower` | switch — opens **the valve's own default outlets** | switch — opens **the controller's own default outlets**, a separate setting |
+| `Shower on` / `Shower` | switch — opens **the valve's own default outlets** | switch — opens **the controller's own default outlets**, a separate setting |
 | `Favourite` | select — presets **stored on the valve** | select — favourites **stored on the controller**; a different list |
 | `Status` | sensor — `Water Running` / `Paused` / `Warming Up` / `Idle` | sensor — `Water Running` / `Warming Up` / `Idle` |
 | `Zone N Temperature` | **number** — the setpoint, writable | **sensor** — read-only |

@@ -89,7 +89,7 @@ def test_no_unique_id_collisions(coordinator):
 def test_outlets_named_after_their_fixture(coordinator):
     names = {e.name for e in collect("switch", coordinator)}
     assert {"Rainhead", "Showerhead", "Handshower"} <= names, sorted(names)
-    assert "Shower Valves" in names
+    assert "Shower on" in names
 
 
 def test_run_time_sensors_follow_outlet_names(coordinator):
@@ -102,17 +102,21 @@ def test_single_zone_valve_drops_the_zone_prefix(coordinator):
     assert names == {"Temperature", "Flow"}
 
 
-def test_two_zone_valve_keeps_the_zone_prefix(valve_model):
+def test_two_zone_valve_numbers_each_zone(valve_model):
+    """0.7.3: `Temperature 1`/`Temperature 2`, not `Zone 1 Temperature`.
+
+    The number is a suffix so the pair sorts together in every Home Assistant list.
+    """
     from custom_components.kohler_anthem_plus.anthem_plus.models import get_valve_model
 
     model = get_valve_model("K-28212")
     coordinator = make_coordinator([make_valve(model, [31, 11, 1, 11, None, 21])])
     names = {e.name for e in collect("number", coordinator)}
     assert names == {
-        "Zone 1 Temperature",
-        "Zone 1 Flow",
-        "Zone 2 Temperature",
-        "Zone 2 Flow",
+        "Temperature 1",
+        "Flow 1",
+        "Temperature 2",
+        "Flow 2",
     }, sorted(names)
 
 
@@ -120,7 +124,8 @@ def test_unknown_outlet_type_falls_back_to_position(valve_model):
     """An unconfirmed type code must never be given an invented fixture name."""
     coordinator = make_coordinator([make_valve(valve_model, [999, 11, 1])])
     names = {e.name for e in collect("switch", coordinator)}
-    assert "Zone 1 Outlet 1" in names, sorted(names)
+    # Single-zone valve, so no zone number — `Outlet 1`, not `Zone 1 Outlet 1`.
+    assert "Outlet 1" in names, sorted(names)
 
 
 def test_duplicate_fixtures_get_distinct_ids(valve_model):
@@ -203,3 +208,72 @@ def test_firmware_reads_every_known_shape(configuration, expected):
 
     holder = SimpleNamespace(configuration=configuration)
     assert Valve.firmware.fget(holder) == expected
+
+
+# --------------------------------------------------------------------------- #
+# Naming: zone numbers and fixture numbers must not blur together
+# --------------------------------------------------------------------------- #
+def test_duplicate_fixture_in_a_multi_zone_valve_reads_zone_dot_position():
+    """`Showerhead 1.2`, never `Showerhead 2 1`.
+
+    Both the zone suffix and the duplicate-fixture suffix are bare numbers, so a valve with
+    two zones AND a repeated fixture would otherwise emit two numbers in an order nobody can
+    read. The zone leads, separated by a dot.
+    """
+    from custom_components.kohler_anthem_plus.anthem_plus.models import get_valve_model
+    from custom_components.kohler_anthem_plus.entity import outlet_name
+
+    model = get_valve_model("K-28211")
+    valve = make_valve(model, [11, 11, 11, 11])
+    assert outlet_name(valve, 1, 1) == "Showerhead 1.1"
+    assert outlet_name(valve, 1, 2) == "Showerhead 1.2"
+    assert outlet_name(valve, 2, 1) == "Showerhead 2.1"
+
+
+def test_duplicate_fixture_in_a_single_zone_valve_has_no_zone_number(valve_model):
+    """One zone means the number can only mean the fixture — `Showerhead 1`, `Showerhead 2`."""
+    from custom_components.kohler_anthem_plus.entity import outlet_name
+
+    valve = make_valve(valve_model, [11, 11, 1])
+    assert outlet_name(valve, 1, 1) == "Showerhead 1"
+    assert outlet_name(valve, 1, 2) == "Showerhead 2"
+    assert outlet_name(valve, 1, 3) == "Handshower"
+
+
+def test_multi_zone_names_stay_unique_across_every_platform():
+    """A name collision builds the same unique id twice and HA drops one entity silently."""
+    from custom_components.kohler_anthem_plus.anthem_plus.models import get_valve_model
+
+    model = get_valve_model("K-28212")
+    coordinator = make_coordinator([make_valve(model, [11, 11, 11, 11, 11, 11])])
+    for platform in PLATFORMS:
+        entities = collect(platform, coordinator)
+        ids = [e.unique_id for e in entities]
+        assert len(ids) == len(set(ids)), f"{platform}: {sorted(ids)}"
+        names = [e.name for e in entities if e.name]
+        assert len(names) == len(set(names)), f"{platform}: {sorted(names)}"
+
+
+# --------------------------------------------------------------------------- #
+# Water total: the device counts quarter-gallon ticks
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        # The owner's two valves, against what the Kohler Konnect app displays.
+        (8224.0, 2056.00),
+        (25955.0, 6488.75),
+        # Already-gallons readings from the capture corpus pass through: a quarter fraction
+        # cannot survive the tick scale, so it identifies a value that is not a tick count.
+        (413.25, 413.25),
+        # The same total as ticks — 413.25 * 4 — which must land back on 413.25.
+        (1653, 413.25),
+        (1656, 414.0),
+        (None, None),
+    ],
+)
+def test_total_flow_is_scaled_from_quarter_gallon_ticks(raw, expected):
+    from custom_components.kohler_anthem_plus.anthem_plus.state import GcsState
+
+    holder = SimpleNamespace(total_flow_filtered=raw)
+    assert GcsState.total_flow_gallons.fget(holder) == expected
