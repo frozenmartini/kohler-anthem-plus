@@ -117,13 +117,17 @@ async def _async_offer_old_capture_cleanup(hass: HomeAssistant) -> None:
     integration's call, so a repair offers it instead: Submit deletes, Ignore keeps.
 
     Skipped entirely on the author's install, where `_dev/` still writes the folder.
+
+    Transitional: see the sunset note at the top of `repairs.py`.
     """
     if DEV_CAPTURE_INSTALLED:
         return
     path = hass.config.path(OLD_CAPTURE_DIR)
     found = await hass.async_add_executor_job(inspect_old_capture_folder, path)
     if found is None:
-        # Gone (or never there): also clears a card left from a folder deleted by hand.
+        # Absent — and only absent: a folder that cannot be read comes back as present, so
+        # the card is never cleared over a leftover that is still there. This branch also
+        # clears a card left from a folder deleted by hand.
         ir.async_delete_issue(hass, DOMAIN, ISSUE_OLD_CAPTURE_FOLDER)
         return
     count, size, _foreign = found
@@ -200,8 +204,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if not hass.data[DOMAIN]:
             hass.data.pop(DOMAIN)
             # Only once the last entry is gone: the services are shared, so removing them
-            # while another entry is still loaded would break it.
+            # while another entry is still loaded would break it. The capture-folder card is
+            # integration-wide the same way; left behind, it would point at a fix flow whose
+            # code is no longer loaded.
             async_unregister_services(hass)
+            ir.async_delete_issue(hass, DOMAIN, ISSUE_OLD_CAPTURE_FOLDER)
     return unload_ok
 
 

@@ -54,12 +54,14 @@ Reading a pair together — a `GCS_SOLO_STS` whose valve word carries `0x40`, ag
 
 ```sh
 cd custom_components/kohler_anthem_plus/reports
-jq -c 'select(.topic)   | {ts, code:(.payload|fromjson|.data.code)}' report_*.jsonl > /tmp/a.jsonl
+jq -c 'select(.topic)   | {ts, code:(.payload|fromjson?|.data.code)}' report_*.jsonl > /tmp/a.jsonl
 jq -c 'select(.journal) | {ts, journal, event, zone, verdict, reason}' report_*.jsonl > /tmp/b.jsonl
 cat /tmp/a.jsonl /tmp/b.jsonl | sort -t'"' -k4 | less
 ```
 
-(They are already in order in the file; the split is only to read one kind at a time.)
+(They are already in order in the file; the split is only to read one kind at a time. The
+`?` on `fromjson` skips the odd record whose payload is not JSON — the capture keeps a
+malformed payload verbatim and a non-UTF-8 one as `payload_b64` — instead of aborting.)
 
 ### The author's development capture — not part of the integration
 

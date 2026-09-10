@@ -50,7 +50,8 @@
           }
         },
         "abort": {
-          "not_ours": "`{path}` also holds files this integration did not write, so nothing was deleted. Remove the folder by hand if you no longer need it."
+          "not_ours": "`{path}` holds something this integration did not write, so nothing was deleted. Remove the folder by hand if you no longer need it.",
+          "failed": "Deleting `{path}` failed part-way: a file could not be removed. Whatever is left is still there under its original name; remove it by hand. Home Assistant's log says which file."
         }
       }
     }

@@ -275,6 +275,13 @@ class ReportLog:
         stem = "report_" + time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
         with self._lock:
             self._close_locked()
+            # Off and on again inside one second would land on the episode just closed and
+            # merge two switch-ons into one attachment; take the next free name instead.
+            # (`resume` reopens an existing file on purpose; only `start` guards.)
+            base, nth = stem, 1
+            while os.path.exists(os.path.join(self._directory, f"{stem}.jsonl")):
+                nth += 1
+                stem = f"{base}-{nth}"
             self._stem = stem
             try:
                 self._open_locked()
