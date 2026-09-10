@@ -417,13 +417,19 @@ RELOAD_IGNORED_DATA_KEYS = frozenset(
 #
 # * `1`, `11`, `21` — documented in `docs/hub/cloud_api.md` §"Outlet position → physical
 #   outlet", which also warns that other codes are install-specific.
-# * `62`, `52` — resolved 2026-09-10 from an owner-confirmed K-28210 whose zone 1 reads
-#   Rainhead / Showerhead / Handshower against ids 0/1/2. The third of those, type `1`,
-#   independently reproduced the documented `1 = handshower`, which is what makes the
-#   other two credible rather than merely plausible.
-# * `39`, `38` — seen in the corpus but **never confirmed against a fixture**, so they are
-#   deliberately absent. The two devices also disagree about id 4 (39 on the valve, 38 on
-#   the controller) for the same physical outlet, so guessing here would be doubly unsafe.
+# * `31` — owner-confirmed 2026-09-10 on a K-28210 reporting `31, 11, 1` for a rainhead,
+#   showerhead and handshower. The other two codes on that valve are the documented ones,
+#   which is what makes the first credible: two of three positions independently matched
+#   Kohler's own table.
+# * `39`, `38`, `52`, `62` — seen in the capture corpus but **never confirmed against a
+#   fixture**, so they are deliberately absent.
+#
+#   ⚠️ **`62` and `52` were briefly named here (0.5.1) and that was wrong.** They were
+#   inferred by assuming a second install's outlets sat in the same id order as the corpus
+#   reference machine's. The install that inference was built on turned out to report
+#   `31, 11, 1`, so the corpus codes belong to different fixtures than assumed. Codes are
+#   only added here on a direct owner report of *that* valve's own numbers — never by
+#   lining two installs up against each other.
 #
 # **This is a label, not behaviour.** The valve derives no flow envelope from the type; the
 # controller does. Nothing in this integration reads these names to decide anything.
@@ -435,8 +441,7 @@ OUTLET_TYPE_NAMES: dict[int, str] = {
     1: "Handshower",
     11: "Showerhead",
     21: "Tub Filler",
-    52: "Showerhead",
-    62: "Rainhead",
+    31: "Rainhead",
 }
 
 UI_TEMPERATURE_MIN_F = 80

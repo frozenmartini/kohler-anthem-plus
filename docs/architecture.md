@@ -128,15 +128,19 @@ handshower, rainshower, tub filler, and so on). What the type *does* differs:
 | `1` | Handshower | `docs/hub/cloud_api.md` |
 | `11` | Showerhead | `docs/hub/cloud_api.md` |
 | `21` | Tub filler | `docs/hub/cloud_api.md`; matches the owner-confirmed tub filler at zone 2 outlet 3 |
-| `52` | Showerhead | Owner-confirmed, K-28210, 2026-09-10 |
-| `62` | Rainhead | Owner-confirmed, K-28210, 2026-09-10 |
-| `38`, `39` | **unknown** | Seen in the corpus, never confirmed against a fixture |
+| `31` | Rainhead | Owner-confirmed, K-28210, 2026-09-10 |
+| `38`, `39`, `52`, `62` | **unknown** | Seen in the corpus, never confirmed against a fixture |
 
-The 2026-09-10 install reads Rainhead / Showerhead / Handshower across ids 0/1/2, and its
-third outlet is type `1` — independently reproducing the documented `1 = handshower`, which
-is what makes `62` and `52` credible rather than merely plausible. `OUTLET_TYPE_NAMES` in
-`const.py` carries exactly the confirmed rows; an unrecognised code is published as a bare
-number with no name.
+The 2026-09-10 install reads Rainhead / Showerhead / Handshower and reports `31, 11, 1` —
+two of its three codes are Kohler's own documented ones, which is what makes the third
+credible. `OUTLET_TYPE_NAMES` in `const.py` carries exactly the confirmed rows; an
+unrecognised code is published as a bare number with no name.
+
+> ⚠️ **`62` and `52` were briefly named (0.5.1) and that was wrong.** They were inferred by
+> assuming a second install's outlets sat in the same id order as the corpus reference
+> machine's. That install turned out to report `31, 11, 1`, so the corpus codes belong to
+> different fixtures than assumed. **Codes are only added on a direct owner report of that
+> valve's own numbers** — never by lining two installs up against each other.
 
 **The Konnect app's outlet names are not these.** No name string is transmitted anywhere in
 either API, so a rename made in the app cannot be read back. These are fixture types.

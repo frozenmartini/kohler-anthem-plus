@@ -123,6 +123,12 @@ def _configuration_report(valve: Valve) -> dict[str, Any]:
             if isinstance(configuration.get("about"), dict)
             else {}
         ),
+        # Timestamps, by value rather than by name. These are the record's own dates —
+        # when Kohler's cloud created the device row and when it last changed — and unlike
+        # the structural blocks they carry no installation detail, so there is nothing to
+        # withhold. `createdTime` is the closest thing to an install date this API has.
+        "created_time": configuration.get("createdTime"),
+        "updated_timestamp": configuration.get("updatedTimestamp"),
     }
 
 

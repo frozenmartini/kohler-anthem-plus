@@ -499,6 +499,20 @@ class Valve:
         return f"<Valve {self.device_id} {self.name!r}>"
 
     @property
+    def created_time(self) -> str | None:
+        """When Kohler's cloud first created this device's record, as it reports it.
+
+        The closest thing to an install date the API offers — **the cloud record's
+        creation, not the day a plumber fitted the valve**, so a valve re-registered after
+        a service call would read as newer than it is. Named for what it is rather than
+        what it approximates.
+
+        Returned as the raw string; `sensor.ValveInstalledSensor` parses it.
+        """
+        value = (self.configuration or {}).get("createdTime")
+        return None if value in (None, "") else str(value)
+
+    @property
     def firmware(self) -> str | None:
         """The valve's own firmware version, from ``gcs-configuration``'s ``about`` block.
 

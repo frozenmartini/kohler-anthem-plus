@@ -74,6 +74,7 @@ async def async_setup_entry(
             ValveTotalWaterSensor(coordinator, valve),
             ValveLastUpdateSensor(coordinator, valve),
             ValveFirmwareSensor(coordinator, valve),
+            ValveRegisteredSensor(coordinator, valve),
             ValveHexSensor(coordinator, valve, 1),
             OutletMaxRunTimeSensor(coordinator, valve, 1),
         ]
@@ -361,6 +362,64 @@ class ValveFirmwareSensor(ValveDiagnosticSensor):
     @property
     def native_value(self) -> str | None:
         return self._valve.firmware
+
+
+class ValveRegisteredSensor(ValveDiagnosticSensor):
+    """When Kohler's cloud first created this valve's record — ``createdTime``.
+
+    **This is a registration date, not an installation date**, and the distinction is not
+    pedantic: it is when the device row appeared in Kohler's cloud, so a valve replaced
+    under warranty or re-registered after a service call reads as newer than the plumbing.
+    For most systems the two are within a day of each other, which is what makes it useful;
+    the name says which one it actually is.
+
+    The only date the API carries. Nothing else — the device list, the state reads, the
+    preset records, the MQTT stream — reports one at all.
+
+    Accepts the two shapes a JSON timestamp arrives in, an ISO-8601 string or epoch
+    milliseconds, because only one install's payload has ever been seen and a sensor that
+    breaks on the other would be a poor trade for a few lines.
+    """
+
+    _attr_name = "Registered"
+    _attr_icon = "mdi:calendar-clock"
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+
+    def __init__(self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve) -> None:
+        super().__init__(coordinator, valve)
+        self._attr_unique_id = f"{self._device_id}_registered"
+
+    @property
+    def native_value(self) -> datetime | None:
+        raw = self._valve.created_time
+        if raw is None:
+            return None
+        text = str(raw).strip()
+
+        # Epoch, seconds or milliseconds.
+        if text.isdigit():
+            epoch = int(text)
+            if epoch > 10**12:
+                epoch //= 1000
+            try:
+                return datetime.fromtimestamp(epoch, tz=timezone.utc)
+            except (OverflowError, OSError, ValueError):
+                return None
+
+        # ISO-8601. `fromisoformat` handles `Z` only from Python 3.11, and Home Assistant
+        # supports older runtimes, so the suffix is normalised first.
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        # A timestamp device class requires an aware datetime; a naive one from the cloud
+        # is UTC, which is what every other date this API returns has been.
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, object]:
+        """The raw string, so an unparsed format is diagnosable rather than just blank."""
+        return {"reported": self._valve.created_time}
 
 
 class ValveHexSensor(ValveDiagnosticSensor):
