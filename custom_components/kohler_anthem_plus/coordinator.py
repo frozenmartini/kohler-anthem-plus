@@ -1289,16 +1289,20 @@ class Valve:
         its outlets happen to agree.
 
         ⚠️ **They do not always agree — observed 2026-09-10.** One of the owner's two valves
-        reports 1800 s on its Rainhead and Handshower and **3600 s on its Showerhead**, in a
-        single zone. Until then every outlet on every install seen had matched, and several
-        comments here and in `sensor.py` said so; that claim was wrong.
+        read 3600 s on all three outlets at 08:38 and then 1800 s on two of them with 3600 s
+        still on the third at 15:22. Until then every outlet on every install seen had
+        matched, and comments here and in `sensor.py` said so as though it were guaranteed.
 
-        Where they disagree, every distinct value is offered as a candidate rather than
-        picking one. There is still no evidence for which value the valve actually applies to
-        a mixed zone; matching any of them means such a zone stays protected, and the cost is
-        a handful of extra 10 s windows in a 15-minute session that would each also have to
-        coincide with a `0x40` pause to fire. This design anticipated the case correctly — it
-        is only the "never observed" note that has aged.
+        **A mixed zone is a lost write, not a configuration.** There is one duration setting;
+        the app writes it one outlet at a time and stops at the first failure
+        (`docs/gcs/api.md`), so a dropped call strands the old value on the outlets it never
+        reached.
+
+        Which makes offering every distinct value as a candidate exactly right, and for a
+        better reason than the one originally written here: the valve really may enforce
+        either number, because its outlets really are holding different ones. Matching any of
+        them keeps such a zone protected, and the cost is a handful of extra 10 s windows in a
+        15-minute session that would each also have to coincide with a `0x40` pause to fire.
 
         ⚠️ **`maximumRunTime` only. Preset timers are deliberately excluded — do not add
         them here.** A preset carries its own `time` (`GCS_PRESET_STS`), a *second*

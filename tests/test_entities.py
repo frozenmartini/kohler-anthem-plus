@@ -1394,9 +1394,10 @@ def _duration_sensor(valve_model, run_times):
 def test_max_shower_duration_reports_the_shortest_outlet(valve_model):
     """Shower Right, as captured 2026-09-10: Showerhead 3600 s, the other two 1800 s.
 
-    This read outlet 1 alone until 0.11.3 and so reported 30 minutes on a valve that would
-    run one fixture for 60. The shortest is the soonest the water can stop, which is what
-    somebody reading "Max Shower Duration" is planning around.
+    **A lost write, not a per-outlet setting.** There is one master duration; the app writes
+    it one outlet at a time and stops at the first failure, so a 60->30 minute change left
+    one outlet holding the old value. The shortest is both the value the setting was moving
+    to and the soonest the water can stop.
     """
     sensor = _duration_sensor(valve_model, {0: 1800, 1: 3600, 2: 1800})
     assert sensor.native_value == 30
@@ -1409,7 +1410,7 @@ def test_max_shower_duration_reports_the_shortest_outlet(valve_model):
 
 
 def test_max_shower_duration_says_so_when_outlets_agree(valve_model):
-    """Shower Left: all three at 1800 s. The attribute is published either way."""
+    """Shower Left: all three at 1800 s — the healthy state, and the normal one."""
     sensor = _duration_sensor(valve_model, {0: 1800, 1: 1800, 2: 1800})
     assert sensor.native_value == 30
     assert sensor.extra_state_attributes["outlets_agree"] is True
@@ -1425,7 +1426,8 @@ def test_a_longer_first_outlet_does_not_hide_a_shorter_one(valve_model):
     """The failure this replaces, in the direction that actually matters.
 
     Reading outlet 1 alone would report 60 minutes here while the Rainhead stops at 30 —
-    telling somebody they have twice the shower they have.
+    telling somebody they have twice the shower they have. Same lost-write cause, with the
+    surviving stale value on a different outlet.
     """
     sensor = _duration_sensor(valve_model, {0: 3600, 1: 1800, 2: 1800})
     assert sensor.native_value == 30

@@ -718,16 +718,24 @@ class OutletMaxRunTimeSensor(ValveDiagnosticSensor):
     (`Valve.outlet_run_times`), so a value showing up here means that outlet is now
     protected by the cutoff, too.
 
-    ⚠️ **Outlets do not always agree, so this reports the shortest one.** Observed
-    2026-09-10: one of the owner's two valves runs 1800 s on its Rainhead and Handshower and
-    **3600 s on its Showerhead**, in a single zone. This entity read outlet 1 alone until
-    0.11.3 and so reported 30 minutes on a valve that would run one fixture for 60 — the
-    number was right for the outlet it named and wrong for the valve it appeared on.
+    **There is one duration, not one per outlet** — the Konnect app offers a single master
+    setting, and the valve stores that same number on every outlet's record.
 
-    The shortest is the honest single answer: it is the soonest the water can stop, which is
-    what somebody reading "Max Shower Duration" is planning around. Where the outlets differ
-    the full per-outlet map is published in the `per_outlet` attribute and `outlets_agree` is
-    `false`, so the disagreement is visible rather than averaged away.
+    ⚠️ **But the outlets can disagree, and when they do it is a fault rather than a
+    setting.** The app has no list form: it writes **one call per outlet**, each carrying the
+    same `maximumRuntime`, and only issues the next after a 2xx — so a failure part-way
+    leaves the valve holding the new value on some outlets and the old one on others
+    (`docs/gcs/api.md`, "one outlet per call, chained on success").
+
+    Caught on the owner's own hardware 2026-09-10: one valve read 3600 s on all three outlets
+    at 08:38, then 1800 s on its Rainhead and Handshower and **still 3600 s on its
+    Showerhead** at 15:22 — a 60→30 minute change where one of the three writes did not land.
+    The app kept showing 30, because the app shows the value it sent.
+
+    So this reports the **shortest**: with a stale outlet in the mix the master setting is the
+    lower one (the write was moving that way), and it is the soonest the water can stop
+    either way. `per_outlet` publishes the full map and `outlets_agree` goes `false`, which
+    is the signal that a write was lost — re-save the duration in the app to repair it.
     """
 
     _attr_icon = "mdi:timer-cog-outline"
@@ -766,8 +774,8 @@ class OutletMaxRunTimeSensor(ValveDiagnosticSensor):
         run_times = self._valve.outlet_run_times
         if not run_times:
             return None
-        # The soonest the water can stop. See the class docstring for why the minimum rather
-        # than outlet 1's value or an average.
+        # The soonest the water can stop, and — where a write was lost part-way — the value
+        # the master setting was moving to. See the class docstring.
         seconds = min(run_times.values())
         # 1800 -> 30. Kept as a float so a limit that is not a whole number of minutes is
         # reported honestly rather than rounded into a lie; the display precision above
@@ -778,9 +786,12 @@ class OutletMaxRunTimeSensor(ValveDiagnosticSensor):
     def extra_state_attributes(self) -> dict[str, object]:
         """The per-outlet breakdown, named the way the outlets are named elsewhere.
 
-        Only worth reading when `outlets_agree` is false — but published either way, so a
-        report from an install where they agree still says so positively rather than leaving
-        it to be inferred from an absent attribute.
+        `outlets_agree: false` means **a write was lost**, not that the outlets are
+        configured differently — there is only one duration to configure. Re-saving the
+        duration in the Konnect app rewrites every outlet and repairs it.
+
+        Published either way, so a report from a healthy install says so positively rather
+        than leaving it to be inferred from an absent attribute.
         """
         run_times = self._valve.outlet_run_times
         if not run_times:
