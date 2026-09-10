@@ -42,7 +42,12 @@ from .anthem_plus.valve_hex import (
     celsius_to_unit,
     unit_to_celsius,
 )
-from .const import DOMAIN, UI_TEMPERATURE_MAX_F, UI_TEMPERATURE_MIN_F
+from .const import (
+    DEFAULT_FLOW_PERCENT,
+    DOMAIN,
+    UI_TEMPERATURE_MAX_F,
+    UI_TEMPERATURE_MIN_F,
+)
 from .coordinator import KohlerAnthemPlusCoordinator, Valve
 from .entity import KohlerValveEntity
 
@@ -167,13 +172,19 @@ class ZoneFlowNumber(ZoneNumberBase):
     > between 2026-08-13 and 2026-09-10. If yours behaves that way, disable this entity —
     > the protocol layer is unaffected either way.
 
-    **The value is always the byte the valve is holding**, with `flow_is_live` saying
-    whether water is moving. That flag is advisory and not a reason to distrust the number:
-    on the capture-corpus install an idle valve carries a flow nobody chose, transient and
-    collapsing within seconds, but on a controller-free K-28210 pair the idle bytes are
-    stable to the half-percent across hours (24.5 % and 26.5 %, one per valve) and read as
-    stored per-zone settings. A control cannot hide a value it may need to be dragged from,
-    and on the second kind of install hiding it would be wrong anyway.
+    **While the shower is off, this reads the last flow Home Assistant wrote, or 100 %.**
+    It deliberately does not echo the valve's idle byte, which is not the flow setting: one
+    install carries transient junk there, and another carries *stable* junk — 24.5 % and
+    26.5 %, unmoving across hours, while the owner's panel held 100 % on both valves. A
+    number that does not move is more convincing than one that flickers, not less, so
+    neither is shown as a setpoint.
+
+    A control has to display something, so the entity remembers what it last wrote and
+    falls back to `DEFAULT_FLOW_PERCENT` — which is also what `async_apply_valve` sends when
+    no flow is specified, so the displayed value and the commanded value agree. Once water
+    is running the valve's own byte is authoritative and is shown directly.
+
+    `flow_is_live` says which of the two you are looking at.
     """
 
     _attr_icon = "mdi:water-percent"
@@ -188,6 +199,10 @@ class ZoneFlowNumber(ZoneNumberBase):
         super().__init__(coordinator, valve, zone)
         self._attr_name = f"Zone {zone} Flow"
         self._attr_unique_id = f"{self._device_id}_flow_zone_{zone}"
+        # What to show when the valve's own byte cannot be trusted — see the class
+        # docstring. `DEFAULT_FLOW_PERCENT` is what `async_apply_valve` writes when no flow
+        # is given, so an untouched entity displays exactly what a command would send.
+        self._last_written: float = DEFAULT_FLOW_PERCENT
 
     @property
     def native_min_value(self) -> float:
@@ -212,8 +227,16 @@ class ZoneFlowNumber(ZoneNumberBase):
 
     @property
     def native_value(self) -> float | None:
-        word = self._word
-        return None if word is None else word.flow_percent
+        """The valve's byte while water runs; otherwise what we last wrote, or 100 %.
+
+        See the class docstring for why the idle byte is not echoed.
+        """
+        state = self._state
+        if state is not None and state.flow_is_live:
+            word = self._word
+            if word is not None:
+                return word.flow_percent
+        return self._last_written
 
     @property
     def extra_state_attributes(self) -> dict[str, object]:
@@ -231,7 +254,12 @@ class ZoneFlowNumber(ZoneNumberBase):
             return {}
         low, high = state.zone_flow_limits(self._zone)
         return {
+            # False means the value above is what Home Assistant last wrote, not a reading
+            # from the valve — see the class docstring.
             "flow_is_live": state.flow_is_live,
+            # The byte the valve is actually holding, whatever it means. Published so the
+            # idle-byte behaviour stays observable rather than merely asserted.
+            "reported_flow_percent": state.flow_percent,
             "minimum_percent": low / FLOW_PER_PERCENT,
             "maximum_percent": high / FLOW_PER_PERCENT,
             # True where the valve reports a single-point range — flow control is off at
@@ -242,4 +270,8 @@ class ZoneFlowNumber(ZoneNumberBase):
     async def async_set_native_value(self, value: float) -> None:
         key = "zone1_flow" if self._zone == 1 else "zone2_flow"
         await self._valve.async_apply_valve(**{key: float(value)})
+        # Remembered so an idle valve shows what was asked for rather than reverting to the
+        # byte it happens to be holding. Recorded only after the write is accepted.
+        self._last_written = float(value)
+        self.async_write_ha_state()
 

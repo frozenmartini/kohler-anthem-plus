@@ -483,27 +483,25 @@ class GcsState:
 
     @property
     def flow_is_live(self) -> bool:
-        """Whether water is actually moving, so the flow byte describes a running shower.
+        """Whether `flow_percent` is the flow somebody actually asked for.
 
-        **Advisory, not a reason to hide the value.** This says "an outlet is open and the
-        valve is not paused" — nothing more. It was originally documented as deciding
-        whether the byte was meaningful at all, and that is too strong a reading of the
-        evidence:
+        **The idle byte is not the flow setting**, and it is not enough to check that it
+        holds still. Two installs, two different-looking failures, same conclusion:
 
-        * On the capture-corpus install, 296 idle words carry a flow nobody selected, in
-          *recurring pairs* like 34.5 %/82.5 %, with the value collapsing and returning
-          seconds later. There the idle byte genuinely is noise.
-        * On a controller-free K-28210 pair (2026-09-10), the idle bytes are **stable** —
-          24.5 % and 26.5 %, byte-identical across reports 2 h 23 m apart, one value per
-          valve. Nothing there looks transient, and they read as stored per-zone settings.
+        * Capture corpus: 296 idle words carry a flow nobody selected, in recurring pairs
+          like 34.5 %/82.5 %, collapsing and returning within seconds. Obviously junk.
+        * Controller-free K-28210 pair (2026-09-10): idle bytes of 24.5 % and 26.5 %,
+          byte-identical across reports 2 h 23 m apart — and the owner's panel held
+          **100 %** on both valves throughout. Stable junk, which is the more dangerous
+          kind: it looks like a setting.
 
-        Both observations are real; neither generalises to the other install. So a consumer
-        should present the byte and *flag* whether water is moving, rather than blanking a
-        number that may be the valve's actual setting. A control especially cannot hide it:
-        a slider with no value cannot be dragged.
+        The second was briefly read as evidence that a stable idle byte *is* the stored
+        setting, and 0.6.2 relaxed this flag on that basis. The panel reading disproved it.
+        Stability is not meaning. Anything presenting "the flow setting" must gate on this,
+        or it will show a number nobody chose — and a number that does not move is more
+        convincing, not less.
 
-        See `docs/gcs/api.md` for the corpus evidence and `docs/architecture.md` for the
-        contrast between the two installs.
+        See `docs/architecture.md` for both observations.
         """
         word = self.valve1
         if word is None:

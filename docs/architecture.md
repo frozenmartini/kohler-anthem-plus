@@ -155,28 +155,28 @@ body sprays*, and *tub filler* all allow a higher maximum than a single showerhe
 handshower. The valve applies no such logic — it honours whatever flow byte it is given,
 within its calibrated range.
 
-### The idle flow byte differs by install
+### The idle flow byte is never the flow setting
 
-What byte 2 reads while nothing is flowing is **not the same on every system**, and both
-observations below are from real captures.
+What byte 2 reads while nothing is flowing is not the commanded flow on any install
+observed, but it fails in two different ways — and the second is the dangerous one.
 
 | Install | Idle flow byte | Behaviour |
 |---|---|---|
 | Capture-corpus reference (valve + Anthem Plus controller) | Varies — 296 words carry a flow nobody selected | Transient: recurring pairs like 34.5 %/82.5 %, collapsing and returning within seconds, with `totalFlow` dropping to `2` in the same message |
-| Controller-free K-28210 pair (2026-09-10) | `24.5 %` and `26.5 %`, one per valve | **Stable** — byte-identical across reports 2 h 23 m apart, no movement at all |
+| Controller-free K-28210 pair (2026-09-10) | `24.5 %` and `26.5 %`, one per valve | **Stable** — byte-identical across reports 2 h 23 m apart, and **wrong**: the owner's panel held 100 % on both valves throughout |
 
-On the first, the idle byte is noise. On the second it looks like a stored per-zone setting:
-byte `0x31` and `0x35`, unchanging, one value per valve.
+> ⚠️ **Stability is not meaning, and 0.6.2 got this wrong.** The stable pair was briefly read
+> as evidence that such a byte *is* the stored per-zone setting, and the `flow_is_live` gate
+> was relaxed on that basis. The owner's panel reading — 100 % on both, against bytes of
+> 24.5 % and 26.5 % — disproved it within a day. A byte that does not move is *more*
+> convincing than one that flickers, not less, which is exactly why it was mistaken for a
+> setting. Restored in 0.6.3.
 
-**Consequence for anything reading flow.** `GcsState.flow_is_live` says whether an outlet is
-open — nothing more. It is *advisory*: treating it as "the byte is meaningless unless this
-is true" was the original framing and is too strong, because it blanks a number that on some
-hardware is the valve's actual setting. Present the byte and flag whether water is moving.
-A control has no choice anyway — a slider with no value cannot be dragged.
-
-Unresolved: whether the difference is firmware, calibration, or the presence of a
-controller. Two installs is not enough to say, and the corpus install has flow control
-disabled system-wide, which may itself be the cause.
+**Consequence for anything reading flow.** Gate on `GcsState.flow_is_live`. While it is
+False the valve's byte means nothing, however steady it looks; a control should show what it
+last wrote (or `DEFAULT_FLOW_PERCENT`, which is what an unspecified write sends) rather than
+echo the valve. While it is True the byte is authoritative, including a change made on the
+panel mid-shower.
 
 ### HUB flow control is throttled — effect MEASURED, mechanism UNKNOWN
 
