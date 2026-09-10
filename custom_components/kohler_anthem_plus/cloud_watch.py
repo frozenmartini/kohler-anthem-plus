@@ -223,7 +223,14 @@ class CloudConnectionWatch:
         if self._pair_cancel is not None:
             self._pair_cancel()
             self._pair_cancel = None
-        self._arm_quiet_timer()
+        # **Armed once, not re-armed per message.** The timestamp above is what decides
+        # whether the valve has gone quiet; the timer only needs to wake up and compare.
+        # Cancelling and rebuilding a three-hour deadline on every message allocated a
+        # `HassJob` and a loop timer handle thousands of times a day to move a deadline that
+        # is checked once — see `_quiet_elapsed`, which now re-arms for the remaining time
+        # rather than firing early.
+        if self._quiet_cancel is None:
+            self._arm_quiet_timer()
 
     def note_hub_envelope(self, envelope: Envelope) -> None:
         """Trigger A. Only ``SHOWER_VALVE_STS`` with a zone ``ON`` is evidence."""
@@ -282,26 +289,38 @@ class CloudConnectionWatch:
         self._pair_cancel = None
         self._request_check("controller reported a zone ON, valve silent")
 
-    def _arm_quiet_timer(self) -> None:
-        """(Re)start trigger B's countdown. Every valve message pushes it back."""
+    def _arm_quiet_timer(self, seconds: float | None = None) -> None:
+        """Start trigger B's countdown, for the full window or the remainder of one."""
         if self._stopped:
             return
         if self._quiet_cancel is not None:
             self._quiet_cancel()
         self._quiet_cancel = async_call_later(
-            self._hass, CLOUD_CHECK_QUIET_SECONDS, self._quiet_elapsed
+            self._hass,
+            CLOUD_CHECK_QUIET_SECONDS if seconds is None else max(seconds, 1.0),
+            self._quiet_elapsed,
         )
 
     @callback
     def _quiet_elapsed(self, _now: Any) -> None:
-        """Trigger B. Ask, then keep the interval running while the quiet continues."""
+        """Trigger B. Ask if the valve really has been quiet; otherwise wait out the rest.
+
+        The timer is armed once and left alone, so it can fire while the valve has been
+        talking — `note_gcs_message` moves the timestamp without touching the deadline. That
+        is the case this checks: if the last message is more recent than the quiet window,
+        nothing is wrong and the timer is simply re-armed for the time that remains.
+        """
         self._quiet_cancel = None
-        self._request_check(
-            f"no valve message for {CLOUD_CHECK_QUIET_SECONDS / 3600:.0f}h"
-        )
-        # Re-armed unconditionally, including when the check was skipped or failed: the point
-        # of trigger B is that it keeps asking while the valve stays quiet.
-        self._arm_quiet_timer()
+        quiet_for = time.monotonic() - self._last_gcs_at
+        if quiet_for >= CLOUD_CHECK_QUIET_SECONDS:
+            self._request_check(
+                f"no valve message for {CLOUD_CHECK_QUIET_SECONDS / 3600:.0f}h"
+            )
+            # Re-armed after asking, including when the check was skipped or failed: the
+            # point of trigger B is that it keeps asking while the valve stays quiet.
+            self._arm_quiet_timer()
+            return
+        self._arm_quiet_timer(CLOUD_CHECK_QUIET_SECONDS - quiet_for)
 
     # ------------------------------------------------------------------ #
     # The read

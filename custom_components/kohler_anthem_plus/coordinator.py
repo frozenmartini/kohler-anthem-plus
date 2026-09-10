@@ -78,6 +78,8 @@ from .anthem_plus import (
 from .anthem_plus.entry_reload import reload_signature
 from .anthem_plus.state import outlet_limits_from_settings
 from .anthem_plus.valve_hex import (
+    TEMPERATURE_MAX_TENTHS,
+    TEMPERATURE_TENTHS_PER_DEGREE,
     UNUSED_VALVE_WORD,
     VALVE1_PREFIX,
     VALVE2_PREFIX,
@@ -259,9 +261,31 @@ def _command_half(value: str, field: str) -> str:
             f"Zone Hex sensor), got {len(text)}: {value!r}"
         )
     try:
-        return normalize_word(text)
+        word = normalize_word(text)
     except ValveHexError as err:
         raise HomeAssistantError(f"{field}: {err}") from err
+
+    # **The temperature ceiling applies here too.** This is the one path that reaches the
+    # valve without going through `encode_word`, which clamps every other caller to
+    # `TEMPERATURE_MAX_TENTHS`. The word carries a 10-bit temperature, so a hand-typed or
+    # scripted word can encode 102.3 °C — 216 °F — and be sent verbatim. Whether the firmware
+    # would honour it is untested, and this integration should not be the thing depending on
+    # that answer.
+    #
+    # Only the temperature is checked. Outlet masks, flow bytes, pause and warm-up flags are
+    # exactly what this escape hatch exists to experiment with, and none of them can scald.
+    ceiling = TEMPERATURE_MAX_TENTHS / TEMPERATURE_TENTHS_PER_DEGREE
+    try:
+        commanded = decode_word(word).temperature_celsius
+    except ValveHexError as err:  # pragma: no cover - normalize_word already validated
+        raise HomeAssistantError(f"{field}: {err}") from err
+    if commanded > ceiling:
+        raise HomeAssistantError(
+            f"{field}: that word commands {commanded:.1f} °C, above the "
+            f"{ceiling:.1f} °C the valve is written to anywhere else. Refused — check the "
+            f"temperature bytes."
+        )
+    return word
 
 
 def _describe_word(word: str) -> str:
@@ -428,9 +452,16 @@ def _device_names(devices: list[Device], base: str) -> dict[str, str]:
         for device in devices
     }
     seen = Counter(labels.values())
+    # **Never the device id.** A device name reaches entity ids, the dashboard, screenshots
+    # and every log line that names the device, so falling back to the id would publish a
+    # cloud address more thoroughly than any log statement — and permanently, since entity
+    # ids persist. A position is enough to tell two devices apart, which is all this is for.
+    ordinals = {device.device_id: index + 1 for index, device in enumerate(devices)}
     return {
         device_id: (
-            f"{base} {label}" if label and seen[label] == 1 else f"{base} {device_id}"
+            f"{base} {label}"
+            if label and seen[label] == 1
+            else f"{base} {ordinals[device_id]}"
         )
         for device_id, label in labels.items()
     }
@@ -2430,6 +2461,10 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         session = async_get_clientsession(hass)
         self.auth = KohlerAuth(session, entry.data.get(CONF_REFRESH_TOKEN))
+        # Persist a rotated refresh token the moment B2C issues one. Without this the entry
+        # keeps a token Kohler has already retired, and on a push-only install nothing else
+        # writes it back for hours — see `KohlerAuth._async_token_request`.
+        self.auth.on_token_rotated = self._store_refresh_token
         self.client = KohlerClient(session, self.auth, entry.data.get(CONF_TENANT_ID))
 
         # Every Anthem valve on the account, in the order the cloud lists them, plus the
@@ -2504,7 +2539,7 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.info(
                 "Account has %d Anthem valves: %s",
                 len(self.valves),
-                ", ".join(f"{v.name} ({v.device_id})" for v in self.valves),
+                ", ".join(valve.name for valve in self.valves),
             )
         # Every controller, not the first one. Each gets its own command surface and its
         # own state, both keyed by its device id: the one account-level MQTT stream carries
@@ -2526,7 +2561,7 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.info(
                 "Account has %d Anthem Plus controllers: %s",
                 len(self.controllers),
-                ", ".join(f"{c.name} ({c.device_id})" for c in self.controllers),
+                ", ".join(controller.name for controller in self.controllers),
             )
 
         try:
@@ -2879,57 +2914,80 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         for valve in self.valves:
             await valve.async_seed()
 
-        for controller in self.controllers:
-            device_id = controller.device_id
-            # Zones, outlet types, and installed parts — installation-time facts that no
-            # message ever pushes because nothing changes them at runtime. Read once and
-            # keep it; re-reading on a timer polls forever for an event that happens when a
-            # plumber visits.
-            #
-            # Read BEFORE the state, not after it as this used to: the same response says
-            # how many outlets each of this controller's zones has, which decides how its
-            # state decodes the zone arrays in everything that follows. See
-            # `_apply_controller_topology`.
-            if not controller.capabilities.known:
-                try:
-                    config = await self.client.async_get_hub_configuration(device_id)
-                    configuration = config.get("configuration") or {}
-                    controller.capabilities = HubCapabilities.from_configuration(
-                        configuration
-                    )
-                    self._apply_controller_topology(controller, configuration)
-                except KohlerError as err:
-                    _LOGGER.debug(
-                        "Could not read HUB configuration for %s: %s", device_id, err
-                    )
+        # **In parallel.** Each device's reads are independent, and the only ordering that
+        # matters is inside one device — settings before state on a valve, configuration
+        # before state on a controller — which stays sequential within each coroutine. Run
+        # serially this was ~14 round trips end to end on a two-valve, two-controller
+        # account: several seconds of waiting on every restart and reload.
+        #
+        # `return_exceptions=True` preserves the existing behaviour that one device's
+        # failure does not blank the others; each coroutine already catches `KohlerError`
+        # per read, so anything reaching here is unexpected and is logged rather than
+        # allowed to cancel its siblings.
+        results = await asyncio.gather(
+            *(valve.async_seed() for valve in self.valves),
+            *(
+                self._async_seed_controller(controller)
+                for controller in self.controllers
+            ),
+            return_exceptions=True,
+        )
+        for result in results:
+            if isinstance(result, Exception):
+                _LOGGER.warning("Seeding a Kohler device failed: %s", result)
+
+    async def _async_seed_controller(self, controller: Controller) -> None:
+        """Seed one controller. Extracted so every device can be seeded concurrently."""
+        device_id = controller.device_id
+        # Zones, outlet types, and installed parts — installation-time facts that no
+        # message ever pushes because nothing changes them at runtime. Read once and
+        # keep it; re-reading on a timer polls forever for an event that happens when a
+        # plumber visits.
+        #
+        # Read BEFORE the state, not after it as this used to: the same response says
+        # how many outlets each of this controller's zones has, which decides how its
+        # state decodes the zone arrays in everything that follows. See
+        # `_apply_controller_topology`.
+        if not controller.capabilities.known:
             try:
-                controller.state.apply_rest_state(
-                    await self.client.async_get_hub_state(device_id)
+                config = await self.client.async_get_hub_configuration(device_id)
+                configuration = config.get("configuration") or {}
+                controller.capabilities = HubCapabilities.from_configuration(
+                    configuration
                 )
+                self._apply_controller_topology(controller, configuration)
             except KohlerError as err:
-                _LOGGER.debug("Could not seed HUB state for %s: %s", device_id, err)
-            try:
-                payload = await self.client.async_get_hub_favorites(device_id)
-                favorites = payload.get("favorites")
-                if isinstance(favorites, list):
-                    # Favourite ids are reassigned when one is deleted, so this list is the
-                    # only safe way to resolve a favourite — never hardcode an id.
-                    controller.favorites = favorites
-            except KohlerError as err:
-                if getattr(err, "status", None) == 404:
-                    # Not a failure: this endpoint 404s when the controller has **no** saved
-                    # favourites, rather than returning an empty list. Confirmed 2026-08-17 —
-                    # the route is handled (it answers with the application's own error
-                    # envelope, unlike a genuine bad path), MQTT `FAVORITES_SNAPSHOT` agrees
-                    # with `attributes: []`, and `docs/hub/cloud_api.md` §5.2 has a captured
-                    # 200 from when this account still had one. Logging it as an error made
-                    # three misleading lines per startup.
-                    controller.favorites = []
-                    _LOGGER.debug("No HUB favourites are saved on %s", device_id)
-                else:
-                    _LOGGER.debug(
-                        "Could not read HUB favourites for %s: %s", device_id, err
-                    )
+                _LOGGER.debug(
+                    "Could not read HUB configuration for %s: %s", device_id, err
+                )
+        try:
+            controller.state.apply_rest_state(
+                await self.client.async_get_hub_state(device_id)
+            )
+        except KohlerError as err:
+            _LOGGER.debug("Could not seed HUB state for %s: %s", device_id, err)
+        try:
+            payload = await self.client.async_get_hub_favorites(device_id)
+            favorites = payload.get("favorites")
+            if isinstance(favorites, list):
+                # Favourite ids are reassigned when one is deleted, so this list is the
+                # only safe way to resolve a favourite — never hardcode an id.
+                controller.favorites = favorites
+        except KohlerError as err:
+            if getattr(err, "status", None) == 404:
+                # Not a failure: this endpoint 404s when the controller has **no** saved
+                # favourites, rather than returning an empty list. Confirmed 2026-08-17 —
+                # the route is handled (it answers with the application's own error
+                # envelope, unlike a genuine bad path), MQTT `FAVORITES_SNAPSHOT` agrees
+                # with `attributes: []`, and `docs/hub/cloud_api.md` §5.2 has a captured
+                # 200 from when this account still had one. Logging it as an error made
+                # three misleading lines per startup.
+                controller.favorites = []
+                _LOGGER.debug("No HUB favourites are saved on %s", device_id)
+            else:
+                _LOGGER.debug(
+                    "Could not read HUB favourites for %s: %s", device_id, err
+                )
 
     @callback
     def _apply_controller_topology(
@@ -2972,8 +3030,20 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # Helpers
     # ------------------------------------------------------------------ #
     def _persist_refresh_token(self) -> None:
-        """Write the rotated refresh token back to the config entry."""
-        token = self.auth.refresh_token
+        """Write the current refresh token back to the config entry.
+
+        Kept for the callers that already invoke it. Rotation itself now persists through
+        `_store_refresh_token`, so this is a safety net rather than the mechanism.
+        """
+        self._store_refresh_token(self.auth.refresh_token)
+
+    @callback
+    def _store_refresh_token(self, token: str | None) -> None:
+        """Persist one refresh token, if it is new.
+
+        Called from `KohlerAuth` the instant a rotation happens — which is inside the auth
+        lock, on the event loop, so `async_update_entry` is safe to call directly here.
+        """
         if token and token != self.entry.data.get(CONF_REFRESH_TOKEN):
             self.hass.config_entries.async_update_entry(
                 self.entry, data={**self.entry.data, CONF_REFRESH_TOKEN: token}

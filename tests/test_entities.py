@@ -664,3 +664,85 @@ def test_flow_display_is_unchanged_on_a_200_ceiling(valve_model):
     valve.gcs_state.valve1 = decode_word("0195310100000001")  # byte 49 = 24.5 %
     assert valve.gcs_state.flow_is_live
     assert flow.native_value == 24
+
+
+# --------------------------------------------------------------------------- #
+# Safety and credentials
+# --------------------------------------------------------------------------- #
+def test_send_valve_hex_refuses_a_scalding_word():
+    """`send_valve_hex` is the one path that does not go through `encode_word`'s clamp.
+
+    The word carries a 10-bit temperature, so a typo or a script can encode 102.3 °C — 216 °F
+    — and it used to be sent verbatim. Outlet, flow and pause bits stay unrestricted: those
+    are what the escape hatch is for, and none of them can scald.
+    """
+    from homeassistant.exceptions import HomeAssistantError
+
+    from custom_components.kohler_anthem_plus.coordinator import _command_half
+
+    assert _command_half("0195C801", "zone1_hex") == "0195C801"  # 40.5 C, ordinary
+    # 16-character words pasted from the Hex sensor must still work.
+    assert _command_half("0195310100000001", "zone1_hex") == "01953101"
+
+    for word in ("01FFC801", "03FFC801"):  # 51.1 C and 102.3 C
+        with pytest.raises(HomeAssistantError, match="above the"):
+            _command_half(word, "zone1_hex")
+
+
+def test_rotated_refresh_token_is_persisted_at_rotation():
+    """B2C retires the old token the instant it issues a new one.
+
+    Persistence used to be the caller's job, and on a push-only install (`SCAN_INTERVAL` is
+    None) those callers ran once at startup — so hours of rotations went unpersisted and a
+    restart loaded a token Kohler had already retired.
+    """
+    from custom_components.kohler_anthem_plus.anthem_plus.auth import KohlerAuth
+
+    auth = KohlerAuth(None, "token-1")
+    seen: list[str] = []
+    auth.on_token_rotated = seen.append
+    assert auth.on_token_rotated is not None
+
+    # The 401 path must invalidate the access token without discarding the refresh token,
+    # so the retry goes back through the lock rather than around it.
+    auth.invalidate_access_token()
+    assert auth._tokens is None
+    assert auth.refresh_token == "token-1"
+
+
+def test_error_messages_carry_no_device_id():
+    """Device ids double as cloud addresses, and error text reaches logs and report files."""
+    from custom_components.kohler_anthem_plus.anthem_plus.client import KohlerClient
+
+    for path, ident in (
+        ("/devices/api/v1/device-management/gcs-state/gcs-secret01", "gcs-secret01"),
+        (
+            "/devices/api/v1/device-management/gcs-usage/gcs-secret01?Interval=MONTH",
+            "gcs-secret01",
+        ),
+        ("/devices/api/v1/device-management/hub-state/hub-secret02", "hub-secret02"),
+        (
+            "/devices/api/v1/device-management/customer-device/tenant-secret03",
+            "tenant-secret03",
+        ),
+    ):
+        safe = KohlerClient.safe_path(path)
+        assert ident not in safe, safe
+        assert "<id>" in safe, safe
+
+    # A command path has no id to redact and must be left intact.
+    command = "/platform/api/v1/commands/gcs/solowritesystem"
+    assert KohlerClient.safe_path(command) == command
+
+
+def test_device_names_never_contain_a_device_id():
+    """A device name reaches entity ids and the dashboard — permanently."""
+    from custom_components.kohler_anthem_plus.coordinator import valve_names
+
+    devices = [
+        SimpleNamespace(device_id="gcs-secret01", name="Shower"),
+        SimpleNamespace(device_id="gcs-secret02", name="Shower"),
+    ]
+    names = valve_names(devices)
+    for name in names.values():
+        assert "gcs-secret" not in name, names

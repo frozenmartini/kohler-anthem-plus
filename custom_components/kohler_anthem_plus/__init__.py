@@ -135,11 +135,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             (
                 # Every device, each by the name its device page will carry — and, for a
                 # valve, the layout it decodes with, which is its own rather than the entry's.
+                #
+                # **No device ids here.** They are cloud addresses, this line is INFO, and
+                # `home-assistant.log` is what people attach to issues — so printing them
+                # here handed over exactly what `diagnostics.py` goes to length to redact.
+                # The name and SKU identify the device to its owner, which is all this line
+                # is for; anyone needing the id has diagnostics, where it is labelled.
                 *(
-                    f"{v.name} ({v.device_id}, {v.model.sku}, {v.model.total_outlets} outlets)"
+                    f"{v.name} ({v.model.sku}, {v.model.total_outlets} outlets)"
                     for v in coordinator.valves
                 ),
-                *(f"{c.name} ({c.device_id})" for c in coordinator.controllers),
+                *(c.name for c in coordinator.controllers),
             ),
         )
     )

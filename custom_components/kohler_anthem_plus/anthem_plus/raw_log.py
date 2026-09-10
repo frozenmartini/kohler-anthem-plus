@@ -85,6 +85,10 @@ Each .jsonl file is one capture session, one JSON object per line:
     payload_b64  present INSTEAD of `payload` when the bytes were not valid UTF-8
     qos, retain  from the paho message
 
+⚠️ Before sharing, know that these files contain your device identifiers and show when your
+shower was used. Kohler device ids double as cloud addresses, so skim a capture before
+attaching it to a public issue.
+
 This capture is OFF by default. Right now it is on because:
 
 {why}

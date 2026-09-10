@@ -348,6 +348,16 @@ class ValveMonthlyWaterSensor(KohlerValveEntity, SensorEntity):
     def __init__(self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve) -> None:
         super().__init__(coordinator, valve)
         self._attr_unique_id = f"{self._device_id}_water_this_month"
+        # **Rendered once, not per message.** Every MQTT message re-renders every entity, and
+        # this one's attributes are a 13-month dict built from data read once at setup and
+        # never again. Recomputing it per message cost two linear scans, two `strftime` calls
+        # and thirteen conversions — and, because attributes are serialised into the state
+        # machine and the recorder, wrote that churn to the database on every message.
+        #
+        # Keyed on the identity of the usage payload, so a re-seed that replaces it
+        # invalidates the cache without needing an explicit hook.
+        self._cache_key: int | None = None
+        self._cached: tuple[dict[str, Any] | None, dict[str, Any]] = (None, {})
 
     @property
     def _metric(self) -> bool:
@@ -357,30 +367,58 @@ class ValveMonthlyWaterSensor(KohlerValveEntity, SensorEntity):
     def native_unit_of_measurement(self) -> str:
         return UnitOfVolume.LITERS if self._metric else UnitOfVolume.GALLONS
 
+    def _rendered(self) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+        """This month's entry and the attribute dict, built once per usage payload.
+
+        The month is matched on `intervalKey` rather than taken as the last entry: the series
+        can end on a month the valve reported nothing for, and trusting position would then
+        publish a stale month's total as the current one.
+        """
+        usage = self._valve.usage
+        key = id(usage)
+        if key == self._cache_key:
+            return self._cached
+
+        entries = usage_series(usage)
+        month = datetime.now(UTC).strftime("%Y-%m")
+        current = next(
+            (entry for entry in entries if entry.get("intervalKey") == month), None
+        )
+
+        attributes: dict[str, Any] = {}
+        if entries:
+            attributes["history"] = {
+                str(entry.get("intervalKey")): self._volume(entry)
+                for entry in entries
+                if entry.get("intervalKey")
+            }
+        if current is not None:
+            attributes["month"] = current.get("intervalKey")
+            duration = current.get("onDuration")
+            if isinstance(duration, (int, float)):
+                # Seconds on the wire; minutes is what a shower is measured in.
+                attributes["running_minutes"] = round(float(duration) / 60, 1)
+
+        self._cache_key = key
+        self._cached = (current, attributes)
+        return self._cached
+
+    def _volume(self, entry: dict[str, Any]) -> float | None:
+        """One entry's volume in the account's unit, or None when it is not a number."""
+        litres = entry.get("volume")
+        if not isinstance(litres, (int, float)):
+            return None
+        value = float(litres) if self._metric else usage_volume_gallons(float(litres))
+        return round(value, 1)
+
     @property
     def _current(self) -> dict[str, Any] | None:
-        """This month's entry, matched on `intervalKey` rather than taken as the last one.
-
-        The series can end on a month the valve reported nothing for, and trusting position
-        would then publish a stale month's total as the current one.
-        """
-        key = datetime.now(UTC).strftime("%Y-%m")
-        for entry in usage_series(self._valve.usage):
-            if entry.get("intervalKey") == key:
-                return entry
-        return None
+        return self._rendered()[0]
 
     @property
     def native_value(self) -> float | None:
         entry = self._current
-        if entry is None:
-            return None
-        litres = entry.get("volume")
-        if not isinstance(litres, (int, float)):
-            return None
-        if self._metric:
-            return round(float(litres), 1)
-        return round(usage_volume_gallons(float(litres)), 1)
+        return None if entry is None else self._volume(entry)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -388,36 +426,10 @@ class ValveMonthlyWaterSensor(KohlerValveEntity, SensorEntity):
 
         `history` is every month Kohler returned, in the account's unit — enough to answer
         "how does this month compare" without a second call, and the reason the whole series
-        is fetched rather than only the current month.
+        is fetched rather than only the current month. Built once per payload; see
+        `_rendered`.
         """
-        entries = usage_series(self._valve.usage)
-        if not entries:
-            return {}
-
-        def _volume(entry: dict[str, Any]) -> float | None:
-            litres = entry.get("volume")
-            if not isinstance(litres, (int, float)):
-                return None
-            value = (
-                float(litres) if self._metric else usage_volume_gallons(float(litres))
-            )
-            return round(value, 1)
-
-        attributes: dict[str, Any] = {
-            "history": {
-                str(entry.get("intervalKey")): _volume(entry)
-                for entry in entries
-                if entry.get("intervalKey")
-            },
-        }
-        current = self._current
-        if current is not None:
-            attributes["month"] = current.get("intervalKey")
-            duration = current.get("onDuration")
-            if isinstance(duration, (int, float)):
-                # Seconds on the wire; minutes is what a shower is measured in.
-                attributes["running_minutes"] = round(float(duration) / 60, 1)
-        return attributes
+        return self._rendered()[1]
 
 
 class ValveDiagnosticSensor(KohlerValveEntity, SensorEntity):

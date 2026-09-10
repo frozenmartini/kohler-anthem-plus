@@ -32,10 +32,12 @@ import base64
 import binascii
 import hashlib
 import json
+import logging
 import re
 import secrets
 import time
 import urllib.parse
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -54,6 +56,12 @@ from .const import (
     ERROR_REDIRECT_NOT_REGISTERED,
     TOKEN_EXPIRY_MARGIN_SECONDS,
 )
+
+#: This module handles credentials, so nothing here ever logs a token, a password or a
+#: username — see `client._redact_payload` for the same rule applied to payloads. The one
+#: use is reporting that persisting a rotated token failed, which names no secret.
+_LOGGER = logging.getLogger(__name__)
+
 
 # The sign-in page embeds its configuration as `var SETTINGS = {...};`.
 _SETTINGS = re.compile(r"var SETTINGS = (\{.*?\});", re.S)
@@ -163,6 +171,10 @@ class KohlerAuth:
         # so two concurrent refreshes race to redeem the same one and the loser's failure
         # is indistinguishable from a dead credential. See `async_get_access_token`.
         self._refresh_lock = asyncio.Lock()
+        #: Called with the new refresh token whenever B2C rotates one, so persistence is a
+        #: property of rotation rather than something a caller has to remember. See
+        #: `_async_token_request`.
+        self.on_token_rotated: Callable[[str], None] | None = None
 
     @property
     def has_credentials(self) -> bool:
@@ -400,13 +412,43 @@ class KohlerAuth:
         if not access_token or not refresh_token:
             raise AuthError("Kohler did not return a usable token pair.")
 
+        rotated = refresh_token != self._refresh_token
         self._tokens = TokenSet(
             access_token=access_token,
             refresh_token=refresh_token,
             expires_at=time.time() + float(payload.get("expires_in", 3600)),
         )
         self._refresh_token = refresh_token
+
+        # **Persist here, not at the caller.** B2C invalidates the old token the moment a new
+        # one is issued, so an unpersisted rotation strands the account: the entry still holds
+        # a token Kohler has already retired, and the next start fails to reauth.
+        #
+        # This used to be the caller's job, and on a push-only install (`SCAN_INTERVAL` is
+        # None) the callers that did it ran once at startup and then effectively never again
+        # — while every valve write and cloud check kept rotating the token behind them. The
+        # window between redeeming and persisting was hours, not milliseconds.
+        #
+        # A failure to persist must not fail the request that triggered it: the token in
+        # memory is still good for this run, and losing it at the next restart is strictly
+        # better than breaking the call in hand.
+        if rotated and self.on_token_rotated is not None:
+            try:
+                self.on_token_rotated(refresh_token)
+            except Exception:  # pragma: no cover - defensive
+                _LOGGER.exception("Could not persist the rotated Kohler refresh token")
         return self._tokens
+
+    def invalidate_access_token(self) -> None:
+        """Mark the current access token as unusable, without touching the refresh token.
+
+        For the 401 path: the server has rejected the access token we hold, so the next
+        `async_get_access_token` must mint a new one rather than return the rejected one
+        from cache. Going through that method rather than calling `async_refresh` directly
+        keeps the refresh serialised — two concurrent 401s would otherwise redeem the same
+        rotating refresh token twice.
+        """
+        self._tokens = None
 
     async def async_get_access_token(self) -> str:
         """Return a valid access token, refreshing it if needed.

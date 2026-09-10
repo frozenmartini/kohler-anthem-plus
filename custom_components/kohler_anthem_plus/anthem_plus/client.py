@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import uuid
 from typing import Any
 
@@ -44,6 +45,14 @@ from .const import (
 from .models import OutletStateSource, resolve_outlet_source
 
 _LOGGER = logging.getLogger(__name__)
+
+#: Matches the id segment of a device-management path: everything after the endpoint name up
+#: to the next `/` or `?`. Kohler ids are `gcs-...`, `hub-...` and bare tenant GUIDs, so this
+#: keys off the endpoint prefix rather than trying to recognise an id by shape.
+_ID_IN_PATH = re.compile(
+    r"/((?:gcs|hub|customer)-[a-z-]*/(?:[a-z]+/)?)[^/?]+",
+    re.IGNORECASE,
+)
 
 REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=30)
 
@@ -255,9 +264,15 @@ class KohlerClient:
             _LOGGER.info(
                 "401 from %s — the access token aged out mid-request; refreshing it and "
                 "retrying once. Expect this call to take a few seconds longer than usual",
-                path,
+                self.safe_path(path),
             )
-            await self._auth.async_refresh()
+            # Through `async_get_access_token`, not `async_refresh`, so this goes via the
+            # refresh lock. B2C rotates the refresh token on every use, and two concurrent
+            # 401s calling `async_refresh` directly would redeem the same token twice —
+            # exactly the double-redemption the lock exists to prevent. Invalidating first
+            # makes the locked path treat the token as expired and mint a new one.
+            self._auth.invalidate_access_token()
+            await self._auth.async_get_access_token()
             return await self.async_request(
                 method, path, json_body=json_body, allow_retry=False
             )
@@ -301,6 +316,21 @@ class KohlerClient:
         return payload
 
     @staticmethod
+    def safe_path(path: str) -> str:
+        """An endpoint path with its device or tenant id replaced by `<id>`.
+
+        **Every read endpoint carries an id in its path**, so an error message built from one
+        carries a cloud address — and those messages reach WARNING and ERROR logs, the
+        `probe_usage` report file, and service responses. `diagnostics.py` goes to length to
+        redact exactly this; an exception string handed it back.
+
+        The shape is what makes an error useful (`gcs-usage/<id> failed with HTTP 400` says
+        which endpoint and why), and the shape is all this keeps. Write endpoints have no id
+        in the path — the id travels in the body — so they are unaffected either way.
+        """
+        return _ID_IN_PATH.sub(r"/\1<id>", path)
+
+    @staticmethod
     def _raise_for_payload(status: int, path: str, payload: Any) -> None:
         """Translate Kohler's HTTP status and in-body statusCode into exceptions."""
         inner = payload.get("statusCode") if isinstance(payload, dict) else None
@@ -319,7 +349,9 @@ class KohlerClient:
         if status >= 400:
             detail = payload if isinstance(payload, str) else repr(payload)
             raise KohlerError(
-                f"{path} failed with HTTP {status}: {detail}", payload, status
+                f"{KohlerClient.safe_path(path)} failed with HTTP {status}: {detail}",
+                payload,
+                status,
             )
 
     # ------------------------------------------------------------------ #
@@ -452,8 +484,11 @@ class KohlerClient:
                 payload = await self.async_request("GET", path)
             except KohlerError as err:
                 # The status is in the message; the message itself may quote an error body,
-                # so it is truncated rather than stored whole.
-                record["error"] = str(err)[:300]
+                # so it is truncated rather than stored whole. `safe_path` has already taken
+                # the id out of the path, and this belt-and-braces pass catches an id echoed
+                # back inside a body — truncation alone would not, since the id can sit
+                # anywhere in it.
+                record["error"] = str(err).replace(device_id, "<id>")[:300]
             else:
                 record["ok"] = True
                 record["payload_type"] = type(payload).__name__
