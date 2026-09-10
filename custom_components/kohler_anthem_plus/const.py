@@ -461,7 +461,7 @@ UI_TEMPERATURE_MAX_F = 113
 # Flow
 # ---------------------------------------------------------------------------
 # What flow Home Assistant writes when a command does not name one — which is every command
-# it can currently issue, since the flow entities were removed (see `docs/gcs/api.md`).
+# it can currently issue, while the flow entities were absent, between 2026-08-13 and 0.6.0 (see `docs/gcs/api.md`).
 #
 # **This must not be "whatever the valve currently holds".** It used to be, and that quietly
 # handed control of every HA write to the touchscreen: opening an outlet from Home Assistant
@@ -631,7 +631,8 @@ WARMUP_DEBUG_LOG_KEEP_FILES = None
 # looked backwards would miss the strongest signal there is.
 #
 # ⚠️ **The forward window must stay shorter than WARMUP_AUTO_RESTORE_DELAY_SECONDS**, and
-# `test_warmup_journal.py` fails if it does not. Both were 60 s when first written, which put
+# The external harness asserted this; nothing in this repository's `tests/` does. Both were
+# 60 s when first written, which put
 # the close of the evidence window at the exact instant auto-restore writes to the valve —
 # so whether our own traffic landed inside the evidence depended on which coroutine the loop
 # happened to run first. 45 s ends the window a clear 15 s before any intervention, which

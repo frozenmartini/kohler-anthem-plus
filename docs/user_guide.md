@@ -235,10 +235,12 @@ the valve's own byte is authoritative, including a change made at the panel mid-
 | `Last Update` | both | Timestamp of the most recent message |
 | `Start new MQTT capture` | both | Button; rolls the raw capture over to a fresh file |
 | `Report Log` | both | Switch; one-file bug-report capture of the raw MQTT stream — see [The Report Log switch](#the-report-log-switch) |
-| `Zone N Hex` | valve | The current command word for that zone — copy it into `send_valve_hex` |
-| `Zone N Outlet M Max Run Time` | valve | That outlet's configured run-time ceiling, in seconds |
+| `Hex` | valve | The current command word for that zone — copy it into `send_valve_hex`. `Zone N Hex` on a two-zone valve |
+| `Rainhead Max Run Time` | valve | The valve's configured run-time ceiling, in seconds — named after outlet 1's fixture. **One sensor, not one per outlet**: every outlet observed reports the same figure, and the valve times the limit per zone rather than per outlet. Enabled by default, unlike the rest of this table |
 | `Zone N Active` | valve | Whether that zone is currently running water |
 | `Preset Active` | valve | Whether a stored preset is driving the valve |
+| `Firmware` | valve | The valve's own firmware version. Reads `unknown` where the valve reports no `about` block — including every controller-free account observed so far |
+| `Registered` | valve | When Kohler's cloud created this device's record. **A registration date, not an installation date** — a valve replaced under warranty reads as newer than the plumbing |
 | `Warmup Auto-Restore` | valve | Switch; puts warmup back when something silently disables it |
 
 </details>
@@ -527,7 +529,7 @@ rest.
 
 The workflow is copy-and-paste rather than hand-assembly. Set the shower up the way you want
 it using the outlet switches and temperature controls, read the resulting code off the
-`Zone N Hex` diagnostic sensor, and store that string. Sending it later reproduces that exact
+`Hex` diagnostic sensor (`Zone N Hex` on a two-zone valve), and store that string. Sending it later reproduces that exact
 state.
 
 ```yaml
@@ -657,9 +659,10 @@ This integration is **not in HACS's default store.** Add it as a custom reposito
 
 ### Manually
 
-This repository **is** the integration — `manifest.json` sits at its root. Copy its contents
-into `config/custom_components/kohler_anthem_plus/` in your Home Assistant configuration
-directory (the folder name must be exactly `kohler_anthem_plus`) and restart.
+Copy the `custom_components/kohler_anthem_plus/` folder from this repository into the
+`custom_components/` folder of your Home Assistant configuration directory, so that
+`config/custom_components/kohler_anthem_plus/manifest.json` exists, and restart Home
+Assistant.
 
 ## Setup
 
@@ -801,7 +804,7 @@ The raw equivalent is `send_valve_hex` with a hand-built word:
           zone1_hex: "01A6C801"   # 0x1A6 (422) = 42.2 °C = 108 °F, flow 100%, outlet 1
 ```
 
-Zone 2 is re-sent as it stands when `zone2_hex` is omitted. Build the word from the *Zone N Hex*
+Zone 2 is re-sent as it stands when `zone2_hex` is omitted. Build the word from the *Hex*
 diagnostic sensor: change the last byte for outlets (`01`, `02`, `04`, and sums), and the
 temperature per the [hex reference](gcs/valve_hex.md) — or read it off `custom_shower`'s
 response.
@@ -906,7 +909,7 @@ legacy delayed-start modes. It's shown so Home Assistant can display the true st
 disappears once you select something else. You can't select it.
 
 **The shower stops after about fifteen minutes.** That's the configured maximum run time, and
-it's working as designed. `Zone N Outlet M Max Run Time` shows the ceiling per outlet. The
+it's working as designed. `Rainhead Max Run Time` shows the ceiling. The
 `Endless Shower` switch will re-open the zone if you want that behaviour.
 
 **Zone 2 entities are missing.** Expected on a single-zone valve — K-28209 and K-28210 have
@@ -919,10 +922,12 @@ Konnect app.
 
 * **Cloud-only.** No local control path exists for either product. The controller's local API
   can read configuration but cannot actuate anything.
-* **No flow entity.** The codec handles flow correctly and the valve honours a flow byte, but
-  the Anthem Plus touchscreen overwrites both temperature and flow, so a Home Assistant
-  setpoint could not be relied on to stay put. Use `custom_shower`'s *Advanced → Flow*
-  field, or `send_valve_hex`, if you need it.
+* **Flow can be overwritten on some hardware.** Each zone has a Flow number, restored in
+  0.6.0. But a first-generation Anthem touchscreen has been captured rewriting *both* zones'
+  flow the moment its flow panel is opened — before any adjustment is made — applying its own
+  linked scaling and a calibration-derived ceiling. On such an install a setpoint written from
+  Home Assistant can change on its own; disable the entity if yours behaves that way. The
+  protocol layer is unaffected either way.
 * **Music, lighting and steam are read-only.** The controller exposes them as state; driving
   them means activating a favourite that includes them. This is the limit of what **Konnect**
   exposes, not what the hardware can do.

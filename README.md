@@ -221,9 +221,9 @@ set up in your browser. Otherwise, add it by hand:</p>
 <p>HACS installs from <b>releases</b>, not from the latest commit.</p>
 
 <b>Manually</b>
-<p>This repository <b>is</b> the integration — <code>manifest.json</code> sits at its root. Copy
-its contents into <code>custom_components/kohler_anthem_plus/</code> in your Home Assistant
-configuration directory (the folder name must be exactly <code>kohler_anthem_plus</code>) and
+<p>Copy the <code>custom_components/kohler_anthem_plus/</code> folder from this repository into
+the <code>custom_components/</code> folder of your Home Assistant configuration directory, so
+that <code>config/custom_components/kohler_anthem_plus/manifest.json</code> exists, and
 restart.</p>
 
 <hr>
@@ -290,9 +290,10 @@ used. The reports folder lives inside the integration, so updating or reinstalli
 
 <ul>
 <li><b>Cloud-only.</b> No local control path exists for either product.</li>
-<li><b>No flow control.</b> Both interfaces overwrite the flow limits with their own
-calibration, so a flow setting cannot be held accurately — not by this integration, and not by
-the Konnect app either.</li>
+<li><b>Flow may be overwritten on some hardware.</b> Each zone has a Flow number. A
+first-generation Anthem touchscreen has been captured rewriting both zones the moment its flow
+panel is opened, so on such an install a setpoint may not hold — disable the entity if yours
+behaves that way.</li>
 <li><b>The API is undocumented</b> and Kohler can change it without notice.</li>
 <li><b>One installation tested.</b> A single K-28212 — six outlets, three and three — with a
 controller on firmware 2.88. Other models are supported on what the protocol says, not on anyone

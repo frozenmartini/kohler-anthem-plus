@@ -531,7 +531,7 @@ class HubShowerSwitch(KohlerControllerEntity, SwitchEntity):
     (51 of 95 immediately, 12 late, 32 never; preset-driven ones never). That is the
     intended reading, not a gap: the switch shows what the controller knows, and its own
     ``valvecontrol OFF`` can only stop a session the controller is party to. For whether
-    water is physically running, read the **Anthem Valve** device's Shower switch and outlet
+    water is physically running, read the **Anthem Valve** device's Shower Valves switch and
     sensors, which are authoritative.
 
     See ``Controller.water_is_running`` for the 2026-08-18 measurement that made this

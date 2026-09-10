@@ -128,7 +128,8 @@ CUSTOM_SHOWER_SCHEMA = vol.Schema(
 
 # The forms as the UI renders them. `services.yaml` carries the same thing statically, as the
 # fallback if the runtime override below cannot be applied; keep the two in step —
-# `tests/test_service_form.py` checks that they are.
+# Nothing in this repository checks that they stay in step — an external harness did, and
+# `tests/` here does not cover it. Treat the duplication as hand-maintained.
 _FIELD_DEVICE = {
     "name": "Valve",
     "required": False,

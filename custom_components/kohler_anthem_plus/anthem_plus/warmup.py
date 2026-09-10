@@ -90,7 +90,8 @@ def restore_target(taken_away: str | None, remembered: str | None) -> str | None
     ``"before": "warmUpAllOutletsWithNoStartDelay"`` beside ``"restores_to": null`` and the
     valve stayed disabled for seven hours.
 
-    So the invariant worth testing, and the one ``test_warmup_restore_target.py`` asserts, is
+    So the invariant worth testing — asserted by the external harness, not by this
+    repository's ``tests/`` — is
     that **whenever ``should_restore_warmup`` returns True, this returns a mode.**
     """
     for mode in (taken_away, remembered):
