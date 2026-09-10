@@ -17,9 +17,10 @@ endpoint — an Anthem Plus controller on its own has no valve to write to, and 
 goes through favourites instead. So on a HUB-only account neither service appears at all,
 rather than appearing and failing.
 
-There is deliberately **no device field**. The services target the valve because they can
-only target the valve, and asking which one on a single-valve integration is friction for
-nothing.
+The **device field is optional**. With one Anthem valve on the account — every install
+before 2026-09-08 — it can be left empty and the action finds the valve itself; asking
+would be friction for nothing. With several, it says which one, and an action that does
+not say is refused rather than sent to whichever valve happened to load first.
 
 **These services can run water.** Input is validated before sending and the effect is logged,
 but they are deliberately unrestricted otherwise: the point is to reach states the UI does
@@ -40,6 +41,7 @@ from homeassistant.core import (
 )
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.service import async_set_service_schema
 
 from .anthem_plus.models import ValveModel
@@ -59,10 +61,12 @@ from .const import (
     UI_TEMPERATURE_MAX_F,
     UI_TEMPERATURE_MIN_F,
 )
-from .coordinator import KohlerAnthemPlusCoordinator
+from .coordinator import KohlerAnthemPlusCoordinator, Valve
 
 _LOGGER = logging.getLogger(__name__)
 
+# Home Assistant's device-registry id for the valve, as the device selector yields it.
+ATTR_DEVICE_ID = "device_id"
 ATTR_ZONE1_HEX = "zone1_hex"
 ATTR_ZONE2_HEX = "zone2_hex"
 
@@ -91,6 +95,7 @@ _HEX_WORD = vol.All(cv.string, cv.matches_regex(r"^(?:[0-9A-Fa-f]{8}|[0-9A-Fa-f]
 
 SEND_VALVE_HEX_SCHEMA = vol.Schema(
     {
+        vol.Optional(ATTR_DEVICE_ID): vol.Any(None, cv.string),
         vol.Required(ATTR_ZONE1_HEX): _HEX_WORD,
         # `vol.Maybe` because the UI submits "" for a touched-then-cleared optional text
         # field, which would otherwise fail the regex instead of meaning "closed".
@@ -103,6 +108,7 @@ SEND_VALVE_HEX_SCHEMA = vol.Schema(
 # them out; the form marks them required for a display reason explained at `_FIELD_OUTLETS`.
 CUSTOM_SHOWER_SCHEMA = vol.Schema(
     {
+        vol.Optional(ATTR_DEVICE_ID): vol.Any(None, cv.string),
         vol.Required(ATTR_ZONE1_TEMPERATURE): vol.Coerce(float),
         vol.Optional(ATTR_ZONE2_TEMPERATURE): vol.Any(None, vol.Coerce(float)),
         vol.Optional(ATTR_FLOW): vol.All(
@@ -121,6 +127,12 @@ CUSTOM_SHOWER_SCHEMA = vol.Schema(
 # The forms as the UI renders them. `services.yaml` carries the same thing statically, as the
 # fallback if the runtime override below cannot be applied; keep the two in step —
 # `tests/test_service_form.py` checks that they are.
+_FIELD_DEVICE = {
+    "name": "Valve",
+    "required": False,
+    "description": "Which Anthem valve, when the account has more than one.",
+    "selector": {"device": {"filter": {"integration": DOMAIN}}},
+}
 _FIELD_ZONE1 = {
     "name": "Zone 1 Hex",
     "required": True,
@@ -285,8 +297,11 @@ def _temperature_bounds(unit: str) -> tuple[float, float, str]:
     )
 
 
-def _async_describe_service(hass: HomeAssistant, two_zones: bool) -> None:
-    """Publish the `send_valve_hex` form, showing the Zone 2 field only on a two-zone system.
+def _async_describe_service(
+    hass: HomeAssistant, two_zones: bool, several_valves: bool
+) -> None:
+    """Publish the `send_valve_hex` form, showing the Zone 2 field only on a two-zone system
+    and the Valve picker only when the account has more than one valve.
 
     `services.yaml` is static and cannot vary per installation, so a single-zone owner would
     otherwise be shown a Zone 2 box for a zone they do not have — with a sensor named in its
@@ -296,7 +311,12 @@ def _async_describe_service(hass: HomeAssistant, two_zones: bool) -> None:
     Best-effort: if this cannot be applied the static `services.yaml` still stands, so the
     action keeps working with one redundant field rather than not working at all.
     """
-    fields: dict[str, Any] = {"zone1_hex": _FIELD_ZONE1}
+    fields: dict[str, Any] = {}
+    if several_valves:
+        # Same rule as Zone 2 (2026-09-08): a field for a choice the owner does not have is
+        # noise. With one valve the handler uses it unasked, so the picker is not shown.
+        fields[ATTR_DEVICE_ID] = _FIELD_DEVICE
+    fields["zone1_hex"] = _FIELD_ZONE1
     if two_zones:
         fields["zone2_hex"] = _FIELD_ZONE2
     try:
@@ -315,13 +335,19 @@ def _async_describe_service(hass: HomeAssistant, two_zones: bool) -> None:
 
 
 def _async_describe_custom_shower(
-    hass: HomeAssistant, model: ValveModel, temperature_unit: str
+    hass: HomeAssistant, models: list[ValveModel], temperature_unit: str
 ) -> None:
     """Publish the `custom_shower` form for this installation.
 
     Three things the static `services.yaml` cannot know: the account's temperature unit and
     therefore the slider's range, which zones the valve has, and how many outlets each zone
     has (`ValveModel.outlets_in_zone`). Same best-effort rule as `_async_describe_service`.
+
+    With several valves the form is the union of their layouts — a zone or outlet any of
+    them has is shown — and the handler checks the chosen valve's own model, so an outlet
+    the target does not have is an error there rather than a silent no-op. The Valve picker
+    itself appears only then: with one valve there is no choice to make, so — like Zone 2 on
+    a single-zone valve — it is left out (2026-09-08).
     """
     low, high, symbol = _temperature_bounds(temperature_unit)
 
@@ -340,8 +366,12 @@ def _async_describe_custom_shower(
 
     statics = {1: _FIELD_ZONE1_TEMPERATURE, 2: _FIELD_ZONE2_TEMPERATURE}
     fields: dict[str, Any] = {}
-    for zone in model.zones:
-        keys = _ZONE_OUTLET_FIELDS[zone][: model.outlets_in_zone(zone)]
+    if len(models) > 1:
+        fields[ATTR_DEVICE_ID] = _FIELD_DEVICE
+    zones = [1, 2] if any(model.uses_valve2 for model in models) else [1]
+    for zone in zones:
+        widest = max(model.outlets_in_zone(zone) for model in models if zone in model.zones)
+        keys = _ZONE_OUTLET_FIELDS[zone][:widest]
         section = _ZONE_SECTIONS[zone]
         fields[section] = {
             "name": _SECTION_NAMES[section],
@@ -372,31 +402,49 @@ def _async_describe_custom_shower(
         _LOGGER.debug("Could not override the custom_shower description", exc_info=True)
 
 
-def _resolve_coordinator(hass: HomeAssistant) -> KohlerAnthemPlusCoordinator:
-    """Find the loaded entry that owns a valve.
+def _resolve_valve(hass: HomeAssistant, device_id: str | None) -> Valve:
+    """Find the valve an action is for.
 
-    No device field to disambiguate with, so this picks the one entry that *can* answer.
-    Several valve-owning entries is a configuration nobody has, but it is better to say so
-    than to write a command word to whichever one happened to load first.
+    ``device_id`` is Home Assistant's device-registry id — what the device selector yields —
+    resolved to a valve through the identifiers this integration registers. Without one,
+    the single valve across every loaded entry is used. With several and no id the action
+    refuses, because writing a command word to whichever one happened to load first is
+    worse than saying so.
     """
     entries: dict[str, KohlerAnthemPlusCoordinator] = hass.data.get(DOMAIN, {})
-    with_valve = [c for c in entries.values() if c.gcs_device is not None]
-    if not with_valve:
+    valves = [valve for coordinator in entries.values() for valve in coordinator.valves]
+    if not valves:
         raise HomeAssistantError(
             "No Anthem valve on this account — solowritesystem is a valve endpoint, and an "
             "Anthem Plus controller is driven through favourites instead"
         )
-    if len(with_valve) > 1:
-        raise HomeAssistantError(
-            "More than one Anthem valve is set up; this action cannot tell them apart"
+    if device_id:
+        device = dr.async_get(hass).async_get(device_id)
+        if device is None:
+            raise ServiceValidationError(f"No device with id {device_id!r}")
+        wanted = {
+            identifier for domain, identifier in device.identifiers if domain == DOMAIN
+        }
+        for valve in valves:
+            if valve.device_id in wanted:
+                return valve
+        raise ServiceValidationError(
+            f"{device.name_by_user or device.name} is not an Anthem valve; choose the "
+            "valve device, not the controller"
         )
-    return with_valve[0]
+    if len(valves) > 1:
+        raise ServiceValidationError(
+            "More than one Anthem valve is set up ("
+            + ", ".join(valve.name for valve in valves)
+            + "); say which one with the Valve field (device_id)"
+        )
+    return valves[0]
 
 
 async def _async_send_valve_hex(call: ServiceCall) -> ServiceResponse:
     """Handle `kohler_anthem_plus.send_valve_hex`."""
-    coordinator = _resolve_coordinator(call.hass)
-    result: dict[str, Any] = await coordinator.async_send_valve_hex(
+    valve = _resolve_valve(call.hass, call.data.get(ATTR_DEVICE_ID))
+    result: dict[str, Any] = await valve.async_send_valve_hex(
         call.data[ATTR_ZONE1_HEX], call.data.get(ATTR_ZONE2_HEX) or None
     )
     return result
@@ -410,8 +458,8 @@ async def _async_custom_shower(call: ServiceCall) -> ServiceResponse:
     account's unit, so a YAML caller cannot send the valve full cold by typing 0. Zone 2's
     temperature follows zone 1's when it is not given.
     """
-    coordinator = _resolve_coordinator(call.hass)
-    unit = coordinator.temperature_unit
+    valve = _resolve_valve(call.hass, call.data.get(ATTR_DEVICE_ID))
+    unit = valve.temperature_unit
     low, high, symbol = _temperature_bounds(unit)
     zone1 = float(call.data[ATTR_ZONE1_TEMPERATURE])
     zone2_raw = call.data.get(ATTR_ZONE2_TEMPERATURE)
@@ -429,7 +477,7 @@ async def _async_custom_shower(call: ServiceCall) -> ServiceResponse:
     flow = call.data.get(ATTR_FLOW)
     try:
         word1, word2 = encode_shower(
-            coordinator.model,
+            valve.model,
             {1: unit_to_celsius(zone1, unit), 2: unit_to_celsius(zone2, unit)},
             DEFAULT_FLOW_PERCENT if flow is None else float(flow),
             zone_flags,
@@ -437,7 +485,7 @@ async def _async_custom_shower(call: ServiceCall) -> ServiceResponse:
     except ValveHexError as err:
         raise ServiceValidationError(str(err)) from err
     keep_on = bool(call.data.get(ATTR_KEEP_ON, False))
-    result: dict[str, Any] = await coordinator.async_custom_shower(
+    result: dict[str, Any] = await valve.async_custom_shower(
         word1, word2, keep_on_after_warmup=keep_on
     )
     return {**result, ATTR_KEEP_ON: keep_on}
@@ -452,8 +500,19 @@ def async_register_services(
     would otherwise stack handlers. A HUB-only entry registers nothing, so the actions do
     not appear in the UI on an account that could never use them.
     """
-    if coordinator.gcs_device is None:
+    if not coordinator.valves:
         return
+    # The forms describe every valve loaded so far, across entries, so the Valve picker
+    # appears only once there is more than one to choose from. Registration is once, but
+    # the description is re-published on every entry setup so a second entry's valve turns
+    # the picker on. (An unload does not re-describe; a stale picker is cosmetic, and the
+    # handler checks the target valve either way.) `hass.data[DOMAIN]` already holds this
+    # entry's coordinator — `async_setup_entry` stores it before calling here.
+    models = [
+        valve.model
+        for other in hass.data.get(DOMAIN, {}).values()
+        for valve in other.valves
+    ]
     if not hass.services.has_service(DOMAIN, SERVICE_SEND_VALVE_HEX):
         hass.services.async_register(
             DOMAIN,
@@ -464,9 +523,12 @@ def async_register_services(
             # meant what they thought without going to the log.
             supports_response=SupportsResponse.OPTIONAL,
         )
-        # After registering, not before: the description attaches to a service that exists.
-        # Whether the Zone 2 field is shown follows the topology detected at setup.
-        _async_describe_service(hass, coordinator.model.uses_valve2)
+    # After registering, not before: the description attaches to a service that exists.
+    # Whether the Zone 2 field is shown follows the topology detected at setup; whether the
+    # Valve picker is shown follows how many valves are loaded.
+    _async_describe_service(
+        hass, any(model.uses_valve2 for model in models), len(models) > 1
+    )
     if not hass.services.has_service(DOMAIN, SERVICE_CUSTOM_SHOWER):
         hass.services.async_register(
             DOMAIN,
@@ -477,9 +539,7 @@ def async_register_services(
             # command word for the escape hatch.
             supports_response=SupportsResponse.OPTIONAL,
         )
-        _async_describe_custom_shower(
-            hass, coordinator.model, coordinator.temperature_unit
-        )
+    _async_describe_custom_shower(hass, models, coordinator.temperature_unit)
 
 
 def async_unregister_services(hass: HomeAssistant) -> None:

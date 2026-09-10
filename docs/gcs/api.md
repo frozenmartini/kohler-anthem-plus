@@ -658,7 +658,7 @@ Consequences for anything restoring a session:
 The consequence for anything trying to resume: **by the time the close is visible, the record
 of what was running is already gone.** Rebuilding a command from current state can only
 restore the outlet that fired. The state has to be captured *before* the cutoff message —
-which is why `coordinator._remember_open_masks` keeps a snapshot and refuses to overwrite it
+which is why `Valve._remember_open_masks` keeps a snapshot and refuses to overwrite it
 from a paused or all-closed word.
 
 This session also reads as per-outlet at first glance — outlet 4 opened at 19:52:48 and the

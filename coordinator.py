@@ -22,7 +22,7 @@ import logging
 import os
 import time
 import uuid
-from collections import deque
+from collections import Counter, deque
 from datetime import datetime, timezone
 from typing import Any
 
@@ -67,8 +67,12 @@ from .anthem_plus import (
     journal_event,
     restore_target,
     should_restore_warmup,
+    ValveModel,
+    describe_topology,
     get_valve_model,
     model_for_topology,
+    topology_from_hub_configuration,
+    topology_from_valve_settings,
     unit_to_celsius,
 )
 from .anthem_plus.entry_reload import reload_signature
@@ -92,6 +96,7 @@ from .const import (
     CONF_RESTART_ON_RUNTIME_CUTOFF,
     CONF_TEMPERATURE_UNIT,
     CONF_TENANT_ID,
+    CONF_VALVES,
     CONF_VALVE_MODEL,
     CONF_ZONE_OUTLETS,
     CUTOFF_DEBUG_LOG_KEEP_FILES,
@@ -103,6 +108,8 @@ from .const import (
     DEFAULT_FLOW_PERCENT,
     DEFAULT_PRESET_ID,
     DEFAULT_PRESET_TIMER_SECONDS,
+    DEVICE_NAME_CONTROLLER,
+    DEVICE_NAME_VALVE,
     DOMAIN,
     ENABLE_CUTOFF_DEBUG_LOG,
     ENABLE_RAW_MQTT_LOG,
@@ -237,67 +244,211 @@ def credential_is_dead(err: Exception) -> bool:
     return isinstance(err, AuthError) and not isinstance(err, AuthUnavailable)
 
 
-class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
-    """Owns the connection and the per-device state objects."""
+def _controller_offline(controller: Controller) -> str:
+    """The message for a controller that answered `statusCode 900`.
 
-    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
-        # `config_entry` must be passed on modern Home Assistant: without it
-        # `async_config_entry_first_refresh()` refuses to run. Older releases do not accept
-        # the keyword at all, so fall back rather than hard-failing on them.
-        # `update_interval=SCAN_INTERVAL` disables interval polling entirely. State is
-        # push-only: MQTT carries every change, and the REST reads happen on two *events* —
-        # setup, and every MQTT (re)connect — rather than on a clock.
-        #
-        # ⚠️ **That was one event short of the truth until 2026-08-21.**
-        # `async_config_entry_first_refresh()` runs immediately after `async_setup()` and the
-        # base class turns it into a third read of everything. `_async_update_data` now
-        # short-circuits that one, so the sentence above is enforced rather than merely
-        # intended — see the comment there before removing it.
-        #
-        # `_async_update_data()` still exists and still works; with no interval it runs only
-        # when something asks, which is what `homeassistant.update_entity` does. That is the
-        # manual refresh, and there is no automatic one.
-        try:
-            super().__init__(
-                hass,
-                _LOGGER,
-                name=DOMAIN,
-                update_interval=SCAN_INTERVAL,
-                config_entry=entry,
-            )
-        except TypeError:
-            super().__init__(
-                hass,
-                _LOGGER,
-                name=DOMAIN,
-                update_interval=SCAN_INTERVAL,
-            )
-        # Kept under our own name rather than relying on the base class's `config_entry`,
-        # whose presence varies by release.
-        self.entry = entry
-        # The entry as it looked when this coordinator was built, frozen. Home Assistant
-        # mutates the `ConfigEntry` object in place, so `self.entry` is a live view and
-        # cannot serve as a "before" — comparing it against the entry compares an object
-        # with itself. `_async_update_listener` compares against this instead.
-        self.reload_signature = entry_reload_signature(entry)
-        # The stored split wins over the SKU: an install that matches no catalogue model
-        # still reloads correctly, and a SKU label can never silently change topology.
-        stored = entry.data.get(CONF_ZONE_OUTLETS)
-        if isinstance(stored, (list, tuple)) and len(stored) == 2:
-            self.model = model_for_topology(int(stored[0]), int(stored[1]))
+    Named, because with several controllers on the account "the controller" no longer
+    says which one to go and look at.
+    """
+    return (
+        f"{controller.name} is offline. Check that the controller is powered on and "
+        "connected, then try again."
+    )
+
+
+class Controller:
+    """One Anthem Plus system controller, with everything the coordinator keeps for it.
+
+    An account can carry several controllers — one per bathroom is the ordinary case — and
+    the cloud lists them all under one tenant, so the coordinator holds a list of these rather
+    than one set of singular fields. Every controller entity is bound to exactly one of them,
+    and each MQTT envelope is routed to the one whose id it carries. Until 2026-09-08 the
+    coordinator kept only the *first* controller the account listed and silently ignored the
+    rest.
+    """
+
+    def __init__(
+        self, device: Device, hub: HubDevice, state: HubState, name: str
+    ) -> None:
+        self.device = device
+        #: Command surface — favourites, `valvecontrol`, `stopall`.
+        self.hub = hub
+        #: Live state, fed by the REST seed and then by MQTT.
+        self.state = state
+        #: Device name shown in Home Assistant. "Anthem Plus" on a single-controller account,
+        #: so nothing changes for an existing install; see `controller_names`.
+        self.name = name
+        #: Which accessories are attached. Latched by the first successful configuration
+        #: read; `known` is what says whether that read has happened.
+        self.capabilities = HubCapabilities()
+        #: This controller's favourites — seeded over REST, then replaced wholesale by every
+        #: `FAVORITES_SNAPSHOT`. Ids are reassigned on delete, so always resolve by name.
+        self.favorites: list[dict[str, Any]] = []
+
+    @property
+    def device_id(self) -> str:
+        return self.device.device_id
+
+    @property
+    def model(self) -> ValveModel:
+        """Outlet layout of the valve behind this controller.
+
+        Starts as the entry's model and is replaced by what the controller's own
+        `hub-configuration` reports on the first seed — two controllers on one account can
+        front different valve models, and the entry stores only one. Lives on the state
+        object, which is what decodes the per-zone outlet arrays with it, so there is exactly
+        one copy to get out of step. See `KohlerAnthemPlusCoordinator._apply_controller_topology`.
+        """
+        return self.state.model
+
+    @property
+    def water_is_running(self) -> bool | None:
+        """Whether the **controller** believes water is running. Never asks the valve.
+
+        This is deliberately the controller's own, possibly wrong, view — and the entities
+        on the Anthem Plus device are the one place that is the right answer. They are
+        answering "what does this controller think it is doing", and a controller that has
+        not been told about a session is not doing anything: its ``stopall`` and
+        ``valvecontrol OFF`` have nothing to stop, and its own timers are not counting.
+
+        **This replaced a valve-backed property on 2026-08-18, because that produced a false
+        positive.** `resolve_outlet_source()` is right that the valve owns the *physical*
+        water state, and the Anthem Valve entities read it. But feeding it to the
+        controller's switches made them report a system the controller knew nothing about.
+        Measured that day: a 86-minute GCS-driven shower — open at 07:52:01 local, the
+        valve's 3600 s pause and our restore at 08:52, stopped by hand at 09:18 — during
+        which the controller published **not one message of any kind**, `SHOWER_VALVE_STS`
+        included. The capture holds five `GCS_SOLO_STS` messages and nothing else. Both
+        controller switches nonetheless tracked the shower perfectly, which looked like
+        health and was actually the valve wearing the controller's name.
+
+        Read from the outlet arrays rather than ``HubState.is_running``'s zone ``status``
+        so this agrees exactly with the ``ControllerOutletSensor`` binary sensors — the
+        Shower switch is on if and only if one of those outlet rows is on. The two sources
+        do not disagree in any capture; matching them is about the dashboard being
+        self-consistent, not about correctness.
+
+        ``None`` — "unknown", not "off" — until the controller has reported a zone at all,
+        since an empty ``zones`` map pads to all-False and would otherwise read as a
+        confident "no water".
+        """
+        state = self.state
+        if not state.zones:
+            return None
+        return any(state.outlets)
+
+    def __repr__(self) -> str:
+        return f"<Controller {self.device_id} {self.name!r}>"
+
+
+def controller_names(devices: list[Device]) -> dict[str, str]:
+    """Home Assistant device name per controller, keyed by device id. See `_device_names`."""
+    return _device_names(devices, DEVICE_NAME_CONTROLLER)
+
+
+def valve_names(devices: list[Device]) -> dict[str, str]:
+    """Home Assistant device name per valve, keyed by device id. See `_device_names`."""
+    return _device_names(devices, DEVICE_NAME_VALVE)
+
+
+def _device_names(devices: list[Device], base: str) -> dict[str, str]:
+    """Home Assistant device name per device of one kind, keyed by device id.
+
+    One controller keeps the plain "Anthem Plus" that every existing install, the user guide
+    and the README's entity ids were built on. With several, each takes its Konnect name —
+    what the owner called it in the app, usually the bathroom — so the two devices' entity
+    ids cannot collide. Two controllers sharing a Konnect name, or one with none, fall back
+    to the device id, which is at least unique.
+
+    Names only decide entity ids at first registration; renaming a device later in Home
+    Assistant does not disturb this, and neither does this disturb an existing registry row.
+    """
+    if len(devices) <= 1:
+        return {device.device_id: base for device in devices}
+    labels = {
+        device.device_id: (
+            device.name.strip()
+            if device.name and device.name.strip() != device.device_id
+            else ""
+        )
+        for device in devices
+    }
+    seen = Counter(labels.values())
+    return {
+        device_id: (
+            f"{base} {label}"
+            if label and seen[label] == 1
+            else f"{base} {device_id}"
+        )
+        for device_id, label in labels.items()
+    }
+
+
+class _TaggedJournal:
+    """A journal that stamps every record with which valve it is about.
+
+    The cutoff detector writes its own records straight to the journal, without knowing
+    which valve it belongs to. With two valves sharing one file, an untagged `flow_end`
+    would be unattributable. Passthrough when there is no tag, so a single-valve journal is
+    byte-for-byte what it always was and the tools that read it need no change.
+    """
+
+    def __init__(self, journal: Any, tag: str | None) -> None:
+        self._journal = journal
+        self._tag = tag
+
+    def note(self, event: str, **fields: Any) -> None:
+        if self._tag is None:
+            self._journal.note(event, **fields)
         else:
-            self.model = get_valve_model(entry.data[CONF_VALVE_MODEL])
-        self.temperature_unit: str = entry.data.get(CONF_TEMPERATURE_UNIT, "Fahrenheit")
+            self._journal.note(event, valve=self._tag, **fields)
 
-        session = async_get_clientsession(hass)
-        self.auth = KohlerAuth(session, entry.data.get(CONF_REFRESH_TOKEN))
-        self.client = KohlerClient(session, self.auth, entry.data.get(CONF_TENANT_ID))
 
-        self.gcs_device: Device | None = None
-        self.hub_device: Device | None = None
-        self.gcs: GcsDevice | None = None
-        self.hub: HubDevice | None = None
-        self.gcs_state: GcsState | None = None
+class Valve:
+    """One Anthem digital valve, with everything the coordinator keeps for it.
+
+    The counterpart of :class:`Controller`. Until 2026-09-08 the valve path — state, the
+    run-time cutoff detector, warm-up auto-restore, the cloud reachability watch, the custom
+    shower watcher and the learned limits — lived on the coordinator as singular fields,
+    which meant the first valve the account listed and no other. Every one of those things
+    is per valve, so they live here, and the coordinator holds a list.
+
+    **The method bodies below are the coordinator's, moved.** They still say `self.gcs`,
+    `self.gcs_state`, `self.hass`, `self.entry` and so on, which is why those names exist
+    on this class as attributes and delegating properties: the history in the docstrings
+    and the measurements they cite are the valuable part, and rewriting every line to a new
+    vocabulary would have put all of it at risk for no behavioural gain.
+
+    **Settings are per valve.** The Endless Shower and Warmup Auto-Restore switches, the
+    remembered warm-up mode and the learned run times used to sit as flat keys on the config
+    entry. They now sit under `CONF_VALVES`, keyed by device id — see `stored` / `option`
+    — and the flat keys are migrated once, at setup, onto the first valve.
+    """
+
+    def __init__(
+        self,
+        coordinator: KohlerAnthemPlusCoordinator,
+        device: Device,
+        model: ValveModel,
+        name: str,
+        tag: str | None,
+    ) -> None:
+        self.coordinator = coordinator
+        self.gcs_device = device
+        #: Device name shown in Home Assistant. "Anthem Valve" on a single-valve account,
+        #: so nothing changes for an existing install; see `valve_names`.
+        self.name = name
+        #: Stamped onto every journal record when the account has several valves, so the
+        #: shared cutoff and warmup journals stay attributable. None keeps a single-valve
+        #: journal exactly as it was.
+        self.tag = tag
+        self.gcs = GcsDevice(
+            coordinator.client, device.device_id, coordinator.temperature_unit, model
+        )
+        self.gcs_state = GcsState(model, coordinator.temperature_unit)
+        # CLOUD CONNECTION WATCH: one per valve, because it is this valve's reachability it
+        # reports. See `cloud_watch.py`.
+        self.cloud_watch = CloudConnectionWatch(coordinator, self)
         # Warmup auto-restore bookkeeping. `_warmup_self_write_*` is the same idea as
         # `ZoneCutoffDetector.note_local_write`: a change we caused must not be treated
         # as the device misbehaving, or turning warmup off from the dropdown would be
@@ -312,31 +463,10 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # something else was sent after its own write. See `anthem_plus/warmup_resume.py`.
         self._custom_shower_task: asyncio.Task | None = None
         self._local_write_serial = 0
-        self.hub_state: HubState | None = None
-        self.hub_capabilities = HubCapabilities()
-        self.favorites: list[dict[str, Any]] = []
-        self.stream: AnthemMqttStream | None = None
-        # CLOUD CONNECTION WATCH: created in `async_setup` only on accounts that have a
-        # valve, because it is the valve's reachability it reports. See `cloud_watch.py`.
-        self.cloud_watch: CloudConnectionWatch | None = None
-        self.raw_log: RawMqttLog | None = None
-        # REPORT LOG: the consumer-side capture behind the "Report Log" switch — one file
-        # per switch-on, appended across restarts. See `anthem_plus/report_log.py`.
-        self.report_log: ReportLog | None = None
-        # One-shot: `async_setup` seeds, then `async_config_entry_first_refresh()` runs
-        # milliseconds later and would seed the identical state all over again. See
-        # `_async_update_data`.
-        self._seeded_during_setup = False
         # The raw `gcs-preset` payload from the most recent seed, held only long enough for
-        # `_async_sync_default_preset_timer` to consume it on the next line of `async_setup`.
-        # Cleared on use — it feeds a write path, and a stale payload is a silent edit.
+        # `_async_sync_default_preset_timer` to consume it. Cleared on use — it feeds a
+        # write path, and a stale payload is a silent edit.
         self._seeded_presets: Any = None
-        # CUTOFF DEBUG LOG: built in `async_setup`, once `hass.config.path` is usable.
-        self.cutoff_log: CutoffDebugLog | None = None
-        self.warmup_log: CutoffDebugLog | None = None
-        # Rolling record of recent messages, so a warmup disable can be journalled
-        # with what surrounded it. Bounded by count and trimmed by age on read.
-        self._recent_messages: deque = deque(maxlen=WARMUP_CONTEXT_MAX_MESSAGES)
         # Tracks how long each zone has been flowing, so a valve-timer close can be told from
         # a real stop. Always fed, even with the option off — the cost is a dict update per
         # message, and it means enabling the option takes effect immediately rather than from
@@ -355,177 +485,320 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # after a restart — see `CONF_OUTLET_RUN_TIMES` for why it has to be remembered.
         self._run_times: dict[int, int] = {
             int(key): int(value)
-            for key, value in (entry.data.get(CONF_OUTLET_RUN_TIMES) or {}).items()
+            for key, value in (self.stored(CONF_OUTLET_RUN_TIMES) or {}).items()
         }
+        # Whether the valve's own outlet split has been read yet — see `async_seed`.
+        self._topology_checked = False
+
+    def __repr__(self) -> str:
+        return f"<Valve {self.device_id} {self.name!r}>"
 
     # ------------------------------------------------------------------ #
-    # Setup / teardown
+    # What the moved methods reach for on the coordinator
     # ------------------------------------------------------------------ #
-    async def async_setup(self) -> None:
-        """Discover devices, seed state from REST, then start the MQTT stream."""
+    @property
+    def hass(self) -> HomeAssistant:
+        return self.coordinator.hass
+
+    @property
+    def client(self) -> KohlerClient:
+        return self.coordinator.client
+
+    @property
+    def entry(self) -> ConfigEntry:
+        return self.coordinator.entry
+
+    @property
+    def temperature_unit(self) -> str:
+        return self.coordinator.temperature_unit
+
+    @property
+    def cutoff_log(self) -> CutoffDebugLog | None:
+        return self.coordinator.cutoff_log
+
+    @property
+    def warmup_log(self) -> CutoffDebugLog | None:
+        return self.coordinator.warmup_log
+
+    @property
+    def stream(self) -> AnthemMqttStream | None:
+        return self.coordinator.stream
+
+    @property
+    def device_id(self) -> str:
+        return self.gcs_device.device_id
+
+    @property
+    def model(self) -> ValveModel:
+        """This valve's outlet layout.
+
+        Starts as the entry's model and is replaced by what the valve's own
+        `gcsadvancestate` reports on the first seed — two valves on one account can be
+        different models, and the entry stores only one. Lives on the state object, which is
+        what decodes every word with it; `GcsDevice` keeps a copy for encoding, and
+        `_apply_topology` moves both together.
+        """
+        return self.gcs_state.model
+
+    @property
+    def issue_id(self) -> str:
+        """The Repairs issue id for an Endless Shower on this valve that cannot act.
+
+        Per valve since 2026-09-08, so two valves raise two cards. The pre-existing id
+        without a device suffix is deleted at setup and unload so an upgrade leaves no
+        orphan.
+        """
+        return f"{ISSUE_NOT_SET_UP}_{self.entry.entry_id}_{self.device_id}"
+
+    def _tagged(self, fields: dict[str, Any]) -> dict[str, Any]:
+        """Journal fields, stamped with this valve when the account has several."""
+        return fields if self.tag is None else {"valve": self.tag, **fields}
+
+    def _push(self) -> None:
+        """Re-render every entity, the way a device push does."""
+        self.coordinator.async_set_updated_data(self.coordinator._snapshot())
+
+    # ------------------------------------------------------------------ #
+    # Per-valve settings on the config entry
+    # ------------------------------------------------------------------ #
+    def stored(self, key: str, default: Any = None) -> Any:
+        """A per-valve value from `entry.data[CONF_VALVES][device_id]`."""
+        return (
+            (self.entry.data.get(CONF_VALVES) or {}).get(self.device_id) or {}
+        ).get(key, default)
+
+    def store(self, key: str, value: Any) -> None:
+        """Write a per-valve value into `entry.data`. Reload-ignored, like the flat key was."""
+        valves = dict(self.entry.data.get(CONF_VALVES) or {})
+        valves[self.device_id] = {**(valves.get(self.device_id) or {}), key: value}
+        self.hass.config_entries.async_update_entry(
+            self.entry, data={**self.entry.data, CONF_VALVES: valves}
+        )
+
+    def option(self, key: str, default: Any = None) -> Any:
+        """A per-valve value from `entry.options[CONF_VALVES][device_id]`."""
+        return (
+            (self.entry.options.get(CONF_VALVES) or {}).get(self.device_id) or {}
+        ).get(key, default)
+
+    def set_option(self, key: str, value: Any) -> None:
+        """Write a per-valve option. The switches call this; nothing reloads on it."""
+        valves = dict(self.entry.options.get(CONF_VALVES) or {})
+        valves[self.device_id] = {**(valves.get(self.device_id) or {}), key: value}
+        self.hass.config_entries.async_update_entry(
+            self.entry, options={**self.entry.options, CONF_VALVES: valves}
+        )
+
+    # ------------------------------------------------------------------ #
+    # Lifecycle, driven by the coordinator
+    # ------------------------------------------------------------------ #
+    def attach_journal(self, journal: CutoffDebugLog | None) -> None:
+        """Point the cutoff detector at the (shared) debug log, once it exists."""
+        if journal is not None:
+            self._cutoff.journal = _TaggedJournal(journal, self.tag)
+
+    def _note_local_write(self) -> None:
+        """Count a command sent from this integration to this valve.
+
+        Read by the custom-shower watcher: if the serial has moved since its own write,
+        something else was sent in the meantime and the watcher must not resume on top
+        of it. Controller commands bump every valve's serial through the coordinator, since
+        which valve a controller fronts is not knowable from the cloud.
+        """
+        self._local_write_serial += 1
+
+    def handle_envelope(self, envelope: Envelope) -> bool:
+        """Apply one of this valve's MQTT messages. True if anything changed."""
+        was_warmup = self.gcs_state.warmup_mode
+        changed = self.gcs_state.apply_envelope(envelope)
+        self._handle_warmup_mode_change(
+            was_warmup,
+            self.gcs_state.warmup_mode,
+            announced=envelope.code == MSG_GCS_WARMUP_STATUS,
+        )
+        self._remember_open_masks()
+        self._check_runtime_cutoff()
+        # A valve message is proof of reachability, and settles any pending
+        # contradiction check. CLOUD CONNECTION WATCH.
+        self.cloud_watch.note_gcs_message()
+        return changed
+
+    def forget_timings(self) -> None:
+        """Drop the cutoff detector's clocks across a stream gap. See `_handle_connected`."""
+        self._cutoff.forget()
+
+    def stop(self) -> None:
+        """Cancel everything that could fire into a torn-down coordinator."""
+        self._cancel_custom_shower("the integration is shutting down")
+        # Before the stream, so a timer cannot fire into a half-torn-down coordinator.
+        self.cloud_watch.async_stop()
+
+    @callback
+    def _apply_topology(self, settings: dict[str, Any]) -> None:
+        """Give this valve the outlet layout its own settings report.
+
+        The entry's model came from the config flow, which asked the *first* valve — right
+        for it, and not necessarily for a second one on the account. Same reasoning as
+        `KohlerAnthemPlusCoordinator._apply_controller_topology`, and the same fallback:
+        a read that yields nothing leaves the entry's model in place.
+        """
+        detected = topology_from_valve_settings(settings)
+        if not detected:
+            return
+        model = model_for_topology(*detected)
+        current = self.model
+        if (model.outlets_valve1, model.outlets_valve2) == (
+            current.outlets_valve1,
+            current.outlets_valve2,
+        ):
+            return
+        _LOGGER.info(
+            "%s (%s) reports %s; using that for this valve instead of the entry's %s",
+            self.name,
+            self.device_id,
+            describe_topology(detected),
+            current.sku,
+        )
+        self.gcs_state.model = model
+        self.gcs.model = model
+        if not model.uses_valve2:
+            self.gcs_state.valve2 = None
+
+    async def async_seed(self) -> None:
+        """Read this valve's state, limits and presets over REST.
+
+        The valve half of `KohlerAnthemPlusCoordinator._async_seed_state`, moved here
+        unchanged apart from the topology read; that docstring says when it runs.
+        """
+        # Layout and limits first, state second — the reverse of the order the coordinator
+        # used. The state read decodes the second zone's word only if the model has a
+        # second zone, so a valve whose own layout differs from the entry's must have that
+        # layout applied before its state is seeded, or a single-zone valve on a two-zone
+        # entry starts life with a zone 2 it does not have.
+        # Per-outlet limits, including `maximumRunTime` — the number Endless Shower
+        # cannot act without.
+        #
+        # This used to arrive **only** over MQTT, unprompted and one outlet at a time,
+        # which left a blind window of unknown length after a fresh install: the switch
+        # read "on" while the feature was inert, and the owner was told to go change Max
+        # Shower Duration in the Konnect app purely to provoke an announcement.
+        # `gcsadvancestate` carries the same data and is readable on demand — it was
+        # reachable all along, in a response this integration already fetched for
+        # topology (see `docs/gcs/api.md` §1c, corrected 2026-08-17).
+        #
+        # Runs on every re-seed, not just the first: cheap, and it re-checks the limit
+        # after a reconnect rather than trusting a value that may be hours stale.
         try:
-            customer = await self.client.async_get_customer()
-        except AuthUnavailable as err:
-            # Kohler unreachable, not a bad credential — retry setup, do not ask the user
-            # to sign in again.
-            raise ConfigEntryNotReady(f"Cannot reach Kohler: {err}") from err
-        except AuthError as err:
-            raise ConfigEntryAuthFailed(str(err)) from err
+            settings = await self.client.async_get_gcs_settings(
+                self.gcs_device.device_id
+            )
+            # The same read says how the outlets split across the zones, which is what
+            # this valve decodes and encodes every word with — its own layout, not the
+            # entry's. See `_apply_topology`; once is enough, plumbing does not change.
+            if not self._topology_checked:
+                self._topology_checked = True
+                self._apply_topology(settings)
+            limits = outlet_limits_from_settings(settings)
+            if limits:
+                self.gcs_state.outlet_limits.update(limits)
+                # Same path an MQTT announcement takes, so the value is persisted and
+                # the cutoff detector is armed without waiting for the valve to speak.
+                self._learn_run_times(self.gcs_state)
         except KohlerError as err:
-            raise ConfigEntryNotReady(f"Cannot reach Kohler: {err}") from err
-
-        self.temperature_unit = customer.temperature_unit or self.temperature_unit
-        self.gcs_device = next(iter(customer.gcs_devices), None)
-        self.hub_device = next(iter(customer.hub_devices), None)
-        if self.gcs_device is None and self.hub_device is None:
-            raise ConfigEntryNotReady("No Anthem devices on this account")
-
-        if self.gcs_device is not None:
-            self.gcs = GcsDevice(
-                self.client,
-                self.gcs_device.device_id,
-                self.temperature_unit,
-                self.model,
-            )
-            self.gcs_state = GcsState(self.model, self.temperature_unit)
-            self.cloud_watch = CloudConnectionWatch(self)
-        if self.hub_device is not None:
-            self.hub = HubDevice(
-                self.client, self.hub_device.device_id, self.temperature_unit
-            )
-            self.hub_state = HubState(self.model)
+            _LOGGER.debug("Could not read outlet limits over REST: %s", err)
 
         try:
-            await self._async_seed_state()
-        except AuthUnavailable as err:
-            # Same split as the customer read above. The seed swallows `KohlerError` per
-            # read ("failures for one device do not blank the other"), but the token layer
-            # under every read raises `AuthError`, which is not a `KohlerError` — left bare,
-            # a rejection here escaped `async_setup_entry` as an unhandled exception: no
-            # reauth prompt, no retry, an entry stuck on "Failed to set up". Found 2026-08-21
-            # while proving the startup-read fold; fixed 2026-08-22.
-            raise ConfigEntryNotReady(f"Cannot reach Kohler: {err}") from err
-        except AuthError as err:
-            raise ConfigEntryAuthFailed(str(err)) from err
-        # `async_config_entry_first_refresh()` follows immediately in `async_setup_entry` and
-        # would repeat every read above for nothing. Claimed here, spent in
-        # `_async_update_data`.
-        self._seeded_during_setup = True
-        await self._async_sync_default_preset_timer()
-        self._persist_refresh_token()
-
-        # One identity for the life of this config entry. Generated on first setup and
-        # persisted, so restarts and reconnects reuse it instead of leaving a trail of
-        # dead registrations on the Kohler account.
-        mobile_device_id = self.entry.data.get(CONF_MOBILE_DEVICE_ID)
-        first_registration = not mobile_device_id
-        if first_registration:
-            mobile_device_id = uuid.uuid4().hex[:16]
-            self.hass.config_entries.async_update_entry(
-                self.entry,
-                data={**self.entry.data, CONF_MOBILE_DEVICE_ID: mobile_device_id},
+            payload = await self.client.async_get_gcs_state(
+                self.gcs_device.device_id
             )
+            if self.cloud_watch is not None:
+                # CLOUD CONNECTION WATCH. `connectionState` is a sibling of `state` in
+                # this payload, and `apply_rest_state` below reads only `state` — so
+                # without this line the field we already paid for is discarded, and the
+                # sensor sits at `unknown` until a trigger fires hours later. Free: no
+                # extra request, and it does not consume the check cooldown.
+                #
+                # `notify=False` — this runs during `async_setup`, before the platforms
+                # exist; every caller of this method pushes a snapshot of its own.
+                self.cloud_watch.note_rest_payload(
+                    payload, "REST seed (setup, reconnect or update_entity)", notify=False
+                )
+            was_warmup = self.gcs_state.warmup_mode
+            self.gcs_state.apply_rest_state(payload)
+            mode_now = self.gcs_state.warmup_mode
+            if was_warmup is not None and mode_now != was_warmup:
+                # The mode moved while we were not listening. `apply_rest_state` writes
+                # `warmup_mode` straight in, so this never reaches
+                # `_handle_warmup_mode_change` and nothing else would record it — the
+                # one way a disable can happen and leave no trace in the journal at all.
+                #
+                # This reseed runs on every MQTT reconnect, so the gap it covers is a
+                # change during a stream outage — which the hub web UI causes for real:
+                # any signed-in use of it writes `warmUpDisabled` (api.md §3h), and a
+                # sign-in while the stream is down lands exactly here.
+                #
+                # A discovered disable restores through the same machinery as an
+                # announced one: same decision function, same self-write grace, same
+                # single-flight guard — and `_async_restore_warmup` waits its delay and
+                # re-checks the *live* mode before writing, so "the REST read is of
+                # unknown age" costs nothing by write time. What a discovery still
+                # cannot have is a `before_window` — the wire context happened while
+                # there was no wire — so `source: "rest"` stays on the record and the
+                # `restoring` field says what was decided. Recorded-but-never-restored
+                # from 2026-08-21 until 2026-08-22 (owner's decision to wire it).
+                write_age, ours = self._warmup_write_status(mode_now)
+                restoring = should_restore_warmup(
+                    was_warmup,
+                    mode_now,
+                    enabled=self.warmup_auto_restore,
+                    self_write_mode=self._warmup_self_write_mode,
+                    self_write_age=write_age,
+                    grace_seconds=WARMUP_SELF_WRITE_GRACE_SECONDS,
+                )
+                self._warmup_journal(
+                    "mode",
+                    before=was_warmup,
+                    after=mode_now,
+                    ours=ours,
+                    source="rest",
+                    restoring=restoring,
+                )
+                if restoring:
+                    self._schedule_warmup_restore(was_warmup)
+            # The third way to learn a mode, and the one `_remember_warmup_mode`'s
+            # docstring used to miss. MQTT alone forgets a mode set while the stream was
+            # down; our own writes alone forget a mode set from the app or touchscreen;
+            # and *both* forget a mode that was simply already in force when we started.
+            #
+            # That third gap disabled auto-restore for seven hours on 2026-08-20: the
+            # valve was in `warmUpAllOutletsWithNoStartDelay`, read correctly over REST
+            # at 19:35:32Z, then disabled at 20:36:28Z — and the restore was skipped with
+            # "no enabled mode has ever been seen", because no *announcement* had
+            # happened in that session. See `_async_restore_warmup`.
+            mode = self.gcs_state.warmup_mode
+            if mode is not None and mode != WARMUP_DISABLED:
+                self._remember_warmup_mode(mode)
+        except KohlerError as err:
+            _LOGGER.debug("Could not seed GCS state: %s", err)
 
-        # RAW MQTT LOG: constructed unconditionally and switched on at runtime, so capture
-        # can be started from the UI mid-session without a reload. Nothing touches the disk
-        # until a message arrives while it is on. See `anthem_plus/raw_log.py`.
-        self.raw_log = RawMqttLog(
-            self.hass.config.path(RAW_MQTT_LOG_DIR),
-            forced=ENABLE_RAW_MQTT_LOG,
-            max_bytes=RAW_MQTT_LOG_MAX_BYTES,
-            keep_files=RAW_MQTT_LOG_KEEP_FILES,
-        )
-        # Open the file up front when capture is already on, so it is findable immediately
-        # rather than after the next push — which can be hours away. Executor, not the loop:
-        # this creates a directory and opens a file.
-        await self.hass.async_add_executor_job(self.raw_log.prepare)
 
-        # REPORT LOG: the consumer capture, in the integration's own folder (owner's
-        # choice — see the const.py section). The options key holds the active episode's
-        # name; its presence here means the switch was on when Home Assistant stopped, so
-        # re-attach to the SAME file — a capture of "it breaks when I restart" must not
-        # lose the interesting part to the restart itself.
-        self.report_log = ReportLog(
-            os.path.join(os.path.dirname(__file__), REPORT_LOG_DIR_NAME),
-            max_bytes=REPORT_LOG_MAX_BYTES,
-        )
-        episode = self.entry.options.get(CONF_REPORT_LOG_FILE)
-        if episode:
-            await self.hass.async_add_executor_job(self.report_log.resume, episode)
-
-        # CUTOFF DEBUG LOG: same directory as the raw capture on purpose — the two are read
-        # together, joined on `ts`. See `anthem_plus/cutoff_log.py`.
-        self.cutoff_log = CutoffDebugLog(
-            self.hass.config.path(RAW_MQTT_LOG_DIR),
-            forced=ENABLE_CUTOFF_DEBUG_LOG,
-            keep_files=CUTOFF_DEBUG_LOG_KEEP_FILES,
-        )
-        self._cutoff.journal = self.cutoff_log
-        await self.hass.async_add_executor_job(self.cutoff_log.prepare)
-
-        # WARMUP JOURNAL: a second journal in the same directory, on the same clock, for a
-        # different open question — see `WARMUP_README`. Separate from the cutoff log because
-        # the two are read for different reasons and `pause_resolution.py` and friends glob
-        # `cutoff_*.jsonl`; mixing warmup records into that corpus would silently change what
-        # those tools count.
-        self.warmup_log = CutoffDebugLog(
-            self.hass.config.path(RAW_MQTT_LOG_DIR),
-            forced=ENABLE_WARMUP_DEBUG_LOG,
-            keep_files=WARMUP_DEBUG_LOG_KEEP_FILES,
-            prefix="warmup",
-            readme=WARMUP_README,
-            readme_fields={
-                "before": int(WARMUP_CONTEXT_BEFORE_SECONDS),
-                "after": int(WARMUP_CONTEXT_AFTER_SECONDS),
-            },
-            label="Warmup journal",
-        )
-        await self.hass.async_add_executor_job(self.warmup_log.prepare)
-        # BASELINE: what mode was in force when this file opened, from the REST seed above.
-        #
-        # Without it a journal is unreadable on its own. **The valve never volunteers its
-        # warmup mode on connect** — measured 2026-08-21 over all 74 raw captures: 17 hold a
-        # `GCS_WARM_STS` at all, and in 16 the first one lands between 137 s and 7 h after
-        # the log opened. The 17th, at +1.7 s, only looks like a connect announcement: it is
-        # the echo of our own write on 08-21 at 03:40:10Z, which landed in a file that had
-        # opened 1.7 s earlier *because* persisting the mode reloaded the entry — the bug
-        # `cde9bf4` fixed, so that artefact cannot recur.
-        #
-        # So a file that records a `disabled` an hour in has no record of what was displaced
-        # or since when, and an empty file cannot be told apart from a broken one.
-        #
-        # Written here rather than in `_async_seed_state` because the first seed runs before
-        # this log exists, and this is the one place that happens exactly once per file.
-        self._warmup_journal(
-            "baseline",
-            mode=None if self.gcs_state is None else self.gcs_state.warmup_mode,
-            auto_restore=self.warmup_auto_restore,
-            restores_to=self.last_warmup_mode,
-            source="rest",
-        )
-
-        self.stream = AnthemMqttStream(
-            self.client,
-            self._handle_envelope,
-            on_connect=self._handle_connected,
-            on_auth_error=self._handle_auth_error,
-            mobile_device_id=mobile_device_id,
-            raw_log=self.raw_log,
-            report_log=self.report_log,
-            # Only a brand-new identity can plausibly need provisioning time. A reused one
-            # has connected before, so silence from it is real silence.
-            expect_warmup=first_registration,
-        )
+        # Presets push over MQTT on every create, edit, rename, and delete, so this is
+        # only the seed — nothing re-reads them on a clock.
         try:
-            await self.stream.async_start()
-        except (AuthError, KohlerError) as err:
-            # State is already seeded, so the integration is usable but frozen until the
-            # stream recovers. A warning rather than a setup failure — the reconnect loop
-            # keeps trying, and each success re-seeds.
-            _LOGGER.warning("Kohler MQTT stream did not start: %s", err)
-            if credential_is_dead(err):
-                self._handle_auth_error(err)
+            presets = await self.client.async_get_gcs_presets(
+                self.gcs_device.device_id
+            )
+            self.gcs_state.apply_preset_list(presets)
+            # Kept for `_async_sync_default_preset_timer`, which needs the *raw* record
+            # — title, volume and each valve's `hexString` — none of which survive
+            # `apply_preset_list`; `GcsPreset` keeps only id, name and is_experience.
+            self._seeded_presets = presets
+        except KohlerError as err:
+            _LOGGER.debug("Could not read GCS presets: %s", err)
 
+    def announce_readiness(self) -> None:
+        """Say at startup whether the cutoff feature can act — the coordinator's old
+        end-of-setup block, per valve."""
         # Say at startup whether the cutoff feature can act. The switch keeps its state
         # across restarts, so without this the only warning would be the one printed when
         # somebody last toggled it — possibly weeks ago, on a different set of known limits.
@@ -557,12 +830,35 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # the valve's limit is journalled but not warned: no HA-side action exists.
             else:
                 _LOGGER.warning(ENDLESS_SHOWER_NOT_SET_UP)
-        if self.cloud_watch is not None:
-            # Arms trigger B's countdown. Nothing is asked of Kohler until the valve has
-            # actually been quiet for the full interval, and any valve message resets it.
-            self.cloud_watch.async_start()
-        self.async_refresh_setup_issue()
 
+    def journal_baseline(self) -> None:
+        """Record the mode in force when the warmup journal opened. See the comment inside."""
+        # BASELINE: what mode was in force when this file opened, from the REST seed above.
+        #
+        # Without it a journal is unreadable on its own. **The valve never volunteers its
+        # warmup mode on connect** — measured 2026-08-21 over all 74 raw captures: 17 hold a
+        # `GCS_WARM_STS` at all, and in 16 the first one lands between 137 s and 7 h after
+        # the log opened. The 17th, at +1.7 s, only looks like a connect announcement: it is
+        # the echo of our own write on 08-21 at 03:40:10Z, which landed in a file that had
+        # opened 1.7 s earlier *because* persisting the mode reloaded the entry — the bug
+        # `cde9bf4` fixed, so that artefact cannot recur.
+        #
+        # So a file that records a `disabled` an hour in has no record of what was displaced
+        # or since when, and an empty file cannot be told apart from a broken one.
+        #
+        # Written here rather than in `_async_seed_state` because the first seed runs before
+        # this log exists, and this is the one place that happens exactly once per file.
+        self._warmup_journal(
+            "baseline",
+            mode=self.gcs_state.warmup_mode,
+            auto_restore=self.warmup_auto_restore,
+            restores_to=self.last_warmup_mode,
+            source="rest",
+        )
+
+    # ------------------------------------------------------------------ #
+    # Moved from the coordinator, 2026-09-08 — bodies unchanged
+    # ------------------------------------------------------------------ #
     @callback
     def async_refresh_setup_issue(self) -> None:
         """Raise or clear the Repairs card for an Endless Shower that cannot act.
@@ -576,7 +872,7 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         that has reported one zone but not the other still raises it. Half-armed is not armed
         for the zone that has no limit, and that is exactly the silent case worth surfacing.
         """
-        issue_id = f"{ISSUE_NOT_SET_UP}_{self.entry.entry_id}"
+        issue_id = self.issue_id
         if self.restart_on_runtime_cutoff and self.zones_awaiting_run_time:
             ir.async_create_issue(
                 self.hass,
@@ -588,26 +884,6 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
         else:
             ir.async_delete_issue(self.hass, DOMAIN, issue_id)
-
-    @callback
-    def _handle_auth_error(self, err: Exception) -> None:
-        """Surface a rejected credential as a reauth prompt.
-
-        Push-only removed the last thing that ran on a clock, and with it the only path that
-        regularly reached ``ConfigEntryAuthFailed``. `_async_update_data` still raises it,
-        but with ``SCAN_INTERVAL = None`` it fires only on a manual
-        ``homeassistant.update_entity``. So without this, an expired or revoked refresh
-        token leaves the entry looking healthy — MQTT down, entities frozen at their last
-        values rather than unavailable, and no prompt anywhere — while the reconnect loop
-        retries forever against a credential that will never be accepted.
-
-        `async_start_reauth` is idempotent; the stream also latches, so repeated failures
-        do not stack up flows.
-        """
-        _LOGGER.error(
-            "Kohler rejected the stored credential (%s); reauthentication required", err
-        )
-        self.entry.async_start_reauth(self.hass)
 
     @property
     def outlet_run_times(self) -> dict[int, int]:
@@ -654,94 +930,7 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         Read live from the entry options rather than cached, so toggling the checkbox takes
         effect on the reload without needing a restart. Off unless explicitly enabled.
         """
-        return bool(self.entry.options.get(CONF_RESTART_ON_RUNTIME_CUTOFF, False))
-
-    @callback
-    def _handle_connected(self) -> None:
-        """Re-seed whenever the stream connects.
-
-        This is what replaces interval polling. The broker sends no state on connect — only
-        future change events — so without a read here a reconnect would leave every entity
-        holding whatever it had before the gap, with nothing to correct it until the shower
-        was next used.
-        """
-        # Durations measured across a disconnect are meaningless — we cannot know what the
-        # outlets did while the stream was down, and the gap has been as long as 11.9 hours.
-        # Dropping the timings means a session spanning a reconnect is simply not judged,
-        # rather than judged on a number we made up.
-        self._cutoff.forget()
-        self.hass.async_create_task(self._async_reseed_after_connect())
-
-    async def _async_reseed_after_connect(self) -> None:
-        try:
-            await self._async_seed_state()
-        except (AuthError, KohlerError) as err:
-            # The stream is up regardless; pushes will still arrive. Do not fail the entry
-            # over a re-seed, and do not retry here — the next connect will try again.
-            _LOGGER.warning("Kohler re-seed after MQTT connect failed: %s", err)
-            if credential_is_dead(err):
-                # A rejected credential is the one failure the next connect cannot fix,
-                # and this path would otherwise absorb it silently.
-                self._handle_auth_error(err)
-            return
-        self._persist_refresh_token()
-        self.async_set_updated_data(self._snapshot())
-
-    async def async_shutdown_stream(self) -> None:
-        """Stop the MQTT stream on unload."""
-        self._cancel_custom_shower("the integration is shutting down")
-        if self.cloud_watch is not None:
-            # Before the stream, so a timer cannot fire into a half-torn-down coordinator.
-            self.cloud_watch.async_stop()
-        if self.stream is not None:
-            await self.stream.async_stop()
-            self.stream = None
-        # The raw capture is closed by the stream's own teardown; this one has no stream to
-        # ride on, so it is released here. Blocking close — off the loop.
-        if self.cutoff_log is not None:
-            await self.hass.async_add_executor_job(self.cutoff_log.close)
-        if self.warmup_log is not None:
-            await self.hass.async_add_executor_job(self.warmup_log.close)
-
-    # ------------------------------------------------------------------ #
-    # Push
-    # ------------------------------------------------------------------ #
-    def _handle_envelope(self, envelope: Envelope) -> None:
-        """Apply an MQTT message and notify entities if it changed anything."""
-        changed = False
-        if (
-            self.gcs_state is not None
-            and self.gcs_device is not None
-            and envelope.device_id == self.gcs_device.device_id
-        ):
-            was_warmup = self.gcs_state.warmup_mode
-            changed |= self.gcs_state.apply_envelope(envelope)
-            self._remember_message(envelope)
-            self._handle_warmup_mode_change(
-                was_warmup,
-                self.gcs_state.warmup_mode,
-                announced=envelope.code == MSG_GCS_WARMUP_STATUS,
-            )
-            self._remember_open_masks()
-            self._check_runtime_cutoff()
-            if self.cloud_watch is not None:
-                # A valve message is proof of reachability, and settles any pending
-                # contradiction check. CLOUD CONNECTION WATCH.
-                self.cloud_watch.note_gcs_message()
-        if (
-            self.hub_state is not None
-            and self.hub_device is not None
-            and envelope.device_id == self.hub_device.device_id
-        ):
-            changed |= self.hub_state.apply_envelope(envelope)
-            self._remember_message(envelope)
-            if self.hub_state.favorites:
-                self.favorites = self.hub_state.favorites
-            if self.cloud_watch is not None:
-                # Trigger A: a controller report of a zone ON, with the valve silent.
-                self.cloud_watch.note_hub_envelope(envelope)
-        if changed:
-            self.async_set_updated_data(self._snapshot())
+        return bool(self.option(CONF_RESTART_ON_RUNTIME_CUTOFF, False))
 
     @callback
     def _remember_open_masks(self) -> None:
@@ -811,14 +1000,9 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ", ".join(str(k + 1) for k in sorted(new)),
             ", ".join(f"{v}s" for _, v in sorted(new.items())),
         )
-        self.hass.config_entries.async_update_entry(
-            self.entry,
-            data={
-                **self.entry.data,
-                CONF_OUTLET_RUN_TIMES: {
-                    str(k): v for k, v in sorted(self._run_times.items())
-                },
-            },
+        self.store(
+            CONF_OUTLET_RUN_TIMES,
+            {str(k): v for k, v in sorted(self._run_times.items())},
         )
         # The reason the Repairs card can look after itself: this is the moment the owner's
         # trip to the Konnect app pays off, and it needs no restart to be noticed.
@@ -993,7 +1177,7 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         if self.cutoff_log is None:
             return
-        self.cutoff_log.note(event, **fields)
+        self.cutoff_log.note(event, **self._tagged(fields))
         if self.cutoff_log.wants_open:
             self.hass.async_add_executor_job(self.cutoff_log.prepare)
 
@@ -1147,247 +1331,6 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 cut.zone: cut.reading for cut in fired if cut.reading is not None
             },
         )
-
-    def _snapshot(self) -> dict[str, Any]:
-        """A cheap dict so DataUpdateCoordinator has something to hand entities.
-
-        Entities read the state objects directly; this only carries freshness markers.
-        """
-        return {
-            "gcs_last_update": self.gcs_state.last_update if self.gcs_state else None,
-            "hub_last_update": self.hub_state.last_update if self.hub_state else None,
-            "mqtt_connected": bool(self.stream and self.stream.connected),
-            # CLOUD CONNECTION WATCH. Carried here so a check result re-renders the entity
-            # the same way a device push does — the value itself lives on the watch.
-            "cloud_connected": (
-                self.cloud_watch.connected if self.cloud_watch is not None else None
-            ),
-        }
-
-    @callback
-    def async_refresh_entities(self) -> None:
-        """Re-render entities from what is already in memory, with no network read.
-
-        For state that changes without a message arriving — currently only the cloud
-        reachability check, which is answered over REST on its own schedule and has no push
-        source to ride in on.
-        """
-        self.async_set_updated_data(self._snapshot())
-
-    # ------------------------------------------------------------------ #
-    # Poll
-    # ------------------------------------------------------------------ #
-    async def _async_update_data(self) -> dict[str, Any]:
-        if self._seeded_during_setup:
-            # **The first refresh after setup is not a refresh.** `async_setup_entry` calls
-            # `async_setup()` and then `async_config_entry_first_refresh()` on the next line,
-            # and the base class turns that into a `_async_update_data()` — so without this,
-            # every start read the whole account twice, milliseconds apart, for state that
-            # could not have changed in between. Measured 2026-08-21: **five duplicate REST
-            # calls per start** (gcs-state, gcsadvancestate, presets, hub-state, favorites;
-            # the hub configuration read is already skipped once `hub_capabilities.known`).
-            #
-            # What the first refresh is actually *for* is populating `coordinator.data`
-            # before the platforms are forwarded — `async_setup` never calls
-            # `async_set_updated_data`, so `data` is None until this returns. That needs the
-            # snapshot, not the network.
-            #
-            # **Why this is safe, and not merely cheap.** `async_setup` ends by awaiting
-            # `stream.async_start()`, which returns with the socket up — so `_handle_connected`
-            # has already scheduled a full re-seed of its own by the time this runs. Anything
-            # that changed in the gap between the setup read and the stream coming up is
-            # caught by *that* read, which happens after the connection exists rather than
-            # before it. This one was redundant with it, a few hundred milliseconds earlier
-            # and strictly worse placed.
-            #
-            # ⚠️ **Only the first one.** A manual `homeassistant.update_entity` is the only
-            # other way in — with `SCAN_INTERVAL = None` there is no clock — and that one
-            # must read for real, so the flag is spent here and never set again.
-            self._seeded_during_setup = False
-            self._persist_refresh_token()
-            return self._snapshot()
-        try:
-            await self._async_seed_state()
-        except AuthUnavailable as err:
-            raise UpdateFailed(f"Kohler auth service unreachable: {err}") from err
-        except AuthError as err:
-            raise ConfigEntryAuthFailed(str(err)) from err
-        except KohlerError as err:
-            raise UpdateFailed(f"Kohler poll failed: {err}") from err
-        self._persist_refresh_token()
-        return self._snapshot()
-
-    async def _async_seed_state(self) -> None:
-        """Read current state over REST into the state objects.
-
-        Runs at setup, on every MQTT connect, and on a manual `update_entity`. Failures for
-        one device do not blank the other.
-        """
-        if self.gcs_device is not None and self.gcs_state is not None:
-            try:
-                payload = await self.client.async_get_gcs_state(
-                    self.gcs_device.device_id
-                )
-                if self.cloud_watch is not None:
-                    # CLOUD CONNECTION WATCH. `connectionState` is a sibling of `state` in
-                    # this payload, and `apply_rest_state` below reads only `state` — so
-                    # without this line the field we already paid for is discarded, and the
-                    # sensor sits at `unknown` until a trigger fires hours later. Free: no
-                    # extra request, and it does not consume the check cooldown.
-                    #
-                    # `notify=False` — this runs during `async_setup`, before the platforms
-                    # exist; every caller of this method pushes a snapshot of its own.
-                    self.cloud_watch.note_rest_payload(
-                        payload, "REST seed (setup, reconnect or update_entity)", notify=False
-                    )
-                was_warmup = self.gcs_state.warmup_mode
-                self.gcs_state.apply_rest_state(payload)
-                mode_now = self.gcs_state.warmup_mode
-                if was_warmup is not None and mode_now != was_warmup:
-                    # The mode moved while we were not listening. `apply_rest_state` writes
-                    # `warmup_mode` straight in, so this never reaches
-                    # `_handle_warmup_mode_change` and nothing else would record it — the
-                    # one way a disable can happen and leave no trace in the journal at all.
-                    #
-                    # This reseed runs on every MQTT reconnect, so the gap it covers is a
-                    # change during a stream outage — which the hub web UI causes for real:
-                    # any signed-in use of it writes `warmUpDisabled` (api.md §3h), and a
-                    # sign-in while the stream is down lands exactly here.
-                    #
-                    # A discovered disable restores through the same machinery as an
-                    # announced one: same decision function, same self-write grace, same
-                    # single-flight guard — and `_async_restore_warmup` waits its delay and
-                    # re-checks the *live* mode before writing, so "the REST read is of
-                    # unknown age" costs nothing by write time. What a discovery still
-                    # cannot have is a `before_window` — the wire context happened while
-                    # there was no wire — so `source: "rest"` stays on the record and the
-                    # `restoring` field says what was decided. Recorded-but-never-restored
-                    # from 2026-08-21 until 2026-08-22 (owner's decision to wire it).
-                    write_age, ours = self._warmup_write_status(mode_now)
-                    restoring = should_restore_warmup(
-                        was_warmup,
-                        mode_now,
-                        enabled=self.warmup_auto_restore,
-                        self_write_mode=self._warmup_self_write_mode,
-                        self_write_age=write_age,
-                        grace_seconds=WARMUP_SELF_WRITE_GRACE_SECONDS,
-                    )
-                    self._warmup_journal(
-                        "mode",
-                        before=was_warmup,
-                        after=mode_now,
-                        ours=ours,
-                        source="rest",
-                        restoring=restoring,
-                    )
-                    if restoring:
-                        self._schedule_warmup_restore(was_warmup)
-                # The third way to learn a mode, and the one `_remember_warmup_mode`'s
-                # docstring used to miss. MQTT alone forgets a mode set while the stream was
-                # down; our own writes alone forget a mode set from the app or touchscreen;
-                # and *both* forget a mode that was simply already in force when we started.
-                #
-                # That third gap disabled auto-restore for seven hours on 2026-08-20: the
-                # valve was in `warmUpAllOutletsWithNoStartDelay`, read correctly over REST
-                # at 19:35:32Z, then disabled at 20:36:28Z — and the restore was skipped with
-                # "no enabled mode has ever been seen", because no *announcement* had
-                # happened in that session. See `_async_restore_warmup`.
-                mode = self.gcs_state.warmup_mode
-                if mode is not None and mode != WARMUP_DISABLED:
-                    self._remember_warmup_mode(mode)
-            except KohlerError as err:
-                _LOGGER.debug("Could not seed GCS state: %s", err)
-
-            # Per-outlet limits, including `maximumRunTime` — the number Endless Shower
-            # cannot act without.
-            #
-            # This used to arrive **only** over MQTT, unprompted and one outlet at a time,
-            # which left a blind window of unknown length after a fresh install: the switch
-            # read "on" while the feature was inert, and the owner was told to go change Max
-            # Shower Duration in the Konnect app purely to provoke an announcement.
-            # `gcsadvancestate` carries the same data and is readable on demand — it was
-            # reachable all along, in a response this integration already fetched for
-            # topology (see `docs/gcs/api.md` §1c, corrected 2026-08-17).
-            #
-            # Runs on every re-seed, not just the first: cheap, and it re-checks the limit
-            # after a reconnect rather than trusting a value that may be hours stale.
-            try:
-                limits = outlet_limits_from_settings(
-                    await self.client.async_get_gcs_settings(self.gcs_device.device_id)
-                )
-                if limits:
-                    self.gcs_state.outlet_limits.update(limits)
-                    # Same path an MQTT announcement takes, so the value is persisted and
-                    # the cutoff detector is armed without waiting for the valve to speak.
-                    self._learn_run_times(self.gcs_state)
-            except KohlerError as err:
-                _LOGGER.debug("Could not read outlet limits over REST: %s", err)
-
-            # Presets push over MQTT on every create, edit, rename, and delete, so this is
-            # only the seed — nothing re-reads them on a clock.
-            try:
-                presets = await self.client.async_get_gcs_presets(
-                    self.gcs_device.device_id
-                )
-                self.gcs_state.apply_preset_list(presets)
-                # Kept for `_async_sync_default_preset_timer`, which needs the *raw* record
-                # — title, volume and each valve's `hexString` — none of which survive
-                # `apply_preset_list`; `GcsPreset` keeps only id, name and is_experience.
-                self._seeded_presets = presets
-            except KohlerError as err:
-                _LOGGER.debug("Could not read GCS presets: %s", err)
-
-        if self.hub_device is not None and self.hub_state is not None:
-            device_id = self.hub_device.device_id
-            try:
-                self.hub_state.apply_rest_state(
-                    await self.client.async_get_hub_state(device_id)
-                )
-            except KohlerError as err:
-                _LOGGER.debug("Could not seed HUB state: %s", err)
-            # Zones, outlet types, and installed parts — installation-time facts that no
-            # message ever pushes because nothing changes them at runtime. Read once and
-            # keep it; re-reading on a timer polls forever for an event that happens when a
-            # plumber visits.
-            if not self.hub_capabilities.known:
-                try:
-                    config = await self.client.async_get_hub_configuration(device_id)
-                    self.hub_capabilities = HubCapabilities.from_configuration(
-                        config.get("configuration") or {}
-                    )
-                except KohlerError as err:
-                    _LOGGER.debug("Could not read HUB configuration: %s", err)
-            try:
-                payload = await self.client.async_get_hub_favorites(device_id)
-                favorites = payload.get("favorites")
-                if isinstance(favorites, list):
-                    # Favourite ids are reassigned when one is deleted, so this list is the
-                    # only safe way to resolve a favourite — never hardcode an id.
-                    self.favorites = favorites
-            except KohlerError as err:
-                if getattr(err, "status", None) == 404:
-                    # Not a failure: this endpoint 404s when the account has **no** saved
-                    # favourites, rather than returning an empty list. Confirmed 2026-08-17 —
-                    # the route is handled (it answers with the application's own error
-                    # envelope, unlike a genuine bad path), MQTT `FAVORITES_SNAPSHOT` agrees
-                    # with `attributes: []`, and `docs/hub/cloud_api.md` §5.2 has a captured
-                    # 200 from when this account still had one. Logging it as an error made
-                    # three misleading lines per startup.
-                    self.favorites = []
-                    _LOGGER.debug("No HUB favourites are saved on this account")
-                else:
-                    _LOGGER.debug("Could not read HUB favourites: %s", err)
-
-    # ------------------------------------------------------------------ #
-    # Helpers
-    # ------------------------------------------------------------------ #
-    def _persist_refresh_token(self) -> None:
-        """Write the rotated refresh token back to the config entry."""
-        token = self.auth.refresh_token
-        if token and token != self.entry.data.get(CONF_REFRESH_TOKEN):
-            self.hass.config_entries.async_update_entry(
-                self.entry, data={**self.entry.data, CONF_REFRESH_TOKEN: token}
-            )
 
     async def async_apply_valve(
         self,
@@ -1591,19 +1534,6 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         return {"zone1_hex": word1, "zone2_hex": word2, "decoded": decoded}
 
-    # ------------------------------------------------------------------ #
-    # Custom shower
-    # ------------------------------------------------------------------ #
-    def _note_local_write(self) -> None:
-        """Count a command sent from this integration, whichever device it went to.
-
-        Read by the custom-shower watcher: if the serial has moved since its own write,
-        something else was sent in the meantime and the watcher must not resume on top
-        of it. Every command path calls this — valve words, presets, controller
-        favourites and the controller's own shower on/off and stop-all.
-        """
-        self._local_write_serial += 1
-
     async def async_custom_shower(
         self, zone1_hex: str, zone2_hex: str, *, keep_on_after_warmup: bool
     ) -> dict[str, Any]:
@@ -1670,7 +1600,7 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         def _on_update() -> None:
             poke.set()
 
-        remove = self.async_add_listener(_on_update)
+        remove = self.coordinator.async_add_listener(_on_update)
         watch = WarmupResume(time.monotonic())
         try:
             while True:
@@ -1900,58 +1830,9 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.gcs_state.apply_rest_state(payload)
         # Same notification path as an MQTT update, so the dropdown lands on the confirmed
         # value and drops its optimistic guess exactly as it would on a device push.
-        self.async_set_updated_data(self._snapshot())
+        self._push()
         return self.gcs_state.warmup_mode
 
-    # ------------------------------------------------------------------ #
-    # Report log — the consumer capture behind the "Report Log" switch
-    # ------------------------------------------------------------------ #
-    @property
-    def report_log_active(self) -> bool:
-        """Whether a capture episode is in force.
-
-        Read from the entry options, not from the log object: the options key is what
-        survives a restart, and the switch must show ON after one even in the moments
-        before `async_setup` has re-attached the file.
-        """
-        return bool(self.entry.options.get(CONF_REPORT_LOG_FILE))
-
-    async def async_start_report_log(self) -> None:
-        """Begin a new capture episode — a fresh file, named for this moment.
-
-        Idempotent while an episode is running: turning an already-on switch on again must
-        not split the file. The episode name is persisted to the entry options so a
-        restart resumes the same file; the key is in `RELOAD_IGNORED_OPTION_KEYS`, so this
-        write does not reload the entry and drop the stream being captured.
-        """
-        if self.report_log is None or self.report_log_active:
-            return
-        episode = await self.hass.async_add_executor_job(self.report_log.start)
-        self.hass.config_entries.async_update_entry(
-            self.entry,
-            options={**self.entry.options, CONF_REPORT_LOG_FILE: episode},
-        )
-        # Both devices carry this switch; refresh them together so they never disagree.
-        self.async_update_listeners()
-
-    async def async_stop_report_log(self) -> None:
-        """End the capture episode. The files stay on disk until deleted by hand."""
-        if self.report_log is not None:
-            await self.hass.async_add_executor_job(self.report_log.stop)
-        if CONF_REPORT_LOG_FILE in self.entry.options:
-            self.hass.config_entries.async_update_entry(
-                self.entry,
-                options={
-                    k: v
-                    for k, v in self.entry.options.items()
-                    if k != CONF_REPORT_LOG_FILE
-                },
-            )
-        self.async_update_listeners()
-
-    # ------------------------------------------------------------------ #
-    # Warmup auto-restore
-    # ------------------------------------------------------------------ #
     @property
     def warmup_auto_restore(self) -> bool:
         """Whether to put the warmup mode back after something else disables it.
@@ -1959,7 +1840,7 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         Read live from the entry options, like `restart_on_runtime_cutoff`, so the switch
         takes effect immediately. Off unless explicitly enabled.
         """
-        return bool(self.entry.options.get(CONF_WARMUP_AUTO_RESTORE, False))
+        return bool(self.option(CONF_WARMUP_AUTO_RESTORE, False))
 
     @property
     def last_warmup_mode(self) -> str | None:
@@ -1970,44 +1851,21 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         no prior, auto-restore does nothing rather than picking a default, because "all
         outlets" and "selected outlets" are different fixtures' worth of water.
         """
-        stored = self.entry.options.get(CONF_LAST_WARMUP_MODE)
+        stored = self.option(CONF_LAST_WARMUP_MODE)
         return stored if stored in WARMUP_MODES_CURRENT else None
-
-    @callback
-    def _remember_message(self, envelope: Envelope) -> None:
-        """Keep a light record of every message, for the warmup journal's context windows.
-
-        Deliberately small: a code, a sku, a timestamp, and — only for the valve's own status
-        message — the four fields that tell a configuration write apart from an ordinary
-        status. The raw capture beside this holds every payload in full; duplicating it here
-        would make the journal unreadable for the one thing it is for.
-        """
-        record: dict[str, Any] = {
-            # The same stamp shape the journal and the raw capture use, so the three sort
-            # together on one clock.
-            "ts": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-            "at": time.monotonic(),
-            "sku": envelope.sku,
-            "code": envelope.code,
-        }
-        if envelope.code == MSG_GCS_SOLO_STATUS:
-            attribute = envelope.attribute() or {}
-            for key in (
-                "configChangeIndent",
-                "configWriteAllowedFlag",
-                "currentSystemState",
-                "warmUpStatus",
-            ):
-                if key in attribute:
-                    record[key] = attribute[key]
-        self._recent_messages.append(record)
 
     def _message_window(self, since: float, until: float | None = None) -> list[dict]:
         """Messages between two monotonic instants, oldest first, without the clock field."""
+        # This valve's own messages and every controller's — never another valve's.
+        # The controller ones matter: `SYSTEM_STS: SYSTEM_READY` is the most
+        # distinctive marker seen around a disable, and it is a controller message.
+        others = {v.device_id for v in self.coordinator.valves if v is not self}
         return [
-            {k: v for k, v in item.items() if k != "at"}
-            for item in self._recent_messages
-            if item["at"] >= since and (until is None or item["at"] <= until)
+            {k: v for k, v in item.items() if k not in ("at", "device")}
+            for item in self.coordinator._recent_messages
+            if item["at"] >= since
+            and (until is None or item["at"] <= until)
+            and item.get("device") not in others
         ]
 
     @callback
@@ -2015,7 +1873,7 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Append to the warmup journal. Mirrors `_journal`, including the deferred open."""
         if self.warmup_log is None:
             return
-        self.warmup_log.note(event, **fields)
+        self.warmup_log.note(event, **self._tagged(fields))
         if self.warmup_log.wants_open:
             self.hass.async_add_executor_job(self.warmup_log.prepare)
 
@@ -2058,11 +1916,8 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         self._warmup_restores = 0
         self._warmup_restored_at = None
-        if mode != self.entry.options.get(CONF_LAST_WARMUP_MODE):
-            self.hass.config_entries.async_update_entry(
-                self.entry,
-                options={**self.entry.options, CONF_LAST_WARMUP_MODE: mode},
-            )
+        if mode != self.option(CONF_LAST_WARMUP_MODE):
+            self.set_option(CONF_LAST_WARMUP_MODE, mode)
 
     def _warmup_write_status(self, after: str | None) -> tuple[float | None, bool]:
         """How long ago we last wrote a warmup mode, and whether ``after`` was that write.
@@ -2289,63 +2144,721 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             mode_now=None if self.gcs_state is None else self.gcs_state.warmup_mode,
         )
 
-    async def async_activate_favorite(self, favorite_id: Any, name: str) -> None:
+
+class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
+    """Owns the connection and the per-device state objects."""
+
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+        # `config_entry` must be passed on modern Home Assistant: without it
+        # `async_config_entry_first_refresh()` refuses to run. Older releases do not accept
+        # the keyword at all, so fall back rather than hard-failing on them.
+        # `update_interval=SCAN_INTERVAL` disables interval polling entirely. State is
+        # push-only: MQTT carries every change, and the REST reads happen on two *events* —
+        # setup, and every MQTT (re)connect — rather than on a clock.
+        #
+        # ⚠️ **That was one event short of the truth until 2026-08-21.**
+        # `async_config_entry_first_refresh()` runs immediately after `async_setup()` and the
+        # base class turns it into a third read of everything. `_async_update_data` now
+        # short-circuits that one, so the sentence above is enforced rather than merely
+        # intended — see the comment there before removing it.
+        #
+        # `_async_update_data()` still exists and still works; with no interval it runs only
+        # when something asks, which is what `homeassistant.update_entity` does. That is the
+        # manual refresh, and there is no automatic one.
+        try:
+            super().__init__(
+                hass,
+                _LOGGER,
+                name=DOMAIN,
+                update_interval=SCAN_INTERVAL,
+                config_entry=entry,
+            )
+        except TypeError:
+            super().__init__(
+                hass,
+                _LOGGER,
+                name=DOMAIN,
+                update_interval=SCAN_INTERVAL,
+            )
+        # Kept under our own name rather than relying on the base class's `config_entry`,
+        # whose presence varies by release.
+        self.entry = entry
+        # The entry as it looked when this coordinator was built, frozen. Home Assistant
+        # mutates the `ConfigEntry` object in place, so `self.entry` is a live view and
+        # cannot serve as a "before" — comparing it against the entry compares an object
+        # with itself. `_async_update_listener` compares against this instead.
+        self.reload_signature = entry_reload_signature(entry)
+        # The stored split wins over the SKU: an install that matches no catalogue model
+        # still reloads correctly, and a SKU label can never silently change topology.
+        stored = entry.data.get(CONF_ZONE_OUTLETS)
+        if isinstance(stored, (list, tuple)) and len(stored) == 2:
+            self.model = model_for_topology(int(stored[0]), int(stored[1]))
+        else:
+            self.model = get_valve_model(entry.data[CONF_VALVE_MODEL])
+        self.temperature_unit: str = entry.data.get(CONF_TEMPERATURE_UNIT, "Fahrenheit")
+
+        session = async_get_clientsession(hass)
+        self.auth = KohlerAuth(session, entry.data.get(CONF_REFRESH_TOKEN))
+        self.client = KohlerClient(session, self.auth, entry.data.get(CONF_TENANT_ID))
+
+        # Every Anthem valve on the account, in the order the cloud lists them, plus the
+        # same objects keyed by device id for envelope routing. Empty on a controller-only
+        # account. See `Valve` for what each one carries — everything that used to be a
+        # singular `gcs_*` field here, and everything that acted on it.
+        self.valves: list[Valve] = []
+        self._valves_by_id: dict[str, Valve] = {}
+        # Every Anthem Plus controller on the account, in the order the cloud lists them,
+        # plus the same objects keyed by device id for envelope routing. Empty on a
+        # valve-only account. See `Controller` for what each one carries.
+        self.controllers: list[Controller] = []
+        self._controllers_by_id: dict[str, Controller] = {}
+        self.stream: AnthemMqttStream | None = None
+        self.raw_log: RawMqttLog | None = None
+        # REPORT LOG: the consumer-side capture behind the "Report Log" switch — one file
+        # per switch-on, appended across restarts. See `anthem_plus/report_log.py`.
+        self.report_log: ReportLog | None = None
+        # One-shot: `async_setup` seeds, then `async_config_entry_first_refresh()` runs
+        # milliseconds later and would seed the identical state all over again. See
+        # `_async_update_data`.
+        self._seeded_during_setup = False
+        # CUTOFF DEBUG LOG: built in `async_setup`, once `hass.config.path` is usable.
+        self.cutoff_log: CutoffDebugLog | None = None
+        self.warmup_log: CutoffDebugLog | None = None
+        # Rolling record of recent messages, so a warmup disable can be journalled
+        # with what surrounded it. Bounded by count and trimmed by age on read.
+        self._recent_messages: deque = deque(maxlen=WARMUP_CONTEXT_MAX_MESSAGES)
+
+    # ------------------------------------------------------------------ #
+    # Setup / teardown
+    # ------------------------------------------------------------------ #
+    async def async_setup(self) -> None:
+        """Discover devices, seed state from REST, then start the MQTT stream."""
+        try:
+            customer = await self.client.async_get_customer()
+        except AuthUnavailable as err:
+            # Kohler unreachable, not a bad credential — retry setup, do not ask the user
+            # to sign in again.
+            raise ConfigEntryNotReady(f"Cannot reach Kohler: {err}") from err
+        except AuthError as err:
+            raise ConfigEntryAuthFailed(str(err)) from err
+        except KohlerError as err:
+            raise ConfigEntryNotReady(f"Cannot reach Kohler: {err}") from err
+
+        self.temperature_unit = customer.temperature_unit or self.temperature_unit
+        valves = customer.gcs_devices
+        controllers = customer.hub_devices
+        if not valves and not controllers:
+            raise ConfigEntryNotReady("No Anthem devices on this account")
+
+        # Every valve, not the first one. Each carries its own state, cutoff detector,
+        # warm-up restore, cloud watch and settings — see `Valve`. The settings move
+        # first, so the first valve's `Valve.__init__` finds its learned run times where
+        # they now live rather than where the single-valve versions left them.
+        if valves:
+            self._migrate_valve_settings(valves[0].device_id)
+        names = valve_names(valves)
+        self.valves = [
+            Valve(
+                self,
+                device,
+                self.model,
+                names[device.device_id],
+                tag=device.device_id if len(valves) > 1 else None,
+            )
+            for device in valves
+        ]
+        self._valves_by_id = {v.device_id: v for v in self.valves}
+        if len(self.valves) > 1:
+            _LOGGER.info(
+                "Account has %d Anthem valves: %s",
+                len(self.valves),
+                ", ".join(f"{v.name} ({v.device_id})" for v in self.valves),
+            )
+        # Every controller, not the first one. Each gets its own command surface and its
+        # own state, both keyed by its device id: the one account-level MQTT stream carries
+        # messages for all of them, and `_handle_envelope` sorts them by that id. The
+        # entry's model is only the starting layout — `_async_seed_state` replaces it per
+        # controller with what that controller's own configuration says.
+        names = controller_names(controllers)
+        self.controllers = [
+            Controller(
+                device,
+                HubDevice(self.client, device.device_id, self.temperature_unit),
+                HubState(self.model),
+                names[device.device_id],
+            )
+            for device in controllers
+        ]
+        self._controllers_by_id = {c.device_id: c for c in self.controllers}
+        if len(self.controllers) > 1:
+            _LOGGER.info(
+                "Account has %d Anthem Plus controllers: %s",
+                len(self.controllers),
+                ", ".join(f"{c.name} ({c.device_id})" for c in self.controllers),
+            )
+
+        try:
+            await self._async_seed_state()
+        except AuthUnavailable as err:
+            # Same split as the customer read above. The seed swallows `KohlerError` per
+            # read ("failures for one device do not blank the other"), but the token layer
+            # under every read raises `AuthError`, which is not a `KohlerError` — left bare,
+            # a rejection here escaped `async_setup_entry` as an unhandled exception: no
+            # reauth prompt, no retry, an entry stuck on "Failed to set up". Found 2026-08-21
+            # while proving the startup-read fold; fixed 2026-08-22.
+            raise ConfigEntryNotReady(f"Cannot reach Kohler: {err}") from err
+        except AuthError as err:
+            raise ConfigEntryAuthFailed(str(err)) from err
+        # `async_config_entry_first_refresh()` follows immediately in `async_setup_entry` and
+        # would repeat every read above for nothing. Claimed here, spent in
+        # `_async_update_data`.
+        self._seeded_during_setup = True
+        for valve in self.valves:
+            await valve._async_sync_default_preset_timer()
+        self._persist_refresh_token()
+
+        # One identity for the life of this config entry. Generated on first setup and
+        # persisted, so restarts and reconnects reuse it instead of leaving a trail of
+        # dead registrations on the Kohler account.
+        mobile_device_id = self.entry.data.get(CONF_MOBILE_DEVICE_ID)
+        first_registration = not mobile_device_id
+        if first_registration:
+            mobile_device_id = uuid.uuid4().hex[:16]
+            self.hass.config_entries.async_update_entry(
+                self.entry,
+                data={**self.entry.data, CONF_MOBILE_DEVICE_ID: mobile_device_id},
+            )
+
+        # RAW MQTT LOG: constructed unconditionally and switched on at runtime, so capture
+        # can be started from the UI mid-session without a reload. Nothing touches the disk
+        # until a message arrives while it is on. See `anthem_plus/raw_log.py`.
+        self.raw_log = RawMqttLog(
+            self.hass.config.path(RAW_MQTT_LOG_DIR),
+            forced=ENABLE_RAW_MQTT_LOG,
+            max_bytes=RAW_MQTT_LOG_MAX_BYTES,
+            keep_files=RAW_MQTT_LOG_KEEP_FILES,
+        )
+        # Open the file up front when capture is already on, so it is findable immediately
+        # rather than after the next push — which can be hours away. Executor, not the loop:
+        # this creates a directory and opens a file.
+        await self.hass.async_add_executor_job(self.raw_log.prepare)
+
+        # REPORT LOG: the consumer capture, in the integration's own folder (owner's
+        # choice — see the const.py section). The options key holds the active episode's
+        # name; its presence here means the switch was on when Home Assistant stopped, so
+        # re-attach to the SAME file — a capture of "it breaks when I restart" must not
+        # lose the interesting part to the restart itself.
+        self.report_log = ReportLog(
+            os.path.join(os.path.dirname(__file__), REPORT_LOG_DIR_NAME),
+            max_bytes=REPORT_LOG_MAX_BYTES,
+        )
+        episode = self.entry.options.get(CONF_REPORT_LOG_FILE)
+        if episode:
+            await self.hass.async_add_executor_job(self.report_log.resume, episode)
+
+        # CUTOFF DEBUG LOG: same directory as the raw capture on purpose — the two are read
+        # together, joined on `ts`. See `anthem_plus/cutoff_log.py`.
+        self.cutoff_log = CutoffDebugLog(
+            self.hass.config.path(RAW_MQTT_LOG_DIR),
+            forced=ENABLE_CUTOFF_DEBUG_LOG,
+            keep_files=CUTOFF_DEBUG_LOG_KEEP_FILES,
+        )
+        for valve in self.valves:
+            valve.attach_journal(self.cutoff_log)
+        await self.hass.async_add_executor_job(self.cutoff_log.prepare)
+
+        # WARMUP JOURNAL: a second journal in the same directory, on the same clock, for a
+        # different open question — see `WARMUP_README`. Separate from the cutoff log because
+        # the two are read for different reasons and `pause_resolution.py` and friends glob
+        # `cutoff_*.jsonl`; mixing warmup records into that corpus would silently change what
+        # those tools count.
+        self.warmup_log = CutoffDebugLog(
+            self.hass.config.path(RAW_MQTT_LOG_DIR),
+            forced=ENABLE_WARMUP_DEBUG_LOG,
+            keep_files=WARMUP_DEBUG_LOG_KEEP_FILES,
+            prefix="warmup",
+            readme=WARMUP_README,
+            readme_fields={
+                "before": int(WARMUP_CONTEXT_BEFORE_SECONDS),
+                "after": int(WARMUP_CONTEXT_AFTER_SECONDS),
+            },
+            label="Warmup journal",
+        )
+        await self.hass.async_add_executor_job(self.warmup_log.prepare)
+        for valve in self.valves:
+            valve.journal_baseline()
+
+        self.stream = AnthemMqttStream(
+            self.client,
+            self._handle_envelope,
+            on_connect=self._handle_connected,
+            on_auth_error=self._handle_auth_error,
+            mobile_device_id=mobile_device_id,
+            raw_log=self.raw_log,
+            report_log=self.report_log,
+            # Only a brand-new identity can plausibly need provisioning time. A reused one
+            # has connected before, so silence from it is real silence.
+            expect_warmup=first_registration,
+        )
+        try:
+            await self.stream.async_start()
+        except (AuthError, KohlerError) as err:
+            # State is already seeded, so the integration is usable but frozen until the
+            # stream recovers. A warning rather than a setup failure — the reconnect loop
+            # keeps trying, and each success re-seeds.
+            _LOGGER.warning("Kohler MQTT stream did not start: %s", err)
+            if credential_is_dead(err):
+                self._handle_auth_error(err)
+
+        # The Repairs card used to be keyed by entry alone; it is per valve now, and an
+        # upgrade must not leave the old one standing. Deleting a missing issue is a no-op.
+        ir.async_delete_issue(self.hass, DOMAIN, f"{ISSUE_NOT_SET_UP}_{self.entry.entry_id}")
+        for valve in self.valves:
+            valve.announce_readiness()
+            # Arms trigger B's countdown. Nothing is asked of Kohler until the valve has
+            # actually been quiet for the full interval, and any valve message resets it.
+            valve.cloud_watch.async_start()
+            valve.async_refresh_setup_issue()
+
+    @callback
+    def _migrate_valve_settings(self, device_id: str) -> None:
+        """Move the flat per-valve keys under `CONF_VALVES`, once.
+
+        Before 2026-09-08 the entry held one valve's worth of settings as flat keys —
+        `CONF_OUTLET_RUN_TIMES` in data; `CONF_RESTART_ON_RUNTIME_CUTOFF`,
+        `CONF_WARMUP_AUTO_RESTORE` and `CONF_LAST_WARMUP_MODE` in options. They belong to
+        whichever valve that install had, which on an account that has just grown a second
+        one is the first the cloud lists. Copied under that device id and removed, so there
+        is one scheme afterwards; a value already present per valve is never overwritten.
+
+        Every key involved is reload-ignored, so this write does not bounce the entry.
+        """
+        data = dict(self.entry.data)
+        options = dict(self.entry.options)
+        moved_data = {
+            key: data.pop(key) for key in (CONF_OUTLET_RUN_TIMES,) if key in data
+        }
+        moved_options = {
+            key: options.pop(key)
+            for key in (
+                CONF_RESTART_ON_RUNTIME_CUTOFF,
+                CONF_WARMUP_AUTO_RESTORE,
+                CONF_LAST_WARMUP_MODE,
+            )
+            if key in options
+        }
+        if not moved_data and not moved_options:
+            return
+        if moved_data:
+            valves = dict(data.get(CONF_VALVES) or {})
+            valves[device_id] = {**moved_data, **(valves.get(device_id) or {})}
+            data[CONF_VALVES] = valves
+        if moved_options:
+            valves = dict(options.get(CONF_VALVES) or {})
+            valves[device_id] = {**moved_options, **(valves.get(device_id) or {})}
+            options[CONF_VALVES] = valves
+        self.hass.config_entries.async_update_entry(self.entry, data=data, options=options)
+        _LOGGER.info(
+            "Moved per-valve settings (%s) under valve %s",
+            ", ".join(sorted([*moved_data, *moved_options])),
+            device_id,
+        )
+
+    @callback
+    def _handle_auth_error(self, err: Exception) -> None:
+        """Surface a rejected credential as a reauth prompt.
+
+        Push-only removed the last thing that ran on a clock, and with it the only path that
+        regularly reached ``ConfigEntryAuthFailed``. `_async_update_data` still raises it,
+        but with ``SCAN_INTERVAL = None`` it fires only on a manual
+        ``homeassistant.update_entity``. So without this, an expired or revoked refresh
+        token leaves the entry looking healthy — MQTT down, entities frozen at their last
+        values rather than unavailable, and no prompt anywhere — while the reconnect loop
+        retries forever against a credential that will never be accepted.
+
+        `async_start_reauth` is idempotent; the stream also latches, so repeated failures
+        do not stack up flows.
+        """
+        _LOGGER.error(
+            "Kohler rejected the stored credential (%s); reauthentication required", err
+        )
+        self.entry.async_start_reauth(self.hass)
+
+    @callback
+    def _handle_connected(self) -> None:
+        """Re-seed whenever the stream connects.
+
+        This is what replaces interval polling. The broker sends no state on connect — only
+        future change events — so without a read here a reconnect would leave every entity
+        holding whatever it had before the gap, with nothing to correct it until the shower
+        was next used.
+        """
+        # Durations measured across a disconnect are meaningless — we cannot know what the
+        # outlets did while the stream was down, and the gap has been as long as 11.9 hours.
+        # Dropping the timings means a session spanning a reconnect is simply not judged,
+        # rather than judged on a number we made up.
+        for valve in self.valves:
+            valve.forget_timings()
+        self.hass.async_create_task(self._async_reseed_after_connect())
+
+    async def _async_reseed_after_connect(self) -> None:
+        try:
+            await self._async_seed_state()
+        except (AuthError, KohlerError) as err:
+            # The stream is up regardless; pushes will still arrive. Do not fail the entry
+            # over a re-seed, and do not retry here — the next connect will try again.
+            _LOGGER.warning("Kohler re-seed after MQTT connect failed: %s", err)
+            if credential_is_dead(err):
+                # A rejected credential is the one failure the next connect cannot fix,
+                # and this path would otherwise absorb it silently.
+                self._handle_auth_error(err)
+            return
+        self._persist_refresh_token()
+        self.async_set_updated_data(self._snapshot())
+
+    async def async_shutdown_stream(self) -> None:
+        """Stop the MQTT stream on unload."""
+        for valve in self.valves:
+            valve.stop()
+        if self.stream is not None:
+            await self.stream.async_stop()
+            self.stream = None
+        # The raw capture is closed by the stream's own teardown; this one has no stream to
+        # ride on, so it is released here. Blocking close — off the loop.
+        if self.cutoff_log is not None:
+            await self.hass.async_add_executor_job(self.cutoff_log.close)
+        if self.warmup_log is not None:
+            await self.hass.async_add_executor_job(self.warmup_log.close)
+
+    # ------------------------------------------------------------------ #
+    # Push
+    # ------------------------------------------------------------------ #
+    def _handle_envelope(self, envelope: Envelope) -> None:
+        """Apply an MQTT message and notify entities if it changed anything."""
+        changed = False
+        # Valves and controllers alike: the one account-level stream carries every
+        # device's messages, and the device id says whose each one is.
+        valve = self._valves_by_id.get(envelope.device_id)
+        if valve is not None:
+            changed |= valve.handle_envelope(envelope)
+            self._remember_message(envelope)
+        # The one account-level stream carries every controller's messages; the device id
+        # says whose this is. A message from a controller this entry does not know — one
+        # added in the app since setup — falls through untouched until a reload lists it.
+        controller = self._controllers_by_id.get(envelope.device_id)
+        if controller is not None:
+            changed |= controller.state.apply_envelope(envelope)
+            self._remember_message(envelope)
+            if controller.state.favorites:
+                controller.favorites = controller.state.favorites
+            # Trigger A: a controller report of a zone ON, with the valve silent. Every
+            # valve's watch hears every controller: which controller fronts which valve
+            # is not knowable from the cloud, and a spurious trigger costs one
+            # rate-limited read, not a verdict.
+            for valve in self.valves:
+                valve.cloud_watch.note_hub_envelope(envelope)
+        if changed:
+            self.async_set_updated_data(self._snapshot())
+
+    def _snapshot(self) -> dict[str, Any]:
+        """A cheap dict so DataUpdateCoordinator has something to hand entities.
+
+        Entities read the state objects directly; this only carries freshness markers.
+        """
+        return {
+            "gcs_last_update": {
+                v.device_id: v.gcs_state.last_update for v in self.valves
+            },
+            "hub_last_update": {
+                c.device_id: c.state.last_update for c in self.controllers
+            },
+            "mqtt_connected": bool(self.stream and self.stream.connected),
+            # CLOUD CONNECTION WATCH. Carried here so a check result re-renders the entity
+            # the same way a device push does — the value itself lives on the watch.
+            "cloud_connected": {
+                v.device_id: v.cloud_watch.connected for v in self.valves
+            },
+        }
+
+    @callback
+    def async_refresh_entities(self) -> None:
+        """Re-render entities from what is already in memory, with no network read.
+
+        For state that changes without a message arriving — currently only the cloud
+        reachability check, which is answered over REST on its own schedule and has no push
+        source to ride in on.
+        """
+        self.async_set_updated_data(self._snapshot())
+
+    # ------------------------------------------------------------------ #
+    # Poll
+    # ------------------------------------------------------------------ #
+    async def _async_update_data(self) -> dict[str, Any]:
+        if self._seeded_during_setup:
+            # **The first refresh after setup is not a refresh.** `async_setup_entry` calls
+            # `async_setup()` and then `async_config_entry_first_refresh()` on the next line,
+            # and the base class turns that into a `_async_update_data()` — so without this,
+            # every start read the whole account twice, milliseconds apart, for state that
+            # could not have changed in between. Measured 2026-08-21: **five duplicate REST
+            # calls per start** (gcs-state, gcsadvancestate, presets, hub-state, favorites;
+            # each controller's configuration read is already skipped once its
+            # `capabilities.known`).
+            #
+            # What the first refresh is actually *for* is populating `coordinator.data`
+            # before the platforms are forwarded — `async_setup` never calls
+            # `async_set_updated_data`, so `data` is None until this returns. That needs the
+            # snapshot, not the network.
+            #
+            # **Why this is safe, and not merely cheap.** `async_setup` ends by awaiting
+            # `stream.async_start()`, which returns with the socket up — so `_handle_connected`
+            # has already scheduled a full re-seed of its own by the time this runs. Anything
+            # that changed in the gap between the setup read and the stream coming up is
+            # caught by *that* read, which happens after the connection exists rather than
+            # before it. This one was redundant with it, a few hundred milliseconds earlier
+            # and strictly worse placed.
+            #
+            # ⚠️ **Only the first one.** A manual `homeassistant.update_entity` is the only
+            # other way in — with `SCAN_INTERVAL = None` there is no clock — and that one
+            # must read for real, so the flag is spent here and never set again.
+            self._seeded_during_setup = False
+            self._persist_refresh_token()
+            return self._snapshot()
+        try:
+            await self._async_seed_state()
+        except AuthUnavailable as err:
+            raise UpdateFailed(f"Kohler auth service unreachable: {err}") from err
+        except AuthError as err:
+            raise ConfigEntryAuthFailed(str(err)) from err
+        except KohlerError as err:
+            raise UpdateFailed(f"Kohler poll failed: {err}") from err
+        self._persist_refresh_token()
+        return self._snapshot()
+
+    async def _async_seed_state(self) -> None:
+        """Read current state over REST into the state objects.
+
+        Runs at setup, on every MQTT connect, and on a manual `update_entity`. Failures for
+        one device do not blank the other.
+        """
+        for valve in self.valves:
+            await valve.async_seed()
+
+        for controller in self.controllers:
+            device_id = controller.device_id
+            # Zones, outlet types, and installed parts — installation-time facts that no
+            # message ever pushes because nothing changes them at runtime. Read once and
+            # keep it; re-reading on a timer polls forever for an event that happens when a
+            # plumber visits.
+            #
+            # Read BEFORE the state, not after it as this used to: the same response says
+            # how many outlets each of this controller's zones has, which decides how its
+            # state decodes the zone arrays in everything that follows. See
+            # `_apply_controller_topology`.
+            if not controller.capabilities.known:
+                try:
+                    config = await self.client.async_get_hub_configuration(device_id)
+                    configuration = config.get("configuration") or {}
+                    controller.capabilities = HubCapabilities.from_configuration(
+                        configuration
+                    )
+                    self._apply_controller_topology(controller, configuration)
+                except KohlerError as err:
+                    _LOGGER.debug(
+                        "Could not read HUB configuration for %s: %s", device_id, err
+                    )
+            try:
+                controller.state.apply_rest_state(
+                    await self.client.async_get_hub_state(device_id)
+                )
+            except KohlerError as err:
+                _LOGGER.debug("Could not seed HUB state for %s: %s", device_id, err)
+            try:
+                payload = await self.client.async_get_hub_favorites(device_id)
+                favorites = payload.get("favorites")
+                if isinstance(favorites, list):
+                    # Favourite ids are reassigned when one is deleted, so this list is the
+                    # only safe way to resolve a favourite — never hardcode an id.
+                    controller.favorites = favorites
+            except KohlerError as err:
+                if getattr(err, "status", None) == 404:
+                    # Not a failure: this endpoint 404s when the controller has **no** saved
+                    # favourites, rather than returning an empty list. Confirmed 2026-08-17 —
+                    # the route is handled (it answers with the application's own error
+                    # envelope, unlike a genuine bad path), MQTT `FAVORITES_SNAPSHOT` agrees
+                    # with `attributes: []`, and `docs/hub/cloud_api.md` §5.2 has a captured
+                    # 200 from when this account still had one. Logging it as an error made
+                    # three misleading lines per startup.
+                    controller.favorites = []
+                    _LOGGER.debug("No HUB favourites are saved on %s", device_id)
+                else:
+                    _LOGGER.debug(
+                        "Could not read HUB favourites for %s: %s", device_id, err
+                    )
+
+    @callback
+    def _apply_controller_topology(
+        self, controller: Controller, configuration: dict[str, Any]
+    ) -> None:
+        """Give a controller the outlet layout its own configuration reports.
+
+        The entry's model is what the config flow detected — from the valve where there is
+        one, else from the first controller that answered — and it is right for that device.
+        It is not necessarily right for a second controller: the ordinary reason an account
+        has two is two bathrooms, and nothing says they were plumbed with the same valve
+        model. So each controller decodes its zone arrays with the split its own
+        `hub-configuration` states, and keeps the entry's model only when that read yields
+        nothing — which is exactly the case in which the config flow would have asked.
+
+        The model decides how many outlet entities the controller gets, which is why this
+        runs inside the setup seed, before the platforms are built, and never again:
+        `capabilities.known` gates the read, and a plumber's visit needs a reload anyway.
+        """
+        detected = topology_from_hub_configuration(configuration)
+        if not detected:
+            return
+        model = model_for_topology(*detected)
+        current = controller.model
+        if (model.outlets_valve1, model.outlets_valve2) == (
+            current.outlets_valve1,
+            current.outlets_valve2,
+        ):
+            return
+        _LOGGER.info(
+            "%s (%s) reports %s; using that for this controller instead of the entry's %s",
+            controller.name,
+            controller.device_id,
+            describe_topology(detected),
+            current.sku,
+        )
+        controller.state.model = model
+
+    # ------------------------------------------------------------------ #
+    # Helpers
+    # ------------------------------------------------------------------ #
+    def _persist_refresh_token(self) -> None:
+        """Write the rotated refresh token back to the config entry."""
+        token = self.auth.refresh_token
+        if token and token != self.entry.data.get(CONF_REFRESH_TOKEN):
+            self.hass.config_entries.async_update_entry(
+                self.entry, data={**self.entry.data, CONF_REFRESH_TOKEN: token}
+            )
+
+    # ------------------------------------------------------------------ #
+    # Local writes — what the valves' custom-shower watchers count
+    # ------------------------------------------------------------------ #
+    def _note_local_write(self) -> None:
+        """Count a controller command against every valve's custom-shower watcher.
+
+        A valve command bumps only its own serial (`Valve._note_local_write`). A
+        controller command — a favourite, the controller's own shower on/off, stop-all —
+        cannot be attributed to one valve from the cloud, so it counts against all of
+        them: a watcher that then declines to resume is the safe direction of error.
+        """
+        for valve in self.valves:
+            valve._note_local_write()
+
+    # ------------------------------------------------------------------ #
+    # Report log — the consumer capture behind the "Report Log" switch
+    # ------------------------------------------------------------------ #
+    @property
+    def report_log_active(self) -> bool:
+        """Whether a capture episode is in force.
+
+        Read from the entry options, not from the log object: the options key is what
+        survives a restart, and the switch must show ON after one even in the moments
+        before `async_setup` has re-attached the file.
+        """
+        return bool(self.entry.options.get(CONF_REPORT_LOG_FILE))
+
+    async def async_start_report_log(self) -> None:
+        """Begin a new capture episode — a fresh file, named for this moment.
+
+        Idempotent while an episode is running: turning an already-on switch on again must
+        not split the file. The episode name is persisted to the entry options so a
+        restart resumes the same file; the key is in `RELOAD_IGNORED_OPTION_KEYS`, so this
+        write does not reload the entry and drop the stream being captured.
+        """
+        if self.report_log is None or self.report_log_active:
+            return
+        episode = await self.hass.async_add_executor_job(self.report_log.start)
+        self.hass.config_entries.async_update_entry(
+            self.entry,
+            options={**self.entry.options, CONF_REPORT_LOG_FILE: episode},
+        )
+        # Both devices carry this switch; refresh them together so they never disagree.
+        self.async_update_listeners()
+
+    async def async_stop_report_log(self) -> None:
+        """End the capture episode. The files stay on disk until deleted by hand."""
+        if self.report_log is not None:
+            await self.hass.async_add_executor_job(self.report_log.stop)
+        if CONF_REPORT_LOG_FILE in self.entry.options:
+            self.hass.config_entries.async_update_entry(
+                self.entry,
+                options={
+                    k: v
+                    for k, v in self.entry.options.items()
+                    if k != CONF_REPORT_LOG_FILE
+                },
+            )
+        self.async_update_listeners()
+
+    # ------------------------------------------------------------------ #
+    # Message record — context for the valves' warmup journals
+    # ------------------------------------------------------------------ #
+    @callback
+    def _remember_message(self, envelope: Envelope) -> None:
+        """Keep a light record of every message, for the warmup journal's context windows.
+
+        Deliberately small: a code, a sku, a timestamp, and — only for the valve's own status
+        message — the four fields that tell a configuration write apart from an ordinary
+        status. The raw capture beside this holds every payload in full; duplicating it here
+        would make the journal unreadable for the one thing it is for.
+        """
+        record: dict[str, Any] = {
+            # The same stamp shape the journal and the raw capture use, so the three sort
+            # together on one clock.
+            "ts": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "at": time.monotonic(),
+            "sku": envelope.sku,
+            "code": envelope.code,
+            # Which device, so `Valve._message_window` can leave other valves' traffic
+            # out. Stripped again before the record reaches the journal.
+            "device": envelope.device_id,
+        }
+        if envelope.code == MSG_GCS_SOLO_STATUS:
+            attribute = envelope.attribute() or {}
+            for key in (
+                "configChangeIndent",
+                "configWriteAllowedFlag",
+                "currentSystemState",
+                "warmUpStatus",
+            ):
+                if key in attribute:
+                    record[key] = attribute[key]
+        self._recent_messages.append(record)
+
+    # ------------------------------------------------------------------ #
+    # Controller commands
+    # ------------------------------------------------------------------ #
+    async def async_activate_favorite(
+        self, controller: Controller, favorite_id: Any, name: str
+    ) -> None:
         """Start a controller favourite. **This runs water.**
 
         The controller's only way to set water state: it has no direct temperature/outlet
         command, so a favourite is created holding that configuration and then activated.
         Activation is allowed even while something else is running.
         """
-        if self.hub is None:
-            raise HomeAssistantError("No Anthem Plus controller on this account")
         self._note_local_write()
         try:
-            await self.hub.async_activate_favorite(favorite_id, name, True)
+            await controller.hub.async_activate_favorite(favorite_id, name, True)
         except DeviceOffline as err:
-            raise HomeAssistantError(
-                "The Anthem Plus controller is offline. Check that it is powered on and "
-                "connected, then try again."
-            ) from err
+            raise HomeAssistantError(_controller_offline(controller)) from err
         except KohlerError as err:
             raise HomeAssistantError(f"Kohler command failed: {err}") from err
 
-    @property
-    def hub_water_is_running(self) -> bool | None:
-        """Whether the **controller** believes water is running. Never asks the valve.
-
-        This is deliberately the controller's own, possibly wrong, view — and the entities
-        on the Anthem Plus device are the one place that is the right answer. They are
-        answering "what does this controller think it is doing", and a controller that has
-        not been told about a session is not doing anything: its ``stopall`` and
-        ``valvecontrol OFF`` have nothing to stop, and its own timers are not counting.
-
-        **This replaced a valve-backed property on 2026-08-18, because that produced a false
-        positive.** `resolve_outlet_source()` is right that the valve owns the *physical*
-        water state, and the Anthem Valve entities read it. But feeding it to the
-        controller's switches made them report a system the controller knew nothing about.
-        Measured that day: a 86-minute GCS-driven shower — open at 07:52:01 local, the
-        valve's 3600 s pause and our restore at 08:52, stopped by hand at 09:18 — during
-        which the controller published **not one message of any kind**, `SHOWER_VALVE_STS`
-        included. The capture holds five `GCS_SOLO_STS` messages and nothing else. Both
-        controller switches nonetheless tracked the shower perfectly, which looked like
-        health and was actually the valve wearing the controller's name.
-
-        Read from the outlet arrays rather than ``HubState.is_running``'s zone ``status``
-        so this agrees exactly with the ``ControllerOutletSensor`` binary sensors — the
-        Shower switch is on if and only if one of those outlet rows is on. The two sources
-        do not disagree in any capture; matching them is about the dashboard being
-        self-consistent, not about correctness.
-
-        ``None`` — "unknown", not "off" — until the controller has reported a zone at all,
-        since an empty ``zones`` map pads to all-False and would otherwise read as a
-        confident "no water".
-        """
-        state = self.hub_state
-        if state is None or not state.zones:
-            return None
-        return any(state.outlets)
-
-    async def async_set_hub_shower(self, on: bool) -> None:
+    async def async_set_hub_shower(self, controller: Controller, on: bool) -> None:
         """Run or stop the controller's own default shower. **On runs water.**
 
         ``valvecontrol {valveOnOff}`` — the controller's one direct water command, and the
@@ -2356,36 +2869,26 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         Off stops the water only, leaving music, steam, and lighting running. Use
         :meth:`async_stop_hub` to idle everything.
         """
-        if self.hub is None:
-            raise HomeAssistantError("No Anthem Plus controller on this account")
         self._note_local_write()
         try:
-            await self.hub.async_set_shower(on)
+            await controller.hub.async_set_shower(on)
         except DeviceOffline as err:
-            raise HomeAssistantError(
-                "The Anthem Plus controller is offline. Check that it is powered on and "
-                "connected, then try again."
-            ) from err
+            raise HomeAssistantError(_controller_offline(controller)) from err
         except KohlerError as err:
             raise HomeAssistantError(f"Kohler command failed: {err}") from err
 
-    async def async_stop_hub(self) -> None:
+    async def async_stop_hub(self, controller: Controller) -> None:
         """Stop everything the controller is running — water, steam, music, lighting.
 
         Uses ``stopall`` rather than deactivating the active favourite, because the
         favourite may already have been replaced by whatever is running now, and a stop
         should not depend on correctly identifying what to stop.
         """
-        if self.hub is None:
-            raise HomeAssistantError("No Anthem Plus controller on this account")
         self._note_local_write()
         try:
-            await self.hub.async_stop_all()
+            await controller.hub.async_stop_all()
         except DeviceOffline as err:
-            raise HomeAssistantError(
-                "The Anthem Plus controller is offline. Check that it is powered on and "
-                "connected, then try again."
-            ) from err
+            raise HomeAssistantError(_controller_offline(controller)) from err
         except KohlerError as err:
             raise HomeAssistantError(f"Kohler command failed: {err}") from err
 

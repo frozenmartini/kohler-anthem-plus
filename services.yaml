@@ -10,6 +10,14 @@ send_valve_hex:
     controls, then copy the code from the Zone Hex diagnostic sensor and paste it below.
     WARNING: this can start water.
   fields:
+    device_id:
+      name: Valve
+      required: false
+      description: Which Anthem valve, when the account has more than one.
+      selector:
+        device:
+          filter:
+            integration: kohler_anthem_plus
     zone1_hex:
       name: Zone 1 Hex
       required: true
@@ -50,6 +58,14 @@ custom_shower:
     with your outlets and temperature the moment that pause begins. WARNING: this can
     start water.
   fields:
+    device_id:
+      name: Valve
+      required: false
+      description: Which Anthem valve, when the account has more than one.
+      selector:
+        device:
+          filter:
+            integration: kohler_anthem_plus
     zone_1:
       name: Zone 1
       collapsed: false

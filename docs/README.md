@@ -77,6 +77,11 @@ This work covers a **single Anthem valve unit** — one physical body with two z
 three outlets each, so **6 outlets maximum**. That is the K-28209 / K-28210 / K-28211 /
 K-28212 range, and it is what the Home Assistant integration supports.
 
+Several such units on one **account** — one per bathroom, say — are a different matter: since
+0.4.0 the integration gives each its own device, decoded with its own layout (beta; see
+[`releases/v0.4.0.md`](releases/v0.4.0.md)). The limit below is about two bodies under one
+**controller**, not two units on one account.
+
 An Anthem Plus controller can drive **two** such units (12 outlets). That configuration is
 **out of scope and untested**: the GCS API exposes eight zone slots
 (`primaryValve1`, `secondaryValve1`…`secondaryValve7`) and the controller reports a second

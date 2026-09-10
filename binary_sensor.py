@@ -29,7 +29,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .anthem_plus.models import OutletStateSource, resolve_outlet_source
 from .const import DOMAIN, EXPOSE_CONTROLLER_WATER_STATE
-from .coordinator import KohlerAnthemPlusCoordinator
+from .coordinator import Controller, KohlerAnthemPlusCoordinator, Valve
 from .entity import KohlerControllerEntity, KohlerValveEntity
 
 
@@ -42,58 +42,22 @@ async def async_setup_entry(
     coordinator: KohlerAnthemPlusCoordinator = hass.data[DOMAIN][entry.entry_id]
     entities: list[BinarySensorEntity] = []
 
-    if coordinator.gcs_device is not None:
+    # One set per valve — each is its own device with its own state and layout.
+    for valve in coordinator.valves:
         entities += [
-            ValveAtTemperatureSensor(coordinator),
-            MqttConnectionSensor(coordinator),
-            # CLOUD CONNECTION WATCH. Created for every account that has a valve, including
-            # valve-only ones — the quiet-interval trigger needs no controller. On an account
+            ValveAtTemperatureSensor(coordinator, valve),
+            MqttConnectionSensor(coordinator, valve),
+            # CLOUD CONNECTION WATCH. Created for every valve, including on valve-only
+            # accounts — the quiet-interval trigger needs no controller. On an account
             # that also has one, the contradiction trigger wires itself up as well.
-            ValveCloudConnectionSensor(coordinator),
-            ValvePresetActiveSensor(coordinator),
+            ValveCloudConnectionSensor(coordinator, valve),
+            ValvePresetActiveSensor(coordinator, valve),
         ]
         # One per zone the model actually has. A single-zone valve must not get a "Zone 2"
         # that is permanently off — `model.zones` is the only correct source for this.
         entities += [
-            ValveZoneActiveSensor(coordinator, zone) for zone in coordinator.model.zones
+            ValveZoneActiveSensor(coordinator, valve, zone) for zone in valve.model.zones
         ]
-
-    # Music is independent of the water path: it comes from MUSIC_STS, which the controller
-    # reports for its own amplifier regardless of what drives the valve.
-    #
-    # Skipped only when the controller has positively told us there is no amplifier. The
-    # check is `not known or music` rather than plain `music`, because an unread or failed
-    # configuration leaves every capability False — indistinguishable from a real "no
-    # accessories". Erring towards creating it means a missed read costs a sensor reading
-    # unknown, not a silently absent entity.
-    if coordinator.hub_device is not None:
-        # The controller's own copy of the stream-health diagnostic. Same stream as the
-        # valve's, deliberately duplicated per device — see `MqttConnectionMixin`.
-        entities.append(ControllerMqttConnectionSensor(coordinator))
-
-        capabilities = coordinator.hub_capabilities
-
-        def attached(present: bool) -> bool:
-            """Whether to create an accessory entity.
-
-            ``not known or present``, never plain ``present``: an unread or failed
-            configuration leaves every capability False, which is indistinguishable from a
-            genuine "no accessories". Erring towards creating means a missed read costs a
-            sensor reading unknown, not a silently absent entity.
-            """
-            return not capabilities.known or present
-
-        # Gated on `hub-configuration.parts`, which is the ONLY source of what hardware
-        # exists. Message arrival cannot be used: the controller emits STEAM_STS and
-        # LIGHT_STS on this system despite `parts` reporting both NotConnected — 10 and 12
-        # messages respectively — so subscribing would create entities for hardware nobody
-        # owns, permanently reading OFF.
-        if attached(capabilities.music):
-            entities.append(ControllerMusicSensor(coordinator))
-        if attached(capabilities.light):
-            entities.append(ControllerLightSensor(coordinator))
-        if attached(capabilities.steam):
-            entities.append(ControllerSteamSensor(coordinator))
 
     # Everything derived from SHOWER_VALVE_STS is created on a controller-only account,
     # where it is the only water state there is — and, since 2026-08-18, on a both-devices
@@ -104,18 +68,56 @@ async def async_setup_entry(
     # They are answering different questions and both answers are true. See
     # EXPOSE_CONTROLLER_WATER_STATE for why the second one is worth a row.
     source = resolve_outlet_source(
-        coordinator.gcs_device is not None, coordinator.hub_device is not None
+        bool(coordinator.valves), bool(coordinator.controllers)
     )
     controller_water = source is OutletStateSource.HUB_MQTT or (
-        coordinator.hub_device is not None and EXPOSE_CONTROLLER_WATER_STATE
+        bool(coordinator.controllers) and EXPOSE_CONTROLLER_WATER_STATE
     )
-    if controller_water:
-        model = coordinator.model
-        entities += [
-            ControllerOutletSensor(coordinator, zone, outlet)
-            for zone in model.zones
-            for outlet in range(1, model.outlets_in_zone(zone) + 1)
-        ]
+
+    # One set per controller. An account can carry several — the cloud lists them all and
+    # the one stream carries messages for all — and each is its own device with its own
+    # state, its own accessories, and its own outlet layout.
+    for controller in coordinator.controllers:
+        # The controller's own copy of the stream-health diagnostic. Same stream as the
+        # valve's, deliberately duplicated per device — see `MqttConnectionMixin`.
+        entities.append(ControllerMqttConnectionSensor(coordinator, controller))
+
+        capabilities = controller.capabilities
+
+        def attached(present: bool, known: bool = capabilities.known) -> bool:
+            """Whether to create an accessory entity.
+
+            ``not known or present``, never plain ``present``: an unread or failed
+            configuration leaves every capability False, which is indistinguishable from a
+            genuine "no accessories". Erring towards creating means a missed read costs a
+            sensor reading unknown, not a silently absent entity.
+            """
+            return not known or present
+
+        # The accessories are independent of the water path: MUSIC_STS and friends report
+        # the controller's own hardware regardless of what drives the valve.
+        #
+        # Gated on `hub-configuration.parts`, which is the ONLY source of what hardware
+        # exists. Message arrival cannot be used: the controller emits STEAM_STS and
+        # LIGHT_STS on this system despite `parts` reporting both NotConnected — 10 and 12
+        # messages respectively — so subscribing would create entities for hardware nobody
+        # owns, permanently reading OFF.
+        if attached(capabilities.music):
+            entities.append(ControllerMusicSensor(coordinator, controller))
+        if attached(capabilities.light):
+            entities.append(ControllerLightSensor(coordinator, controller))
+        if attached(capabilities.steam):
+            entities.append(ControllerSteamSensor(coordinator, controller))
+
+        if controller_water:
+            # This controller's layout, not the entry's: a second bathroom need not have
+            # the same valve model. See `Controller.model`.
+            model = controller.model
+            entities += [
+                ControllerOutletSensor(coordinator, controller, zone, outlet)
+                for zone in model.zones
+                for outlet in range(1, model.outlets_in_zone(zone) + 1)
+            ]
 
     async_add_entities(entities)
 
@@ -138,8 +140,8 @@ class ValveAtTemperatureSensor(KohlerValveEntity, BinarySensorEntity):
     # thermometer survives — a device class supplies its own icon otherwise.
     _attr_device_class = BinarySensorDeviceClass.HEAT
 
-    def __init__(self, coordinator: KohlerAnthemPlusCoordinator) -> None:
-        super().__init__(coordinator)
+    def __init__(self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve) -> None:
+        super().__init__(coordinator, valve)
         self._attr_unique_id = f"{self._device_id}_at_temperature"
 
     @property
@@ -226,8 +228,8 @@ class MqttConnectionSensor(MqttConnectionMixin, ValveDiagnosticBinarySensor):
     stream.
     """
 
-    def __init__(self, coordinator: KohlerAnthemPlusCoordinator) -> None:
-        super().__init__(coordinator)
+    def __init__(self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve) -> None:
+        super().__init__(coordinator, valve)
         self._attr_unique_id = f"{self._device_id}_mqtt_connection"
 
 
@@ -270,13 +272,13 @@ class ValveCloudConnectionSensor(KohlerValveEntity, BinarySensorEntity):
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_entity_registry_visible_default = False
 
-    def __init__(self, coordinator: KohlerAnthemPlusCoordinator) -> None:
-        super().__init__(coordinator)
+    def __init__(self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve) -> None:
+        super().__init__(coordinator, valve)
         self._attr_unique_id = f"{self._device_id}_cloud_connection"
 
     @property
     def is_on(self) -> bool | None:
-        watch = self.coordinator.cloud_watch
+        watch = self._valve.cloud_watch
         return None if watch is None else watch.connected
 
     @property
@@ -287,7 +289,7 @@ class ValveCloudConnectionSensor(KohlerValveEntity, BinarySensorEntity):
         trigger was taken while a shower was running, which is far stronger evidence than one
         taken because the valve had been quiet overnight.
         """
-        watch = self.coordinator.cloud_watch
+        watch = self._valve.cloud_watch
         return {} if watch is None else watch.attributes
 
 
@@ -308,8 +310,10 @@ class ControllerMqttConnectionSensor(
     signature of a half-open socket that has not yet failed its keepalive.
     """
 
-    def __init__(self, coordinator: KohlerAnthemPlusCoordinator) -> None:
-        super().__init__(coordinator)
+    def __init__(
+        self, coordinator: KohlerAnthemPlusCoordinator, controller: Controller
+    ) -> None:
+        super().__init__(coordinator, controller)
         self._attr_unique_id = f"{self._device_id}_mqtt_connection"
 
 
@@ -331,8 +335,10 @@ class ValveZoneActiveSensor(KohlerValveEntity, BinarySensorEntity):
     _attr_device_class = BinarySensorDeviceClass.RUNNING
     _attr_icon = "mdi:water"
 
-    def __init__(self, coordinator: KohlerAnthemPlusCoordinator, zone: int) -> None:
-        super().__init__(coordinator)
+    def __init__(
+        self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve, zone: int
+    ) -> None:
+        super().__init__(coordinator, valve)
         self._zone = zone
         self._attr_name = f"Zone {zone} Active"
         self._attr_unique_id = f"{self._device_id}_zone_{zone}_active"
@@ -361,7 +367,7 @@ class ValveZoneActiveSensor(KohlerValveEntity, BinarySensorEntity):
         word = self._word
         if word is None:
             return {}
-        model = self.coordinator.model
+        model = self._valve.model
         base = sum(model.outlets_in_zone(z) for z in model.zones if z < self._zone)
         attributes: dict[str, object] = {
             "outlet_mask": f"0x{word.outlet_mask:02X}",
@@ -374,11 +380,11 @@ class ValveZoneActiveSensor(KohlerValveEntity, BinarySensorEntity):
             ],
             "paused": word.paused,
         }
-        flowing_for = self.coordinator.zone_flowing_for(self._zone)
+        flowing_for = self._valve.zone_flowing_for(self._zone)
         attributes["flowing_for_seconds"] = (
             None if flowing_for is None else round(flowing_for, 1)
         )
-        limits = self.coordinator.run_time_limits_for_zone(self._zone)
+        limits = self._valve.run_time_limits_for_zone(self._zone)
         attributes["run_time_limit_seconds"] = list(limits)
         attributes["seconds_remaining"] = (
             None
@@ -419,8 +425,8 @@ class ValvePresetActiveSensor(KohlerValveEntity, BinarySensorEntity):
     _attr_name = "Preset Active"
     _attr_icon = "mdi:playlist-star"
 
-    def __init__(self, coordinator: KohlerAnthemPlusCoordinator) -> None:
-        super().__init__(coordinator)
+    def __init__(self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve) -> None:
+        super().__init__(coordinator, valve)
         self._attr_unique_id = f"{self._device_id}_preset_active"
 
     @property
@@ -458,8 +464,10 @@ class ControllerAccessorySensor(KohlerControllerEntity, BinarySensorEntity):
     a live volume change made on the touchscreen, so a volume entity built on it would lie.
     """
 
-    def __init__(self, coordinator: KohlerAnthemPlusCoordinator, key: str) -> None:
-        super().__init__(coordinator)
+    def __init__(
+        self, coordinator: KohlerAnthemPlusCoordinator, controller: Controller, key: str
+    ) -> None:
+        super().__init__(coordinator, controller)
         self._key = key
         self._attr_unique_id = f"{self._device_id}_{key}"
 
@@ -480,8 +488,10 @@ class ControllerMusicSensor(ControllerAccessorySensor):
     _attr_name = "Music"
     _attr_icon = "mdi:music"
 
-    def __init__(self, coordinator: KohlerAnthemPlusCoordinator) -> None:
-        super().__init__(coordinator, "music")
+    def __init__(
+        self, coordinator: KohlerAnthemPlusCoordinator, controller: Controller
+    ) -> None:
+        super().__init__(coordinator, controller, "music")
 
 
 class ControllerLightSensor(ControllerAccessorySensor):
@@ -495,8 +505,10 @@ class ControllerLightSensor(ControllerAccessorySensor):
     _attr_name = "Light"
     _attr_icon = "mdi:lightbulb"
 
-    def __init__(self, coordinator: KohlerAnthemPlusCoordinator) -> None:
-        super().__init__(coordinator, "light")
+    def __init__(
+        self, coordinator: KohlerAnthemPlusCoordinator, controller: Controller
+    ) -> None:
+        super().__init__(coordinator, controller, "light")
 
 
 class ControllerSteamSensor(ControllerAccessorySensor):
@@ -510,8 +522,10 @@ class ControllerSteamSensor(ControllerAccessorySensor):
     _attr_name = "Steam"
     _attr_icon = "mdi:hot-tub"
 
-    def __init__(self, coordinator: KohlerAnthemPlusCoordinator) -> None:
-        super().__init__(coordinator, "steam")
+    def __init__(
+        self, coordinator: KohlerAnthemPlusCoordinator, controller: Controller
+    ) -> None:
+        super().__init__(coordinator, controller, "steam")
 
 
 class ControllerOutletSensor(KohlerControllerEntity, BinarySensorEntity):
@@ -523,7 +537,7 @@ class ControllerOutletSensor(KohlerControllerEntity, BinarySensorEntity):
     this outlet". What these rows answer instead is "does the controller know", which is
     what decides whether its ``stopall`` and its 60-minute session ceiling apply.
 
-    ``coordinator.hub_water_is_running`` is the any-of over exactly these, and backs both
+    ``Controller.water_is_running`` is the any-of over exactly these, and backs both
     Anthem Plus switches, so a switch here can never disagree with the rows beneath it.
 
     Addressed per zone for the same reason as the valve's switches: the controller's data is
@@ -536,9 +550,13 @@ class ControllerOutletSensor(KohlerControllerEntity, BinarySensorEntity):
     _attr_icon = "mdi:shower-head"
 
     def __init__(
-        self, coordinator: KohlerAnthemPlusCoordinator, zone: int, outlet: int
+        self,
+        coordinator: KohlerAnthemPlusCoordinator,
+        controller: Controller,
+        zone: int,
+        outlet: int,
     ) -> None:
-        super().__init__(coordinator)
+        super().__init__(coordinator, controller)
         self._zone = zone
         self._outlet = outlet
         self._attr_name = f"Zone {zone} Outlet {outlet}"

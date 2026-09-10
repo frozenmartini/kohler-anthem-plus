@@ -60,6 +60,9 @@ shuts off, it goes back on automatically — same outlets, same temperature.
 <br><br>
 <b>Live outlet and temperature</b> — move a setpoint or flip an outlet and the water follows
 immediately. No scene to apply, no confirm step.
+<br><br>
+<b>Every valve on the account</b> — one device per Anthem valve and per controller, each with
+its own entities and settings. New in 0.4.0, beta.
 </td>
 <td width="2%" align="center"><img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/vline-grey-340.svg" width="1" height="340" alt=""></td>
 <td valign="top" width="49%">
@@ -271,7 +274,7 @@ diagnosable:</p>
 
 <ul>
 <li><b>Download diagnostics</b> — on the integration card and both device pages. One JSON report
-of the whole installation, with credentials, account identity and serial numbers redacted. On
+of the whole installation, with credentials and account identity redacted. On
 anything other than a K-28212, this is the single most useful file you can send.</li>
 <li><b>Report Log</b> — a switch on both device pages that captures every raw MQTT message, one
 file per switch-on, continuing across a Home Assistant restart so "it breaks when I restart" stays

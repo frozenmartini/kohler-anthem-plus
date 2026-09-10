@@ -26,7 +26,7 @@ from homeassistant.helpers.event import async_call_later
 
 from .anthem_plus import WARMUP_MODES_CURRENT
 from .const import DOMAIN, PRESET_HIDDEN_IDS, WARMUP_LABELS
-from .coordinator import KohlerAnthemPlusCoordinator
+from .coordinator import Controller, KohlerAnthemPlusCoordinator, Valve
 from .entity import KohlerControllerEntity, KohlerValveEntity
 
 # Shown when no favourite is driving the valve. A `select` must always have its current
@@ -137,14 +137,15 @@ async def async_setup_entry(
     """Set up the favourite selector when the account has a valve."""
     coordinator: KohlerAnthemPlusCoordinator = hass.data[DOMAIN][entry.entry_id]
     entities: list[SelectEntity] = []
-    if coordinator.gcs_device is not None:
-        entities.append(FavouriteSelect(coordinator))
-        entities.append(ValveWarmupSelect(coordinator))
-    if coordinator.hub_device is not None:
-        # The controller keeps its own favourites on a different command surface. Both can
-        # exist on one account, on their own devices, which is why they are separate
-        # entities rather than one merged list.
-        entities.append(HubFavouriteSelect(coordinator))
+    for valve in coordinator.valves:
+        entities.append(FavouriteSelect(coordinator, valve))
+        entities.append(ValveWarmupSelect(coordinator, valve))
+    # Each controller keeps its own favourites on a different command surface from the
+    # valve's. Both can exist on one account, on their own devices, which is why they are
+    # separate entities rather than one merged list — and why a second controller gets
+    # its own dropdown rather than a longer one.
+    for controller in coordinator.controllers:
+        entities.append(HubFavouriteSelect(coordinator, controller))
     async_add_entities(entities)
 
 
@@ -154,8 +155,8 @@ class FavouriteSelect(OptimisticOptionMixin, KohlerValveEntity, SelectEntity):
     _attr_icon = "mdi:playlist-play"
     _attr_name = "Favourite"
 
-    def __init__(self, coordinator: KohlerAnthemPlusCoordinator) -> None:
-        super().__init__(coordinator)
+    def __init__(self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve) -> None:
+        super().__init__(coordinator, valve)
         self._attr_unique_id = f"{self._device_id}_favourite"
         # Holds the requested option until the valve reports back, matching the outlet
         # switches. Activation takes 1-2 s on real hardware.
@@ -223,7 +224,7 @@ class FavouriteSelect(OptimisticOptionMixin, KohlerValveEntity, SelectEntity):
         that get reused, so a stale id stays valid while pointing at a different scene.
         """
         if option == OPTION_OFF:
-            await self._async_command(OPTION_OFF, self.coordinator.async_stop_shower())
+            await self._async_command(OPTION_OFF, self._valve.async_stop_shower())
             return
 
         state = self._state
@@ -236,7 +237,7 @@ class FavouriteSelect(OptimisticOptionMixin, KohlerValveEntity, SelectEntity):
                 "deleted in the Konnect app."
             )
         await self._async_command(
-            option, self.coordinator.async_activate_preset(preset.preset_id)
+            option, self._valve.async_activate_preset(preset.preset_id)
         )
 
     async def _async_command(self, option: str, action) -> None:
@@ -293,8 +294,8 @@ class ValveWarmupSelect(OptimisticOptionMixin, KohlerValveEntity, SelectEntity):
     _attr_name = "Warmup"
     _attr_entity_category = EntityCategory.CONFIG
 
-    def __init__(self, coordinator: KohlerAnthemPlusCoordinator) -> None:
-        super().__init__(coordinator)
+    def __init__(self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve) -> None:
+        super().__init__(coordinator, valve)
         self._attr_unique_id = f"{self._device_id}_warmup"
 
     @property
@@ -354,7 +355,7 @@ class ValveWarmupSelect(OptimisticOptionMixin, KohlerValveEntity, SelectEntity):
             )
         self._set_optimistic(option)
         try:
-            await self.coordinator.async_set_warmup(mode)
+            await self._valve.async_set_warmup(mode)
         except Exception:
             self._clear_optimistic()
             raise
@@ -390,8 +391,10 @@ class HubFavouriteSelect(OptimisticOptionMixin, KohlerControllerEntity, SelectEn
     _attr_icon = "mdi:playlist-star"
     _attr_name = "Favourite"
 
-    def __init__(self, coordinator: KohlerAnthemPlusCoordinator) -> None:
-        super().__init__(coordinator)
+    def __init__(
+        self, coordinator: KohlerAnthemPlusCoordinator, controller: Controller
+    ) -> None:
+        super().__init__(coordinator, controller)
         self._attr_unique_id = f"{self._device_id}_favourite"
 
     @staticmethod
@@ -417,7 +420,7 @@ class HubFavouriteSelect(OptimisticOptionMixin, KohlerControllerEntity, SelectEn
         """
         return [
             f
-            for f in self.coordinator.favorites
+            for f in self._controller.favorites
             if self._name_of(f)
             and str(f.get("isExperience", "")).strip().lower() != "true"
         ]
@@ -485,7 +488,7 @@ class HubFavouriteSelect(OptimisticOptionMixin, KohlerControllerEntity, SelectEn
             # its Off should stop water and leave music, steam, and lighting alone. The
             # whole-system stop lives on the System switch.
             await self._async_command(
-                OPTION_OFF, self.coordinator.async_set_hub_shower(False)
+                OPTION_OFF, self.coordinator.async_set_hub_shower(self._controller, False)
             )
             return
         wanted = option.strip().lower()
@@ -500,7 +503,7 @@ class HubFavouriteSelect(OptimisticOptionMixin, KohlerControllerEntity, SelectEn
         await self._async_command(
             option,
             self.coordinator.async_activate_favorite(
-                favorite.get("id"), self._name_of(favorite)
+                self._controller, favorite.get("id"), self._name_of(favorite)
             ),
         )
 
