@@ -151,8 +151,10 @@ so a 6-outlet valve and a 3-outlet valve on one account each get the right rows.
 their entity IDs apart, the devices are named after the unit's name in the Konnect app:
 **Anthem Valve Master Bath**, **Anthem Plus Guest Bath**, and so on. With a single valve
 or controller the device is plainly **Anthem Valve** or **Anthem Plus**, as it always was.
-The `custom_shower` and `send_valve_hex` actions gain a **Valve** field to say which valve
-they are for — required only when there is more than one.
+The `custom_shower` and `send_valve_hex` actions show a **Valve** field to say which valve
+they are for. It appears only when there is more than one — with a single valve there is
+nothing to choose, so the field is not shown, just as Zone 2 is not shown on a single-zone
+valve.
 
 ## Entities
 
