@@ -30,7 +30,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .anthem_plus.models import OutletStateSource, resolve_outlet_source
 from .const import DOMAIN, EXPOSE_CONTROLLER_WATER_STATE
 from .coordinator import Controller, KohlerAnthemPlusCoordinator, Valve
-from .entity import KohlerControllerEntity, KohlerValveEntity
+from .entity import KohlerControllerEntity, KohlerValveEntity, zone_label
 
 
 async def async_setup_entry(
@@ -377,6 +377,11 @@ class ControllerMqttConnectionSensor(
 class ValveZoneActiveSensor(KohlerValveEntity, BinarySensorEntity):
     """Whether this zone is actually delivering water.
 
+    Named `Shower Active` — on a single-zone valve there is one shower, and `Zone 1` was
+    noise. A two-zone valve keeps the prefix (`Zone 2 Shower Active`), because a bare name
+    would be ambiguous across zones. The unique id still carries `zone_{n}`, so the rename
+    does not disturb history.
+
     **"Active" means flowing, which is not the same as "has outlets assigned".** A paused
     valve keeps its assignment in byte 3 — `0x41` is "paused, outlet 1 still assigned" — but
     no water comes out. This reads the same definition the run-time cutoff detector uses:
@@ -397,7 +402,7 @@ class ValveZoneActiveSensor(KohlerValveEntity, BinarySensorEntity):
     ) -> None:
         super().__init__(coordinator, valve)
         self._zone = zone
-        self._attr_name = f"Zone {zone} Active"
+        self._attr_name = zone_label(valve, zone, "Shower Active")
         self._attr_unique_id = f"{self._device_id}_zone_{zone}_active"
 
     @property

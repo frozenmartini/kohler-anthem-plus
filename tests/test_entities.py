@@ -145,3 +145,61 @@ def test_two_valves_do_not_share_ids(valve_model):
     for name in PLATFORMS:
         ids = [e.unique_id for e in collect(name, coordinator)]
         assert len(ids) == len(set(ids)), f"{name}: {ids}"
+
+
+# --------------------------------------------------------------------------- #
+# Naming: Shower Active
+# --------------------------------------------------------------------------- #
+def test_zone_active_is_named_shower_active(valve_model):
+    """0.7.2 renamed `Zone 1 Active`, which said nothing a user recognised.
+
+    Asserts the name AND that the unique id still carries `zone_1` — a rename that moved the
+    id would silently orphan history and every automation referencing it.
+    """
+    coordinator = make_coordinator([make_valve(valve_model, [31, 11, 1])])
+    active = [
+        e
+        for e in collect("binary_sensor", coordinator)
+        if e.unique_id.endswith("_zone_1_active")
+    ]
+    assert len(active) == 1, [
+        e.unique_id for e in collect("binary_sensor", coordinator)
+    ]
+    assert active[0].name == "Shower Active"
+
+
+# --------------------------------------------------------------------------- #
+# Firmware: Kohler reports it in more than one shape
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize(
+    ("configuration", "expected"),
+    [
+        ({"about": {"firmware": "00.74"}}, "00.74"),
+        ({"otaReportedProperties": {"currentFirmwareVersion": "01.02"}}, "01.02"),
+        ({"otaReportedProperties": {"reported": {"swVersion": "02.10"}}}, "02.10"),
+        ({"otaReportedProperties": "03.01"}, "03.01"),
+        ({"firmwareUpdate": {"currentVersion": "04.05"}}, "04.05"),
+        ({"version": "05.06"}, "05.06"),
+        ({"version": 74}, "74"),
+        # The owner's real shape before 0.7.2: no `about`, so this read `unknown`.
+        ({"createdTime": "x", "deviceId": "y", "sku": "z"}, None),
+        # A version the cloud WANTS installed is not the one running. Reporting it would be
+        # worse than reporting nothing.
+        ({"firmwareUpdate": {"targetVersion": "09.99"}}, None),
+        ({"version": "   "}, None),
+        ({"version": True}, None),
+        ({}, None),
+    ],
+)
+def test_firmware_reads_every_known_shape(configuration, expected):
+    """Exercises the REAL `Valve.firmware`, not the stand-in.
+
+    `make_valve` returns a `SimpleNamespace`, which cannot carry a property — it holds a
+    static `firmware` attribute instead. Asserting against that would test the fake and pass
+    no matter what the integration does, which is how the first draft of this test "passed"
+    one case by coincidence. So the real property is bound to a minimal object here.
+    """
+    from custom_components.kohler_anthem_plus.coordinator import Valve
+
+    holder = SimpleNamespace(configuration=configuration)
+    assert Valve.firmware.fget(holder) == expected

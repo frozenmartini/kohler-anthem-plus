@@ -139,9 +139,21 @@ def _configuration_report(valve: Valve) -> dict[str, Any]:
         "systemConfiguration",
         "systemSettings",
     )
+    # Version-shaped blocks, reported in full. These carry no plumbing structure and no
+    # identity — they are version strings and update state — and withholding them is what
+    # made 0.7.1's `unknown` firmware unanswerable from a report: the summariser named
+    # `firmwareUpdate`, `otaReportedProperties` and `version` without ever saying what was
+    # in them, so the one question the report existed to answer needed a second round trip.
+    version_blocks = {
+        key: configuration.get(key)
+        for key in ("firmwareUpdate", "otaReportedProperties", "version")
+        if key in configuration
+    }
+
     return {
         "read": True,
         "firmware": valve.firmware,
+        "version_blocks": version_blocks,
         # True where the key is present AND not null — the distinction the question turns on.
         "populated": {key: configuration.get(key) is not None for key in structural},
         # Every other key the record carried, named but not dumped, so a field nobody has

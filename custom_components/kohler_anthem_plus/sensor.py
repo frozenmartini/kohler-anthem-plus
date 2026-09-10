@@ -356,8 +356,15 @@ class ValveFirmwareSensor(ValveDiagnosticSensor):
     default, like everything else here: it matters when comparing behaviour across
     firmwares in a bug report, not day to day.
 
-    Reads `unknown` where the record has no `about.firmware`, which includes any account
-    where that read failed. `00.74` on the reference install.
+    Kohler does not report this in one place: the reference install has an `about.firmware`,
+    while the owner's K-28210 valves have no `about` block at all. `Valve.firmware` tries each
+    known shape in turn — see its docstring for the order and for why a *desired* version is
+    never reported as the running one.
+
+    Still reads `unknown` where none of those shapes is present, or where the read failed.
+    That is deliberate: a blank is better than a confidently wrong version in a bug report.
+    A report from such an install now carries the raw `version_blocks`, which is what a fix
+    needs.
     """
 
     _attr_name = "Firmware"

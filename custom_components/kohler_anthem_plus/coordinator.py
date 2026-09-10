@@ -143,6 +143,62 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 
+#: Keys that hold the version a device is *running*, in the two nested blocks Kohler uses.
+#: Ordered — the first match wins. Deliberately excludes anything desired/target shaped:
+#: ``firmwareUpdate`` can carry the version the cloud wants installed, and reporting that as
+#: the running version would be worse than reporting nothing.
+_FIRMWARE_CURRENT_KEYS = (
+    "currentFirmwareVersion",
+    "currentVersion",
+    "firmwareVersion",
+    "swVersion",
+    "firmware",
+    "version",
+)
+
+
+def _firmware_string(value: Any) -> str | None:
+    """A firmware version as a non-empty string, or None.
+
+    Numbers are accepted and stringified — a valve reporting `74` rather than `"00.74"` is
+    still answering the question. Bools are rejected: `True` is not a version, and in Python
+    it would otherwise pass an `isinstance(..., int)` test.
+    """
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, str):
+        text = value.strip()
+        return text or None
+    if isinstance(value, (int, float)):
+        return str(value)
+    return None
+
+
+def _firmware_from_block(block: Any) -> str | None:
+    """Pull a running-firmware version out of one of Kohler's nested blocks.
+
+    Handles the two shapes seen in the wild: a flat mapping of version keys, and an Azure IoT
+    device twin whose real content sits under ``reported``. A string block is taken as the
+    version itself, which is what a bare ``otaReportedProperties: "00.74"`` would be.
+    """
+    if isinstance(block, str):
+        return _firmware_string(block)
+    if not isinstance(block, dict):
+        return None
+    # Azure IoT device twins nest the live values one level down.
+    for nested in ("reported", "properties"):
+        inner = block.get(nested)
+        if isinstance(inner, dict):
+            found = _firmware_from_block(inner)
+            if found is not None:
+                return found
+    for key in _FIRMWARE_CURRENT_KEYS:
+        found = _firmware_string(block.get(key))
+        if found is not None:
+            return found
+    return None
+
+
 def entry_reload_signature(entry: ConfigEntry) -> tuple[Any, ...]:
     """Fingerprint the parts of a config entry that are worth a reload.
 
@@ -526,16 +582,40 @@ class Valve:
 
     @property
     def firmware(self) -> str | None:
-        """The valve's own firmware version, from ``gcs-configuration``'s ``about`` block.
+        """The valve's own firmware version, from ``gcs-configuration``.
 
-        None until the first seed has run, and None on any account where the read failed or
-        the block is absent. `00.74` on the reference install.
+        **Kohler does not put this in one place.** The reference install reports an ``about``
+        block with a ``firmware`` key; the owner's two K-28210 valves have no ``about`` key at
+        all (confirmed against diagnostics captured 2026-09-10 — ``about_keys: []``), which is
+        why this read ``unknown`` there until 0.7.2. So each known shape is tried in turn and
+        the first that yields a string wins:
+
+        1. ``about.firmware`` — the reference install's shape.
+        2. ``otaReportedProperties`` — the Azure IoT device twin's reported properties, where
+           an OTA-managed device publishes what it is actually running. Checked before
+           ``firmwareUpdate`` because reported-state beats desired-state.
+        3. ``firmwareUpdate`` — the update record. Its *current* version is the valve's, but
+           a ``target``/``desired`` field here is what the cloud wants it to become, so only
+           current-shaped keys are read.
+        4. ``version`` — a bare top-level string, when it is one.
+
+        None where no shape matches, which is honest: a wrong version in a bug report is
+        worse than a blank one. `00.74` on the reference install.
         """
-        about = (self.configuration or {}).get("about")
-        if not isinstance(about, dict):
-            return None
-        firmware = about.get("firmware")
-        return None if firmware in (None, "") else str(firmware)
+        configuration = self.configuration or {}
+
+        about = configuration.get("about")
+        if isinstance(about, dict):
+            value = _firmware_string(about.get("firmware"))
+            if value is not None:
+                return value
+
+        for key in ("otaReportedProperties", "firmwareUpdate"):
+            value = _firmware_from_block(configuration.get(key))
+            if value is not None:
+                return value
+
+        return _firmware_string(configuration.get("version"))
 
     # ------------------------------------------------------------------ #
     # What the moved methods reach for on the coordinator
