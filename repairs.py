@@ -164,10 +164,11 @@ def _remove_ours(aside: str) -> bool:
 def delete_old_capture_folder(path: str) -> str:
     """Remove the folder if it holds only our files. GONE, NOT_OURS, FAILED or STRANDED.
 
-    Renamed aside first — one atomic step — then inspected again and emptied by name. Anything foreign puts it back (NOT_OURS). A
-    failure before anything was removed leaves it where it was (FAILED); a failure after
-    the rename that cannot be undone leaves it under the aside name (STRANDED), and the
-    abort text names that. Blocking: executor only.
+    Renamed aside first — one atomic step — then inspected again and emptied by name.
+    Anything foreign puts it back (NOT_OURS). A failure that could be undone puts it back
+    where it was, possibly with fewer of our files than before (FAILED); one that cannot
+    be undone leaves it under the aside name (STRANDED), and the abort text names that.
+    Blocking: executor only.
     """
     with _DELETE_LOCK:
         return _delete_old_capture_folder_locked(path)
@@ -179,8 +180,9 @@ def _delete_old_capture_folder_locked(path: str) -> str:
         # Left by an interrupted run. Ours → clear it first; anything else → hands off.
         # Before the symlink check so a stale aside is cleared even if the original path
         # has since become a link.
+        # An *empty* folder there proves nothing about who made it: hands off as well.
         stale = _inspect_dir(aside)
-        if stale is not None and (stale[2] or not _remove_ours(aside)):
+        if stale is not None and (stale[2] or stale[0] == 0 or not _remove_ours(aside)):
             return STRANDED
     if os.path.islink(path):
         return NOT_OURS
