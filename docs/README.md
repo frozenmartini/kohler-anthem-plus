@@ -33,7 +33,7 @@ What that means in practice:
 
 | you see | what it is |
 |---|---|
-| `mqtt_raw_*.jsonl`, `cutoff_*.jsonl`, `warmup_*.jsonl` | MQTT captures and journals from the author's own system. Not published. **Your install writes its own** to `/config/kohler_anthem_plus_raw/`, in the same formats. |
+| `mqtt_raw_*.jsonl`, `cutoff_*.jsonl`, `warmup_*.jsonl` | MQTT captures and journals from the author's own system, written by tooling that lives outside this repository. Not published. Your install does **not** write these (before 0.4.1 it did, unasked); the **Report Log** switch writes the same records — raw messages and both journals — into one file when you turn it on. |
 | `kohler-work/…`, `kohler_konnect_custom/…`, `/homeassistant/scripts/…` | Analysis scripts and an experiment workspace kept outside this repo. Not published. |
 | `tests/…`, `run_offline.sh` | The regression suite, also outside this repo. |
 | `captures/…` | Archived evidence from specific incidents, kept with the workspace above. |
@@ -78,8 +78,8 @@ three outlets each, so **6 outlets maximum**. That is the K-28209 / K-28210 / K-
 K-28212 range, and it is what the Home Assistant integration supports.
 
 Several such units on one **account** — one per bathroom, say — are a different matter: since
-0.4.0 the integration gives each its own device, decoded with its own layout (beta; see
-[`releases/v0.4.0.md`](releases/v0.4.0.md)). The limit below is about two bodies under one
+0.4.1 the integration gives each its own device, decoded with its own layout (beta; see
+[`releases/v0.4.1.md`](releases/v0.4.1.md)). The limit below is about two bodies under one
 **controller**, not two units on one account.
 
 An Anthem Plus controller can drive **two** such units (12 outlets). That configuration is

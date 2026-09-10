@@ -24,15 +24,19 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
 
-from .coordinator import KohlerAnthemPlusCoordinator, entry_reload_signature
-from .const import DOMAIN, ISSUE_NOT_SET_UP
+from .coordinator import (
+    DEV_CAPTURE_INSTALLED,
+    KohlerAnthemPlusCoordinator,
+    entry_reload_signature,
+)
+from .const import DOMAIN, ISSUE_NOT_SET_UP, ISSUE_OLD_CAPTURE_FOLDER, OLD_CAPTURE_DIR
+from .repairs import inspect_old_capture_folder
 from .services import async_register_services, async_unregister_services
 
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS: list[Platform] = [
     Platform.BINARY_SENSOR,
-    Platform.BUTTON,
     Platform.NUMBER,
     Platform.SELECT,
     Platform.SENSOR,
@@ -41,6 +45,7 @@ PLATFORMS: list[Platform] = [
 
 # ---------------------------------------------------------------------------
 # Removed 2026-08-15 — valve reboot counter, controller ping, outage counter
+# Removed 2026-09-10 — the "Start new MQTT capture" button (0.4.1)
 # ---------------------------------------------------------------------------
 # Config-entry keys the old diagnostics persisted. They are dead weight now, and leaving
 # them would make `_async_update_listener` see a spurious difference on the first load.
@@ -60,6 +65,10 @@ _REMOVED_UNIQUE_ID_SUFFIXES = (
     "_reboot_count",
     "_local_outages",
     "_local_reachable",
+    # The button rolled the author's always-on development capture, which no longer ships;
+    # with nothing to roll, the button went too. One per config entry, on the first valve
+    # (or the first controller of a controller-only account).
+    "_new_mqtt_capture",
 )
 
 
@@ -99,9 +108,44 @@ def _async_purge_removed_diagnostics(hass: HomeAssistant, entry: ConfigEntry) ->
             _LOGGER.info("Removed retired diagnostic entity %s", row.entity_id)
 
 
+async def _async_offer_old_capture_cleanup(hass: HomeAssistant) -> None:
+    """Raise, or clear, the Repairs card for a `kohler_anthem_plus_raw` folder left behind.
+
+    Every install before 0.4.1 wrote the author's development capture there, unasked and
+    unbounded. Nothing ships that writes it now, so a folder that exists is a leftover — a
+    few megabytes, inert. Deleting it silently from someone's config directory is not this
+    integration's call, so a repair offers it instead: Submit deletes, Ignore keeps.
+
+    Skipped entirely on the author's install, where `_dev/` still writes the folder.
+    """
+    if DEV_CAPTURE_INSTALLED:
+        return
+    path = hass.config.path(OLD_CAPTURE_DIR)
+    found = await hass.async_add_executor_job(inspect_old_capture_folder, path)
+    if found is None:
+        # Gone (or never there): also clears a card left from a folder deleted by hand.
+        ir.async_delete_issue(hass, DOMAIN, ISSUE_OLD_CAPTURE_FOLDER)
+        return
+    count, size, _foreign = found
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        ISSUE_OLD_CAPTURE_FOLDER,
+        is_fixable=True,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key=ISSUE_OLD_CAPTURE_FOLDER,
+        translation_placeholders={
+            "path": f"/config/{OLD_CAPTURE_DIR}",
+            "count": str(count),
+            "size_mb": f"{size / (1024 * 1024):.1f}",
+        },
+    )
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Kohler Anthem Plus from a config entry."""
     _async_purge_removed_diagnostics(hass, entry)
+    await _async_offer_old_capture_cleanup(hass)
     coordinator = KohlerAnthemPlusCoordinator(hass, entry)
     await coordinator.async_setup()
     await coordinator.async_config_entry_first_refresh()

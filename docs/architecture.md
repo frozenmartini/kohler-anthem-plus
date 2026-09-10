@@ -429,7 +429,7 @@ An integration cannot assume both devices are present:
 | GCS only | First-gen screen. Full valve control; no music, light, or steam. |
 | HUB only | Anthem Plus screen alone. Favourites and experiences; **no direct outlet/temperature/flow control**. |
 | Both | Both screens on one valve. Full control plus the HUB's accessories. |
-| Several of either | One unit per bathroom on one account. Supported since 0.4.0 (beta): one device per unit, the single account-level MQTT stream routed by `deviceid`. Which controller fronts which valve is not something the cloud says, so the two are paired only when there is exactly one of each. Distinct from two bodies under one controller, which is still not read. |
+| Several of either | One unit per bathroom on one account. Supported since 0.4.1 (beta): one device per unit, the single account-level MQTT stream routed by `deviceid`. Which controller fronts which valve is not something the cloud says, so the two are paired only when there is exactly one of each. Distinct from two bodies under one controller, which is still not read. |
 
 Konnect also carries unrelated Kohler product lines (DTV, Numi, Blade, faucets). They share
 the account and must be ignored rather than mistaken for Anthem hardware.

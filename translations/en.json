@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Kohler Anthem Plus",
-        "description": "Sign in with your Kohler Konnect account. Sign-in happens entirely within Home Assistant — there is no browser step and nothing to copy back.",
+        "description": "Sign in with your Kohler Konnect account. Sign-in happens entirely within Home Assistant \u2014 there is no browser step and nothing to copy back.",
         "data": {
           "username": "Email",
           "password": "Password"
@@ -28,7 +28,7 @@
       "invalid_auth": "Kohler rejected that email or password.",
       "cannot_connect": "Could not reach Kohler. Check your internet connection and try again.",
       "signin_blocked": "Kohler needs an extra step to sign in (for example two-factor authentication), which this integration cannot complete.",
-      "no_devices": "That account has no Anthem or Anthem Plus devices. Note that an Anthem Plus touchscreen (K-28214-ASC) only adds the controller — adding the valve itself requires a first-generation Anthem touchscreen (K-28214)."
+      "no_devices": "That account has no Anthem or Anthem Plus devices. Note that an Anthem Plus touchscreen (K-28214-ASC) only adds the controller \u2014 adding the valve itself requires a first-generation Anthem touchscreen (K-28214)."
     },
     "abort": {
       "already_configured": "This Kohler account is already set up.",
@@ -38,7 +38,21 @@
   "issues": {
     "endless_shower_not_set_up": {
       "title": "Endless Shower is waiting on your valve",
-      "description": "Endless Shower is turned on, but Home Assistant has not been able to read the shower time limit from your valve yet, so it cannot restart your shower.\n\n**No action is needed.** The limit is normally read during setup, and Endless Shower arms itself the moment it arrives. This message clears on its own.\n\nIf it is still here after a few minutes, the valve is unreachable — check that it is online in the Kohler Konnect app, then reload the integration."
+      "description": "Endless Shower is turned on, but Home Assistant has not been able to read the shower time limit from your valve yet, so it cannot restart your shower.\n\n**No action is needed.** The limit is normally read during setup, and Endless Shower arms itself the moment it arrives. This message clears on its own.\n\nIf it is still here after a few minutes, the valve is unreachable \u2014 check that it is online in the Kohler Konnect app, then reload the integration."
+    },
+    "old_capture_folder": {
+      "title": "Old debug captures can be deleted",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Delete the old capture folder?",
+            "description": "Versions before 0.4.1 wrote debug captures to `{path}` on every install \u2014 the author's own development tooling, switched on by mistake for everyone. Here it holds {count} files, {size_mb} MB. Nothing reads or writes them any more.\n\n**Submit** deletes the folder. Choose **Ignore** on the issue to keep it instead \u2014 the files are inert either way.\n\nThis is separate from the Report Log switch, whose files live inside the integration folder and are not touched."
+          }
+        },
+        "abort": {
+          "not_ours": "`{path}` also holds files this integration did not write, so nothing was deleted. Remove the folder by hand if you no longer need it."
+        }
+      }
     }
   }
 }

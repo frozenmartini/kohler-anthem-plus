@@ -39,6 +39,20 @@
     "endless_shower_not_set_up": {
       "title": "Endless Shower is waiting on your valve",
       "description": "Endless Shower is turned on, but Home Assistant has not been able to read the shower time limit from your valve yet, so it cannot restart your shower.\n\n**No action is needed.** The limit is normally read during setup, and Endless Shower arms itself the moment it arrives. This message clears on its own.\n\nIf it is still here after a few minutes, the valve is unreachable — check that it is online in the Kohler Konnect app, then reload the integration."
+    },
+    "old_capture_folder": {
+      "title": "Old debug captures can be deleted",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Delete the old capture folder?",
+            "description": "Versions before 0.4.1 wrote debug captures to `{path}` on every install — the author's own development tooling, switched on by mistake for everyone. Here it holds {count} files, {size_mb} MB. Nothing reads or writes them any more.\n\n**Submit** deletes the folder. Choose **Ignore** on the issue to keep it instead — the files are inert either way.\n\nThis is separate from the Report Log switch, whose files live inside the integration folder and are not touched."
+          }
+        },
+        "abort": {
+          "not_ours": "`{path}` also holds files this integration did not write, so nothing was deleted. Remove the folder by hand if you no longer need it."
+        }
+      }
     }
   }
 }

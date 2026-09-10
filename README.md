@@ -62,7 +62,7 @@ shuts off, it goes back on automatically — same outlets, same temperature.
 immediately. No scene to apply, no confirm step.
 <br><br>
 <b>Every valve on the account</b> — one device per Anthem valve and per controller, each with
-its own entities and settings. New in 0.4.0, beta.
+its own entities and settings. New in 0.4.1, beta.
 </td>
 <td width="2%" align="center"><img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/vline-grey-340.svg" width="1" height="340" alt=""></td>
 <td valign="top" width="49%">
@@ -276,9 +276,10 @@ diagnosable:</p>
 <li><b>Download diagnostics</b> — on the integration card and both device pages. One JSON report
 of the whole installation, with credentials and account identity redacted. On
 anything other than a K-28212, this is the single most useful file you can send.</li>
-<li><b>Report Log</b> — a switch on both device pages that captures every raw MQTT message, one
-file per switch-on, continuing across a Home Assistant restart so "it breaks when I restart" stays
-one piece of evidence.</li>
+<li><b>Report Log</b> — a switch on both device pages that captures every raw MQTT message
+<i>and</i> the integration's own decision records (the run-time cutoff and warm-up trails) in one
+file per switch-on, continuing across a Home Assistant restart so "it breaks when I restart"
+stays one piece of evidence.</li>
 </ul>
 
 <p><b>Check both before sharing</b> — they carry device identifiers and show when the shower was

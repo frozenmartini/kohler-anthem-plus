@@ -606,16 +606,18 @@ class HubSystemSwitch(KohlerControllerEntity, SwitchEntity):
 
 
 class _ReportLogSwitch(SwitchEntity):
-    """Shared half of the Report Log switch — the consumer-side raw MQTT capture.
+    """Shared half of the Report Log switch — the one capture a user turns on for a bug.
 
     **What it is for.** A user who hits a bug — or wants to document a healthy run on
     hardware this integration has never been verified against — flips this on, uses the
-    shower, flips it off, and attaches the resulting file to a GitHub issue. It is the
-    quick evidence switch, distinct from the development capture in
-    `/config/kohler_anthem_plus_raw/` (pinned by `const.py`, per-run files): this one is
-    **one file per switch-on**, and a Home Assistant restart mid-capture appends to the
-    **same** file rather than starting a new one, because "it breaks when I restart" is a
-    bug report too. Semantics live in `anthem_plus/report_log.py`.
+    shower, flips it off, and attaches the resulting file to a GitHub issue. The file holds
+    every raw MQTT message **and** the integration's own reasoning — the run-time cutoff
+    detector's and the warm-up watcher's decision records — interleaved on one clock, so
+    one attachment says what arrived and what was made of it (the trails joined the file in
+    0.4.1; before that they went only to the author's development capture). **One file per
+    switch-on**, and a Home Assistant restart mid-capture appends to the **same** file
+    rather than starting a new one, because "it breaks when I restart" is a bug report too.
+    Semantics live in `anthem_plus/report_log.py`.
 
     **One capture, two switches.** The same switch appears on the valve and the controller
     device pages (whichever exist), mirroring the diagnostics buttons — both toggle the one
