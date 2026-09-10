@@ -27,6 +27,7 @@ returns ``AADB2C90053`` for bad credentials, and step 3 returns the expected 302
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import binascii
 import hashlib
@@ -158,6 +159,10 @@ class KohlerAuth:
         self._session = session
         self._tokens: TokenSet | None = None
         self._refresh_token = refresh_token
+        # Serialises refreshes. B2C invalidates a refresh token the moment it is redeemed,
+        # so two concurrent refreshes race to redeem the same one and the loser's failure
+        # is indistinguishable from a dead credential. See `async_get_access_token`.
+        self._refresh_lock = asyncio.Lock()
 
     @property
     def has_credentials(self) -> bool:
@@ -404,8 +409,31 @@ class KohlerAuth:
         return self._tokens
 
     async def async_get_access_token(self) -> str:
-        """Return a valid access token, refreshing it if needed."""
-        if self._tokens is None or self._tokens.expired:
-            await self.async_refresh()
-        assert self._tokens is not None
-        return self._tokens.access_token
+        """Return a valid access token, refreshing it if needed.
+
+        **Serialised, because B2C rotates the refresh token on every use.** Each refresh
+        issues a new one and invalidates the old, so two callers that both find the token
+        expired and both POST the *same* refresh token produce one success and one
+        rejection — and the rejection is a plain `AuthError`, which `credential_is_dead`
+        reads as "these credentials are finished" and turns into a re-authentication prompt
+        the owner did not need. The token that ends up stored is whichever call finished
+        last, which may be the loser's.
+
+        This is reachable: the coordinator starts several independent API-calling tasks,
+        and the window is widest at startup and immediately after each expiry — exactly
+        when they fire together.
+
+        Double-checked: the second caller re-tests `expired` after taking the lock and, in
+        the ordinary case, finds the winner's fresh token and makes no request at all.
+        """
+        if self._tokens is not None and not self._tokens.expired:
+            return self._tokens.access_token
+        async with self._refresh_lock:
+            if self._tokens is None or self._tokens.expired:
+                await self.async_refresh()
+            if self._tokens is None:
+                # `async_refresh` returns tokens or raises; this cannot happen. Raised
+                # rather than asserted so `python -O` cannot turn it into an
+                # `AttributeError` on the next line.
+                raise AuthError("Sign-in succeeded but produced no access token.")
+            return self._tokens.access_token

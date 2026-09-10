@@ -276,26 +276,6 @@ PRESET_OUTLET_BITS = (0x04, 0x08, 0x10)
 PRESET_WORD = re.compile(r"^[0-9A-Fa-f]{6}$")
 
 
-def decode_preset_word(value: str) -> ValveWord:
-    """Decode a 3-byte preset hexString into the same shape as a command word."""
-    word = str(value or "").strip().upper()
-    if not PRESET_WORD.fullmatch(word):
-        raise ValveHexError(f"Not a 6-character preset valve word: {value!r}")
-    byte0 = int(word[0:2], 16)
-    tenths = ((byte0 & TEMPERATURE_HIGH_BITS) << 8) | int(word[2:4], 16)
-    mask = 0
-    for index, bit in enumerate(PRESET_OUTLET_BITS):
-        if byte0 & bit:
-            mask |= 1 << index
-    return ValveWord(
-        prefix=byte0,
-        temperature_celsius=round(tenths / TEMPERATURE_TENTHS_PER_DEGREE, 1),
-        flow_percent=round(int(word[4:6], 16) / FLOW_PER_PERCENT, 1),
-        outlet_mask=mask,
-        paused=False,
-    )
-
-
 def encode_preset_word(
     temperature_celsius: float, flow_percent: float, outlet_mask: int
 ) -> str:
@@ -623,109 +603,6 @@ def pause_pair(
     )
 
 
-def preset_valve_to_command(valve_detail: dict, prefix: int) -> str:
-    """Build a command word from one entry of a preset's ``valveDetails``.
-
-    A preset stores its outlets in the ``outlets`` array, **not** in ``hexString``. The
-    three bytes of ``hexString`` are ``[prefix][temperature][flow]`` — the leading byte is
-    the same unexplained prefix seen in ``GCS_SOLO_STS`` (values 01, 05, 11), not an outlet
-    mask. Verified against two live presets where all four valve entries disagreed with a
-    mask reading::
-
-        Default shower  Valve1 hex 018448  byte0=01  outlets [0,0,0]  (mask would be 00)
-        Default shower  Valve2 hex 05849c  byte0=05  outlets [1,0,0]  (mask would be 01)
-        Test favourite  Valve1 hex 1190c8  byte0=11  outlets [0,0,1]  (mask would be 04)
-        Test favourite  Valve2 hex 0589c8  byte0=05  outlets [1,0,0]  (mask would be 01)
-
-    Temperature and flow are taken from the outlets array too, where they are plain values
-    rather than packed bytes: ``temperature`` in Celsius and ``flow`` on the valve's native
-    0-50 scale. Returns ``None`` when the preset opens nothing on this valve.
-    """
-    outlets = valve_detail.get("outlets") or []
-    mask = 0
-    temperature_c: float | None = None
-    flow_native: float | None = None
-    for index, outlet in enumerate(outlets[:OUTLETS_PER_VALVE]):
-        if not isinstance(outlet, dict):
-            continue
-        if str(outlet.get("value", "0")).strip() in {"1", "true", "True"}:
-            mask |= 1 << index
-        if temperature_c is None:
-            try:
-                temperature_c = float(outlet.get("temperature"))
-            except (TypeError, ValueError):
-                pass
-        if flow_native is None:
-            try:
-                flow_native = float(outlet.get("flow"))
-            except (TypeError, ValueError):
-                pass
-
-    # A mask of 0x00 is still a valid, addressed word meaning "this valve stays closed".
-    # It must NOT be replaced with the all-zero sentinel: prefix 0x00 addresses no valve,
-    # and on a two-valve system that appears to make the device discard the whole command
-    # rather than just that valve. Observed live — a preset command sent as
-    # v1=00000000 v2=11849C01 opened nothing at all, while v1=0185C800 v2=1185C801 (an
-    # addressed, closed valve 1) opened valve 2 immediately.
-
-    # Fall back to the packed bytes if the outlets array omitted the values.
-    stored = str(valve_detail.get("hexString") or "").strip().upper()
-    if PRESET_WORD.fullmatch(stored):
-        if temperature_c is None:
-            temperature_c = (
-                TEMPERATURE_BASE_C + int(stored[2:4], 16) * TEMPERATURE_STEP_C
-            )
-        if flow_native is None:
-            flow_native = int(stored[4:6], 16) / FLOW_PER_SETPOINT
-
-    percent = (
-        (flow_native * FLOW_PER_SETPOINT) / FLOW_PER_PERCENT
-        if flow_native is not None
-        else 100.0
-    )
-    return encode_word(prefix, temperature_c or 38.0, percent, mask)
-
-
-def preset_opens_anything(valve_details: list[dict]) -> bool:
-    """True if the preset opens at least one outlet on any valve.
-
-    Kohler "experiences" carry no outlet data and cannot be started this way, so this is
-    how they are told apart from real presets.
-    """
-    for detail in valve_details or []:
-        if not isinstance(detail, dict):
-            continue
-        for outlet in detail.get("outlets") or []:
-            if isinstance(outlet, dict) and str(outlet.get("value", "0")).strip() in {
-                "1",
-                "true",
-                "True",
-            }:
-                return True
-    return False
-
-
-def preset_to_pair(model: ValveModel, valve_details: list[dict]) -> tuple[str, str]:
-    """Build both command words for a preset.
-
-    **Every valve the model has gets a real, addressed word**, even one whose outlets are
-    all closed — that word simply carries mask ``0x00``. Substituting the all-zero sentinel
-    for an unused valve makes the device ignore the entire command on a two-valve system.
-
-    A model with no second valve still needs the field present, and there the all-zero word
-    is correct: there is genuinely no valve to address.
-    """
-    by_index = {
-        str(detail.get("valveIndex") or ""): detail
-        for detail in valve_details or []
-        if isinstance(detail, dict)
-    }
-    valve1 = preset_valve_to_command(by_index.get("Valve1", {}), VALVE1_PREFIX)
-    if not model.uses_valve2:
-        return valve1, UNUSED_VALVE_WORD
-    return valve1, preset_valve_to_command(by_index.get("Valve2", {}), VALVE2_PREFIX)
-
-
 # A `preset_word_to_command` used to live here: it built a command word by reading a
 # preset hexString's byte 0 as an outlet mask. **That reading is wrong** — byte 0 carries
 # the temperature high bit and the PRESET_OUTLET_BITS positions, and live data disproved
@@ -762,38 +639,3 @@ def unit_to_celsius(value: float, temperature_unit: str) -> float:
     if abs(value - whole) < 0.01 and whole in FAHRENHEIT_TO_TENTHS_C:
         return FAHRENHEIT_TO_TENTHS_C[whole] / TEMPERATURE_TENTHS_PER_DEGREE
     return (value - 32) * 5 / 9
-
-
-def decode_valve_state(
-    model: ValveModel,
-    valve1_code: str,
-    valve2_code: str,
-    temperature_unit: str,
-) -> dict[str, object]:
-    """Decode both valve words into flat published state fields.
-
-    Only outlets the model actually has are reported, and each is resolved through
-    ``model.outlet_location`` rather than assuming a 3+3 split — on a 4-outlet K-28211,
-    outlet 3 lives on valve2.
-    """
-    words: dict[int, ValveWord] = {1: decode_word(valve1_code)}
-    if model.uses_valve2:
-        words[2] = decode_word(valve2_code)
-
-    decoded: dict[str, object] = {}
-    for number, word in words.items():
-        decoded[f"valve{number}_temperature"] = celsius_to_unit(
-            word.temperature_celsius, temperature_unit
-        )
-        decoded[f"valve{number}_flow"] = word.flow_percent
-        decoded[f"valve{number}_flow_setpoint"] = word.flow_setpoint
-        decoded[f"valve{number}_outlet_mask"] = word.outlet_mask
-        decoded[f"valve{number}_paused"] = word.paused
-
-    for outlet in range(1, model.total_outlets + 1):
-        valve_number, bit = model.outlet_location(outlet)
-        word = words.get(valve_number)
-        decoded[f"outlet{outlet}"] = (
-            "ON" if word is not None and word.outlet(bit) else "OFF"
-        )
-    return decoded

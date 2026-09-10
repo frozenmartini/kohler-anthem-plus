@@ -28,6 +28,7 @@ owner's own words and stay out too; counts carry the signal.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from homeassistant.components.diagnostics import async_redact_data
@@ -40,6 +41,7 @@ from .const import (
     CONF_MOBILE_DEVICE_ID,
     CONF_REFRESH_TOKEN,
     CONF_TENANT_ID,
+    CONF_VALVES,
     DOMAIN,
     OUTLET_TYPE_NAMES,
     PRESET_HIDDEN_IDS,
@@ -55,6 +57,37 @@ TO_REDACT = {
     CONF_TENANT_ID,
     CONF_MOBILE_DEVICE_ID,
 }
+
+
+def _redact_entry(
+    coordinator: KohlerAnthemPlusCoordinator, section: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Redact an entry section, **including the device ids used as dictionary keys.**
+
+    `async_redact_data` replaces the *values* at listed keys and recurses into nested
+    dicts. It never touches dictionary **keys** — and `CONF_VALVES` is keyed by device id,
+    so a plain redaction published every valve's id verbatim while this module's own
+    docstring promised they were held back. Kohler device ids double as cloud addresses,
+    and these reports are written to be attached to public issues.
+
+    The ids are replaced with the same `valve_0`, `valve_1` labels `requested_for` uses, in
+    the cloud's order, so a report stays readable and the per-valve settings can still be
+    matched against the `valves` list further down. An id belonging to no known valve — a
+    device removed from the account since it was written — is replaced with a placeholder
+    rather than passed through, because "unknown to us" is not "safe to publish".
+    """
+    labels = {
+        valve.device_id: f"valve_{index}"
+        for index, valve in enumerate(coordinator.valves)
+    }
+    redacted = async_redact_data(dict(section), TO_REDACT)
+    valves = redacted.get(CONF_VALVES)
+    if isinstance(valves, Mapping):
+        redacted[CONF_VALVES] = {
+            labels.get(str(device_id), "valve_unknown"): settings
+            for device_id, settings in valves.items()
+        }
+    return redacted
 
 
 def _word(word: Any) -> dict[str, Any] | None:
@@ -307,8 +340,8 @@ def _build(
             "controller_count": len(coordinator.controllers),
         },
         "entry": {
-            "data": async_redact_data(dict(coordinator.entry.data), TO_REDACT),
-            "options": async_redact_data(dict(coordinator.entry.options), TO_REDACT),
+            "data": _redact_entry(coordinator, coordinator.entry.data),
+            "options": _redact_entry(coordinator, coordinator.entry.options),
         },
         "stream": {
             "mqtt_connected": bool(coordinator.stream and coordinator.stream.connected),

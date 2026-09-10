@@ -332,9 +332,14 @@ class CloudConnectionWatch:
             )
             return
 
-        self._last_check_at = now
         if self._task is not None and not self._task.done():
+            # A check is already in flight. Return **without stamping the cooldown**: this
+            # call did nothing, and burning the next half hour on a check that never ran
+            # would let a genuine contradiction be swallowed by an unrelated one already
+            # in progress. Trigger A fires on bursty controller traffic, so two arriving
+            # together is ordinary rather than exceptional.
             return
+        self._last_check_at = now
         self._task = self._hass.async_create_task(self._async_check(trigger))
 
     async def _async_check(self, trigger: str) -> None:

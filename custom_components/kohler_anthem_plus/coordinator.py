@@ -461,6 +461,12 @@ class Valve:
         # a serial that every command sent from here bumps, so the watcher can tell that
         # something else was sent after its own write. See `anthem_plus/warmup_resume.py`.
         self._custom_shower_task: asyncio.Task | None = None
+        # **Every task this valve starts is held here so `stop()` can cancel it.** Two of
+        # these sleep for a minute or more and then write to the hardware — a warm-up
+        # restore (60 s) and a cutoff restart — so one surviving an unload means an
+        # HTTP write, and a config-entry mutation, from a coordinator Home Assistant has
+        # already discarded. A reload inside that window is enough to trigger it.
+        self._background_tasks: set[asyncio.Task] = set()
         self._local_write_serial = 0
         # The raw `gcs-preset` payload from the most recent seed, held only long enough for
         # `_async_sync_default_preset_timer` to consume it. Cleared on use — it feeds a
@@ -665,9 +671,30 @@ class Valve:
         """Drop the cutoff detector's clocks across a stream gap. See `_handle_connected`."""
         self._cutoff.forget()
 
+    def _track(self, coro) -> asyncio.Task:
+        """Start a background task and keep a reference until it finishes.
+
+        Two things at once. Home Assistant's own guidance is to hold a reference to any
+        task you create, because the event loop keeps only a weak one and a task nobody
+        references can be garbage-collected mid-await. And holding them is what makes
+        `stop()` able to cancel them — see `_background_tasks`.
+        """
+        task = self.hass.async_create_task(coro)
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
+        return task
+
     def stop(self) -> None:
         """Cancel everything that could fire into a torn-down coordinator."""
         self._cancel_custom_shower("the integration is shutting down")
+        # The warm-up restore sleeps 60 s and the journal write 45 s before touching
+        # anything, so both can outlive an unload by a wide margin. Cancelled here rather
+        # than left to finish: the restore ends in a write to the valve and a config-entry
+        # update, neither of which is safe against an entry that is going away.
+        for task in list(self._background_tasks):
+            task.cancel()
+        self._background_tasks.clear()
+        self._warmup_restore_task = None
         # Before the stream, so a timer cannot fire into a half-torn-down coordinator.
         self.cloud_watch.async_stop()
 
@@ -1219,7 +1246,7 @@ class Valve:
         # then failed. The cut time is captured here rather than in the restart, which runs a
         # few seconds later as a task.
         cut_at = dt_util.now()
-        self.hass.async_create_task(self._async_restart_after_cutoff(fired, cut_at))
+        self._track(self._async_restart_after_cutoff(fired, cut_at))
 
     @callback
     def _journal(self, event: str, **fields: Any) -> None:
@@ -2031,9 +2058,7 @@ class Valve:
                 "restore_skipped", reason="a restore is already pending"
             )
             return
-        self._warmup_restore_task = self.hass.async_create_task(
-            self._async_restore_warmup(taken_away)
-        )
+        self._warmup_restore_task = self._track(self._async_restore_warmup(taken_away))
 
     @callback
     def _handle_warmup_mode_change(
@@ -2118,7 +2143,7 @@ class Valve:
         )
         # The after-window is worth having whether or not we restore — an unrestored disable
         # is the cleaner observation of the two, since nothing of ours is in the way.
-        self.hass.async_create_task(self._async_journal_warmup_context(now))
+        self._track(self._async_journal_warmup_context(now))
 
         if not restoring:
             return

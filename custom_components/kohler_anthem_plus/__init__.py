@@ -103,8 +103,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Kohler Anthem Plus from a config entry."""
     _async_purge_removed_diagnostics(hass, entry)
     coordinator = KohlerAnthemPlusCoordinator(hass, entry)
+    # **Everything after `async_setup` must be unwound on failure.** By the time it
+    # returns, the MQTT stream is connected, four journal files are open, and every valve
+    # has armed its cloud-watch timers — but the coordinator is not yet in `hass.data`, so
+    # a raise here means Home Assistant discards it without ever calling
+    # `async_unload_entry`. Left alone that strands a paho network thread with its own
+    # reconnect loop, the open files, and timers that fire into a dead coordinator; and
+    # because `ConfigEntryNotReady` is retried, each attempt stacks another set.
     await coordinator.async_setup()
-    await coordinator.async_config_entry_first_refresh()
+    try:
+        await coordinator.async_config_entry_first_refresh()
+    except Exception:
+        await coordinator.async_shutdown_stream()
+        raise
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
     if PLATFORMS:

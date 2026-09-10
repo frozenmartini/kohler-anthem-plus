@@ -169,13 +169,47 @@ becomes `switch.anthem_plus_master_bath_shower` and `switch.anthem_valve_shower`
 | Entity | Type | What it does |
 |---|---|---|
 | `Shower Valves` | switch | Turns the shower on or off. From cold it opens **the valve's own default outlets**; if outlets are already open it preserves them |
-| `Zone N Outlet M` | switch | One per outlet |
-| `Zone N Temperature` | number | Setpoint for that zone, in your account's unit |
+| `Rainhead`, `Showerhead`, `Handshower`, `Tub Filler` | switch | One per outlet, named after the fixture the valve reports. See **Outlet names** below |
+| `Temperature` | number | Setpoint for that zone, in your account's unit. `Zone N Temperature` on a two-zone valve |
+| `Flow` | number | Flow as a percentage, bounded by the limits the valve itself reports. `Zone N Flow` on a two-zone valve. See **Flow** below |
 | `Favourite` | select | Presets **stored on the valve**, added in the Konnect app or at the first-generation touchscreen |
 | `Warmup` | select | Off / All outlets / Selected outlets |
 | `Endless Shower` | switch | Re-open a zone the valve closed on its run-time limit |
 | `Status` | sensor | `Water Running`, `Paused`, `Warming Up`, `Idle` |
+| `System State` | sensor | The valve's own `normalOperation` / `showerInProgress` flag — a second opinion to `Status`, decoded differently, and worth comparing when the two disagree |
+| `Total Water Used` | sensor | Lifetime water in your account's unit. Feeds the water dashboard |
 | `At Temperature` | binary sensor | Whether the water has reached its setpoint |
+| `Problem` | binary sensor | Whether the valve reports a fault. **Never yet observed set** on any captured system — see `fault_detection_verified` on the entity |
+
+#### Outlet names
+
+Outlet switches are named after the fixture the valve reports for that outlet, not its
+position. Four type codes have confirmed meanings — handshower, showerhead, tub filler and
+rainhead — and an outlet whose code is not one of them keeps the positional form,
+`Zone N Outlet M`, rather than being given an invented name. If yours shows a position where
+you expected a name, please open an issue with the switch's `outlet_type` attribute and what
+the fixture actually is.
+
+On a **single-zone valve the `Zone N ` prefix is dropped** throughout — there is nothing to
+disambiguate. A two-zone valve keeps it. Two outlets of the same fixture in one zone are
+numbered: `Showerhead 1`, `Showerhead 2`.
+
+#### Flow
+
+Each zone has a Flow number, bounded by the minimum and maximum the valve reports for that
+zone rather than a fixed range — a valve with flow control disabled at the fixture offers
+only the value it will honour, and says so in `flow_control_available`.
+
+While the shower is off it shows the last flow Home Assistant wrote, defaulting to 100 %,
+**not** the valve's idle flow byte. That byte is not the flow setting: on some systems it is
+transient noise, and on others it holds perfectly still at a value nobody chose — one pair of
+valves reported a steady 24.5 % and 26.5 % while the panel held 100 %. While water is running
+the valve's own byte is authoritative, including a change made at the panel mid-shower.
+`flow_is_live` says which of the two you are reading.
+
+> ⚠️ **A first-generation Anthem touchscreen may overwrite this.** Opening that panel's flow
+> control has been captured rewriting *both* zones before any adjustment was made. If yours
+> behaves that way, disable the entity — the protocol layer is unaffected either way.
 
 ### Anthem+ controller
 

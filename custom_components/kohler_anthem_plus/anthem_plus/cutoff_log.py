@@ -77,6 +77,8 @@ _SWITCH_LOGGER = _LOGGER
 
 #: None means no limit — every log file is kept forever. This is the default; the
 #: directory is diagnostic output the owner wants to keep, not a rotating buffer.
+# Matches `RAW_MQTT_LOG_MAX_BYTES`. See `_max_bytes` for why a cap exists at all.
+DEFAULT_MAX_BYTES = 8 * 1024 * 1024
 DEFAULT_KEEP_FILES: int | None = None
 
 _README = """\
@@ -248,6 +250,7 @@ class CutoffDebugLog:
         readme: str | None = None,
         readme_fields: dict[str, Any] | None = None,
         label: str = "Cutoff debug log",
+        max_bytes: int = DEFAULT_MAX_BYTES,
     ) -> None:
         """`prefix` names the files and scopes pruning; `readme` is the note left beside them.
 
@@ -262,6 +265,13 @@ class CutoffDebugLog:
         self._readme = readme
         self._readme_fields = readme_fields or {}
         self._label = label
+        # **A single file must not grow without bound.** This writer had no size cap at all
+        # until 2026-09-10, while `RawMqttLog` beside it has always rolled at 8 MB — so a
+        # busy or misbehaving valve could grow one journal indefinitely on what is usually
+        # an SD card. Volume is normally a handful of lines per shower; the cap is a
+        # backstop, not an expected path.
+        self._max_bytes = max_bytes
+        self._written = 0
         self._lock = threading.Lock()
         self._handle: Any = None
         self._path: str | None = None
@@ -335,9 +345,17 @@ class CutoffDebugLog:
                 # prepare() instead; this record is lost and the next one lands.
                 self._wants_open = True
                 return
+            encoded = line + "\n"
+            if self._written >= self._max_bytes:
+                # Roll rather than truncate: the older records are the ones a bug report
+                # needs, and `_open_locked` prunes by the same prefix.
+                self._open_locked()
+                if self._handle is None:
+                    return
             try:
-                self._handle.write(line + "\n")
+                self._handle.write(encoded)
                 self._handle.flush()
+                self._written += len(encoded.encode("utf-8"))
             except OSError as err:
                 # A diagnostic must never take the integration down with it.
                 _LOGGER.warning("%s write failed, disabling: %s", self._label, err)
@@ -346,6 +364,7 @@ class CutoffDebugLog:
 
     def _open_locked(self) -> None:
         self._close_locked()
+        self._written = 0
         os.makedirs(self._directory, exist_ok=True)
         self._write_readme()
         stamp = time.strftime("%Y%m%dT%H%M%S", time.gmtime())

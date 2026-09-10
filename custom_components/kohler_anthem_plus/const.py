@@ -123,11 +123,19 @@ EXPOSE_CONTROLLER_WATER_STATE = True
 #
 # This constant pins capture on across restarts instead.
 #
-# **Currently ON, deliberately** — switched on 2026-08-13 (session 5) at the user's request
-# for a stretch of work involving frequent restarts, where a UI toggle that resets on every
-# restart would be useless. Set back to False when that debugging is done; the capture is
-# bounded (8 MB x 6 files) so leaving it on is untidy rather than dangerous.
-ENABLE_RAW_MQTT_LOG = True
+# **Off, and it must ship off.** It was switched on 2026-08-13 for a stretch of work
+# involving frequent restarts, where a UI toggle that resets on every restart was useless —
+# and then shipped that way through 0.6.7, which was a mistake: this constant *overrides*
+# the `logger.set_level` switch (see `raw_log.py`), so a released build with it True
+# captures every MQTT payload with no supported way for the owner to stop it short of
+# editing the integration's source.
+#
+# An earlier version of this comment claimed the capture was "bounded (8 MB x 6 files)".
+# It is not — `RAW_MQTT_LOG_KEEP_FILES` below is None, so nothing is ever pruned and growth
+# is unbounded in file count. On a Raspberry Pi's SD card that is a real cost.
+#
+# Turn it on for a debugging session by setting this True locally; do not commit it.
+ENABLE_RAW_MQTT_LOG = False
 
 # Written under the Home Assistant config directory, so it is reachable from the File editor
 # and Samba add-ons rather than buried in the container.
@@ -175,15 +183,17 @@ REPORT_LOG_MAX_BYTES = 8 * 1024 * 1024
 #
 #     custom_components.kohler_anthem_plus.anthem_plus.cutoff_log: debug
 #
-# **Currently ON, deliberately** — switched on 2026-08-14 (session 6) after the detector was
-# found to be timing the wrong thing. A cutoff that fails to fire writes nothing to
-# `home-assistant.log`, so the only way to tell "no cutoff happened" from "a cutoff was
-# missed" is this log. Written into the same directory as the raw capture and stamped from
-# the same clock, so the two interleave by sorting on `ts`.
+# **Off by default, and it must ship off.** Switched on 2026-08-14 after the detector was
+# found to be timing the wrong thing, and shipped that way through 0.6.7 by oversight. A
+# cutoff that fails to fire writes nothing to `home-assistant.log`, so this journal is the
+# only way to tell "no cutoff happened" from "a cutoff was missed" — genuinely valuable
+# while investigating, and not something to leave running on every install.
 #
-# Volume is a handful of lines per shower. Set back to False once the zone-based detector has
-# been trusted for a while.
-ENABLE_CUTOFF_DEBUG_LOG = True
+# Written into the same directory as the raw capture and stamped from the same clock, so the
+# two interleave by sorting on `ts`. Volume is a handful of lines per shower, but unlike the
+# raw capture `CutoffDebugLog` has **no size cap at all** and `..._KEEP_FILES` below is None,
+# so nothing bounds a single file's growth.
+ENABLE_CUTOFF_DEBUG_LOG = False
 
 # None = no limit on the number of files; every log is kept forever, matching
 # RAW_MQTT_LOG_KEEP_FILES. Deliberately the same directory as the raw capture: these two logs
@@ -598,12 +608,15 @@ WARMUP_AUTO_RESTORE_GIVING_UP = (
 # ---------------------------------------------------------------------------
 # Warmup diagnostic journal
 # ---------------------------------------------------------------------------
-# Forced on, like the cutoff journal. Built to catch what kept disabling warmup; that
-# question is solved (`docs/gcs/api.md` §3h — the hub's web UI), and the journal stays on
-# as the watchdog: it verifies every auto-restore end to end and would be the first thing
-# to notice a different writer. Volume is a handful of records a day, against a raw capture
-# that already writes every message.
-ENABLE_WARMUP_DEBUG_LOG = True
+# **Off by default**, like the cutoff journal, and off for the same reason: it was forced on
+# during an investigation and shipped that way through 0.6.7. Built to catch what kept
+# disabling warmup; that question is solved (`docs/gcs/api.md` §3h — the hub's web UI).
+#
+# Worth turning on locally if warm-up is being rewritten by something on your system: it
+# verifies every auto-restore end to end and would be the first thing to notice a different
+# writer. Volume is a handful of records a day, but it shares `CutoffDebugLog`'s missing
+# size cap.
+ENABLE_WARMUP_DEBUG_LOG = False
 
 # Unlimited, matching the cutoff journal: this is evidence for an open question, and the
 # whole point is comparing an event to ones weeks earlier.

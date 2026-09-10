@@ -29,6 +29,8 @@ control disabled reports a narrow range rather than being offered one it will no
 
 from __future__ import annotations
 
+from typing import Any
+
 from homeassistant.components.number import NumberDeviceClass, NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import PERCENTAGE, UnitOfTemperature
@@ -138,12 +140,43 @@ class ZoneTemperatureNumber(ZoneNumberBase):
 
     @property
     def native_value(self) -> float | None:
+        """The valve's setpoint, **clamped into this entity's declared range.**
+
+        The bounds are a Home Assistant-side gate, not the device's: the valve accepts
+        0 °C ("full cold") through 48.8 °C, and the touchscreen or a preset can put it
+        there. Reporting a value outside `native_min_value`/`native_max_value` leaves the
+        slider with no position it can render and, in Celsius, a 0 °C setpoint reads as a
+        plain `0` against a 27-45 range — which looks like a broken entity rather than a
+        deliberate setting.
+
+        Clamped rather than widened because the narrow range is the point: it keeps the
+        slider usable for the temperatures people actually shower at. The unclamped reading
+        is published as `reported_temperature` so nothing is hidden, and a value that is
+        being clamped says so in `out_of_range`.
+        """
         word = self._word
         if word is None:
             return None
-        return round(
+        value = round(
             celsius_to_unit(word.temperature_celsius, self.coordinator.temperature_unit)
         )
+        return min(max(value, self._attr_native_min_value), self._attr_native_max_value)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """The valve's real setpoint, and whether this entity is clamping it."""
+        word = self._word
+        if word is None:
+            return {}
+        reported = round(
+            celsius_to_unit(word.temperature_celsius, self.coordinator.temperature_unit)
+        )
+        return {
+            "reported_temperature": reported,
+            "out_of_range": not (
+                self._attr_native_min_value <= reported <= self._attr_native_max_value
+            ),
+        }
 
     async def async_set_native_value(self, value: float) -> None:
         key = "zone1_temperature" if self._zone == 1 else "zone2_temperature"
