@@ -3154,3 +3154,74 @@ def test_a_sparse_announcement_does_not_erase_what_is_known():
         "maximum_temperature_tenths",
     ):
         assert getattr(limits, field) == getattr(before, field), field
+
+
+def test_default_temperature_survives_an_announcement_from_another_setting():
+    """It vanished from the dashboard after changing Max Shower Duration. 0.18.0-0.18.2.
+
+    The same erasure as `test_an_mqtt_announcement_keeps_the_write_fields`, seen from the
+    entity: `native_value` returned `None` once `defaultOutletTemperature` was blanked, and
+    Home Assistant renders a number with no value as unavailable — so the entity
+    disappeared. `Max Temperature` stayed, because its own field was one of the seven the
+    announcement did carry, which is what made it look like an entity-specific fault.
+
+    Reported by the owner 2026-09-11: "Default temperature entity still disappears after an
+    update to another entity such as max shower duration."
+    """
+    from types import SimpleNamespace
+
+    from custom_components.kohler_anthem_plus.anthem_plus.models import (
+        model_for_topology,
+    )
+    from custom_components.kohler_anthem_plus.anthem_plus.state import (
+        GcsState,
+        OutletLimits,
+    )
+    from custom_components.kohler_anthem_plus.number import (
+        OutletDefaultTemperatureNumber,
+        OutletMaxTemperatureNumber,
+    )
+
+    model = model_for_topology(3, 0)
+    valve = make_valve(model, [31, 11, 1])
+    # A real state object: the announcement path is what this test is about.
+    state = GcsState(model=model)
+    for outlet in range(3):
+        state.outlet_limits[outlet] = OutletLimits(
+            outlet, 16, 200, 1800, 200, 31, 477, 150, 388, 1
+        )
+    valve.gcs_state = state
+    coordinator = make_coordinator([valve])
+    default = OutletDefaultTemperatureNumber(coordinator, valve)
+    maximum = OutletMaxTemperatureNumber(coordinator, valve)
+
+    assert default.native_value == 102
+    assert maximum.native_value == 118
+
+    # What the valve sends after a Max Shower Duration write: one message per outlet.
+    state._apply_outlet_config(
+        SimpleNamespace(
+            attributes=[
+                {
+                    "outLetId": str(outlet),
+                    "outLetType": "31",
+                    "outLetFlags": "1",
+                    "minimumOutletTemperature": "150",
+                    "defaultOutletTemperature": "388",
+                    "maximumOutletTemperature": "477",
+                    "minimumFlowRate": "16",
+                    "defaultFlowRate": "200",
+                    "maximumFlowRate": "200",
+                    "maximumRunTime": "2700",
+                }
+                for outlet in range(3)
+            ]
+        )
+    )
+
+    # Both entities still have a value — neither disappears.
+    assert default.native_value == 102, "Default Temperature vanished"
+    assert maximum.native_value == 118
+    assert default.available is True
+    # And the duration the announcement was actually reporting did land.
+    assert state.outlet_limits[0].maximum_run_time == 2700
