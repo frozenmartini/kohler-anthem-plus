@@ -156,6 +156,18 @@ def outlet_limits_from_settings(payload: Any) -> dict[int, OutletLimits]:
                 )
             except (TypeError, ValueError):
                 max_temperature = None
+
+            def _tenths(key: str, item: dict = entry) -> int | None:
+                """Display °C -> tenths, the scale this model stores temperatures in."""
+                try:
+                    return round(float(str(item.get(key))) * 10)
+                except (TypeError, ValueError):
+                    return None
+
+            try:
+                outlet_flags: int | None = int(str(entry.get("outLetFlags")))
+            except (TypeError, ValueError):
+                outlet_flags = None
             limits[outlet_id] = OutletLimits(
                 outlet_id,
                 low,
@@ -164,6 +176,9 @@ def outlet_limits_from_settings(payload: Any) -> dict[int, OutletLimits]:
                 _flow("defaultFlowrate"),
                 outlet_type,
                 max_temperature,
+                _tenths("minimumOutletTemperature"),
+                _tenths("defaultOutletTemperature"),
+                outlet_flags,
             )
     return limits
 
@@ -232,6 +247,23 @@ class OutletLimits:
     #
     # None when the valve has not reported it, which is not the same as no limit.
     maximum_temperature_tenths: int | None = None
+    # The remaining three fields of `writeoutletconfig`'s eleven, captured 2026-09-11 so a
+    # write can replace the record without inventing them.
+    #
+    # 🚨 **`writeoutletconfig` is a whole-record replace.** Omitting a key, or sending a
+    # guess, changes the setting it names — and one of these sits beside the scald limit.
+    # Reading them is the only way a write can put back what it did not mean to change; see
+    # `docs/gcs/api.md` §1c.
+    #
+    # Tenths of °C, normalised from REST's display °C exactly as the maximum above.
+    minimum_temperature_tenths: int | None = None
+    # The temperature a shower starts at when nothing else specifies one — the Konnect app's
+    # "Default Temperature", bounded below by the minimum and above by the scald limit.
+    default_temperature_tenths: int | None = None
+    # `outLetFlags`. Meaning undocumented and deliberately not interpreted: it is read so a
+    # write can echo it back unchanged, which is the only thing this integration needs from
+    # it. `1` on every outlet of every install seen so far.
+    outlet_flags: int | None = None
 
 
 @dataclass(frozen=True)

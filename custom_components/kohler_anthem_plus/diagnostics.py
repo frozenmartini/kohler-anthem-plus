@@ -357,6 +357,11 @@ def _valve_report(valve: Valve) -> dict[str, Any]:
                 # parser had missed it, which is the one question such a report exists to
                 # answer.
                 "maximum_temperature_tenths": lim.maximum_temperature_tenths,
+                # The other three fields `writeoutletconfig` replaces. Reported so a report
+                # can confirm what a write would have to echo back — see `OutletLimits`.
+                "minimum_temperature_tenths": lim.minimum_temperature_tenths,
+                "default_temperature_tenths": lim.default_temperature_tenths,
+                "outlet_flags": lim.outlet_flags,
             }
             for outlet_id, lim in sorted(gcs.outlet_limits.items())
         },

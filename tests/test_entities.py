@@ -2609,3 +2609,90 @@ async def test_daily_usage_refreshes_when_a_shower_ends():
 async def _noop_sleep(_seconds):
     """`asyncio.sleep` with the wait removed, so the delay is not paid in tests."""
     return None
+
+
+def test_outlet_limits_capture_every_writeoutletconfig_field():
+    """`writeoutletconfig` replaces the whole record, so every field must be readable.
+
+    Three of its eleven keys were never parsed — `outLetFlags`,
+    `minimumOutletTemperature` and `defaultOutletTemperature` — so a write would have had to
+    invent them, and one sits beside the scald limit. See `docs/gcs/api.md` §1c.
+
+    The minimum landing on 59 °F is the corroboration that matters: it is exactly the lower
+    bound the Konnect app offers for Default Temperature, which is what identifies
+    `defaultOutletTemperature` as the field behind that setting.
+    """
+    from custom_components.kohler_anthem_plus.anthem_plus.state import (
+        outlet_limits_from_settings,
+    )
+
+    # REST display units, the shape `gcsadvancestate` returns.
+    limits = outlet_limits_from_settings(
+        {
+            "setting": {
+                "valveSettings": [
+                    {
+                        "outletConfigurations": [
+                            {
+                                "outLetId": "0",
+                                "outLetType": "31",
+                                "outLetFlags": "1",
+                                "minimumOutletTemperature": "15",
+                                "defaultOutletTemperature": "38.8",
+                                "maximumOutletTemperature": "47.7",
+                                "minimumFlowrate": "4",
+                                "defaultFlowrate": "50",
+                                "maximumFlowrate": "50",
+                                "maximumRuntime": "1800",
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+    )
+
+    limit = limits[0]
+    # Tenths of °C, normalised from REST's display °C like the maximum already was.
+    assert limit.minimum_temperature_tenths == 150  # 59.0 °F
+    assert limit.default_temperature_tenths == 388  # 101.8 °F
+    assert limit.maximum_temperature_tenths == 477  # 117.9 °F
+    # Read only so a write can echo it back unchanged; never interpreted.
+    assert limit.outlet_flags == 1
+    # The fields that already worked must not have regressed.
+    assert limit.maximum_run_time == 1800
+    assert limit.outlet_type == 31
+
+
+def test_missing_write_fields_are_none_not_zero():
+    """An absent key must read as "not learned", never as a real 0 °C or flag 0.
+
+    Zero is a legal-looking value for all three, and a write that echoed it back would
+    silently reset the record it was meant to preserve.
+    """
+    from custom_components.kohler_anthem_plus.anthem_plus.state import (
+        outlet_limits_from_settings,
+    )
+
+    limits = outlet_limits_from_settings(
+        {
+            "setting": {
+                "valveSettings": [
+                    {
+                        "outletConfigurations": [
+                            {
+                                "outLetId": "0",
+                                "minimumFlowrate": "4",
+                                "maximumFlowrate": "50",
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+    )
+
+    limit = limits[0]
+    assert limit.minimum_temperature_tenths is None
+    assert limit.default_temperature_tenths is None
+    assert limit.outlet_flags is None
