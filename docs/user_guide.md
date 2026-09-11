@@ -599,7 +599,9 @@ move files you want to keep first.
 > `/config/kohler_anthem_plus_raw/` on every install, and had a **Start new MQTT capture**
 > button for it. Both are gone: that was the author's own tooling and now lives outside the
 > published integration. If your install still has that folder, a **Repairs** card offers to
-> delete it; the files are inert either way.
+> delete it; the files are inert either way. Submit deletes only when the folder holds nothing
+> but the files this integration wrote; if anything else is in there, or the delete cannot
+> finish, the card says so and nothing of yours is touched.
 
 ## Requirements
 
