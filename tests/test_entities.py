@@ -19,6 +19,7 @@ import importlib
 import time
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 
@@ -2065,8 +2066,10 @@ async def test_seed_is_two_round_trips_deep_not_five():
     await valve.async_seed()
     elapsed = time.monotonic() - start
 
-    assert len(client.started) == 5, client.started
-    # Two round trips (~0.10s) plus slack; five serial would be ~0.25s.
+    # Six: settings, state, configuration, presets, and the two usage series (monthly and
+    # daily), which overlap each other as well as the ordered pair.
+    assert len(client.started) == 6, client.started
+    # Still two round trips deep (~0.10s) plus slack; six serial would be ~0.30s.
     assert elapsed < 0.20, f"seed took {elapsed:.3f}s — reads went serial again"
 
 
@@ -2418,3 +2421,191 @@ def test_usage_probe_separates_interval_from_range():
         f"keep the original long call as a control; spans are {spans}"
     )
     assert len(set(spans)) == len(spans), f"WEEK ranges must differ; spans are {spans}"
+
+
+# --------------------------------------------------------------------------- #
+# Daily and weekly water (0.17.0)
+# --------------------------------------------------------------------------- #
+
+# The owner's real `Interval=DAY` response, 2026-09-11 — the probe that established DAY
+# works where WEEK does not. Litres, as every `gcs-usage` volume is.
+_REAL_DAY_SERIES = {
+    "gcsUsageDataDetailsList": [
+        {"intervalKey": key, "volume": litres}
+        for key, litres in (
+            ("2026-08-28", 112),
+            ("2026-08-29", 59),
+            ("2026-08-30", 75),
+            ("2026-08-31", 75),
+            ("2026-09-01", 46),
+            ("2026-09-02", 39),
+            ("2026-09-03", 31),
+            ("2026-09-04", 47),
+            ("2026-09-05", 38),
+            ("2026-09-06", 39),
+            ("2026-09-07", 42),
+            ("2026-09-08", 37),
+            ("2026-09-09", 49),
+            ("2026-09-10", 56),
+            ("2026-09-11", 41),
+        )
+    ]
+}
+
+
+def _water_sensors(monkeypatch, *, metric=False):
+    """The day and week sensors over the real series, with "today" pinned to its last day."""
+    from datetime import date
+
+    from custom_components.kohler_anthem_plus import sensor as module
+    from custom_components.kohler_anthem_plus.anthem_plus.models import (
+        model_for_topology,
+    )
+
+    class _PinnedNow:
+        @staticmethod
+        def now():
+            class _Today:
+                @staticmethod
+                def date():
+                    return date(2026, 9, 11)
+
+            return _Today()
+
+    monkeypatch.setattr(module, "dt_util", _PinnedNow)
+    model = model_for_topology(3, 0)
+    valve = make_valve(model, [31, 11, 1])
+    valve.usage_daily = _REAL_DAY_SERIES
+    coordinator = make_coordinator([valve])
+    if metric:
+        coordinator.water_units = "Liters"
+    return (
+        module.ValveDailyWaterSensor(coordinator, valve),
+        module.ValveWeeklyWaterSensor(coordinator, valve),
+    )
+
+
+def test_water_used_today_is_the_last_bucket(monkeypatch):
+    """41 L on 2026-09-11 -> 10.8 US gallons, from the owner's own probe response."""
+    today, _ = _water_sensors(monkeypatch)
+    assert today.native_value == 10.8
+    assert today.extra_state_attributes["days_counted"] == 1
+
+
+def test_water_used_this_week_sums_seven_days(monkeypatch):
+    """A rolling seven days, today included — `Interval=WEEK` is refused by this endpoint."""
+    _, week = _water_sensors(monkeypatch)
+    # 38+39+42+37+49+56+41 = 302 L -> 79.8 gal.
+    assert week.native_value == 79.8
+    attributes = week.extra_state_attributes
+    assert attributes["days_counted"] == 7
+    assert attributes["window_days"] == 7
+    # The breakdown must cover exactly the window, in order, and stop at today.
+    assert list(attributes["per_day"]) == [
+        "2026-09-05",
+        "2026-09-06",
+        "2026-09-07",
+        "2026-09-08",
+        "2026-09-09",
+        "2026-09-10",
+        "2026-09-11",
+    ]
+
+
+def test_daily_water_stays_in_litres_on_a_metric_account(monkeypatch):
+    """`volume` is litres on the wire whatever the account; only the display converts."""
+    today, week = _water_sensors(monkeypatch, metric=True)
+    assert today.native_value == 41.0
+    assert week.native_value == 302.0
+
+
+def test_the_daily_series_agrees_with_the_monthly_one():
+    """The check that proves the DAY series is real and not a different unit or window.
+
+    The owner's daily buckets for 2026-09 sum to 465 L — exactly what the `MONTH` call
+    reported for that month in the same probe run.
+    """
+    september = sum(
+        entry["volume"]
+        for entry in _REAL_DAY_SERIES["gcsUsageDataDetailsList"]
+        if entry["intervalKey"].startswith("2026-09")
+    )
+    assert september == 465
+
+
+def test_water_sensors_are_empty_without_a_series(monkeypatch):
+    """No series is `unknown`, not zero — zero would read as "no water used today"."""
+    from custom_components.kohler_anthem_plus import sensor as module
+    from custom_components.kohler_anthem_plus.anthem_plus.models import (
+        model_for_topology,
+    )
+
+    model = model_for_topology(3, 0)
+    valve = make_valve(model, [31, 11, 1])
+    valve.usage_daily = {}
+    coordinator = make_coordinator([valve])
+    for sensor in (
+        module.ValveDailyWaterSensor(coordinator, valve),
+        module.ValveWeeklyWaterSensor(coordinator, valve),
+    ):
+        assert sensor.native_value is None
+        assert sensor.extra_state_attributes == {}
+
+
+@pytest.mark.asyncio
+async def test_daily_usage_refreshes_when_a_shower_ends():
+    """The only moment the figure can change, and the only read this adds.
+
+    `SCAN_INTERVAL` is None — there is no clock — so without this the day's total would hold
+    whatever it read at startup. Tying it to the running -> stopped edge keeps the push-only
+    design: no timer, and no call at all on a day nobody showered.
+    """
+    from custom_components.kohler_anthem_plus import coordinator as module
+
+    calls: list[str] = []
+
+    class _Holder:
+        """Enough of a Valve to exercise the edge detector."""
+
+        _track = module.Valve._track
+        _note_running_for_usage = module.Valve._note_running_for_usage
+        _async_refresh_daily_usage_soon = module.Valve._async_refresh_daily_usage_soon
+
+        def __init__(self):
+            self.gcs_state = SimpleNamespace(is_running=False)
+            self._was_running = False
+            self._daily_usage_task = None
+            self._background_tasks = set()
+            self.hass = SimpleNamespace(async_create_task=asyncio.ensure_future)
+            self.coordinator = SimpleNamespace(
+                async_refresh_entities=lambda: calls.append("rendered")
+            )
+
+        async def async_refresh_daily_usage(self):
+            calls.append("read")
+
+    valve = _Holder()
+
+    # Running: nothing to do — the total cannot be final while water is flowing.
+    valve.gcs_state.is_running = True
+    valve._note_running_for_usage()
+    assert calls == []
+
+    # Stopped: one read, after the delay that lets Kohler aggregate the session.
+    with patch.object(module.asyncio, "sleep", new=_noop_sleep):
+        valve.gcs_state.is_running = False
+        valve._note_running_for_usage()
+        assert valve._daily_usage_task is not None
+        await valve._daily_usage_task
+
+    assert calls == ["read", "rendered"]
+
+    # A second stop message in the same wind-down must not become a second cloud read.
+    calls.clear()
+    valve._note_running_for_usage()
+    assert calls == []
+
+
+async def _noop_sleep(_seconds):
+    """`asyncio.sleep` with the wait removed, so the delay is not paid in tests."""
+    return None

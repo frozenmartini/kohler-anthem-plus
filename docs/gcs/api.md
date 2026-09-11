@@ -340,25 +340,36 @@ Each series entry: `timestamp` (long), `volume` (double), `onDuration`,
 the full series; `Interval=WEEK` and `Interval=YEAR` were both rejected with the generic 400
 on this account, so `MONTH` may be the only one a GCS valve supports.
 
-🚨 **`WEEK` IS SUPPORTED — that conclusion was wrong** (corrected 2026-09-11). The owner
-confirmed the Konnect app shows weekly statistics on this same account and hardware. The app
-reaches this endpoint through `getAnthemWaterUsageData` and its week tab sends `Interval=WEEK`
-(the `tab_week` const-string above), so the endpoint plainly serves weekly buckets. Whatever
-produced that 400, it was not an unsupported interval.
+🚨 **Settled 2026-09-11 by probe: `DAY` works, `WEEK` does not, at any range.**
 
-**The test could never have shown otherwise.** Both rejections used the same 400-day window as
-the MONTH call — which asks for roughly **57 weekly buckets against 13 monthly ones**. A server
-that caps result rows answers the same generic 400 as one that does not know the interval, so
-"WEEK is unsupported" and "that range is too long for WEEK" were indistinguishable in that
-evidence. The conclusion went beyond what the test could support, and `DAY` was never asked at
-all yet was covered by it too.
+| Interval | Range | Result |
+|---|---|---|
+| `MONTH` | 400 d (13 buckets) | ✅ 200, in all three date formats |
+| `DAY` | 14 d (15 buckets) | ✅ 200 |
+| `WEEK` | 400 d (~57 buckets) | ❌ 400 |
+| `WEEK` | 90 d (~12 buckets) | ❌ 400 |
+| `WEEK` | 28 d (**4 buckets**) | ❌ 400 |
+| `YEAR` | 400 d | ❌ 400 |
+| bare (control) | — | ❌ 400 |
 
-**The live evidence beats the inference**: a feature visible in the app is proof the API serves
-it, and no probe result outranks that. The remaining question is not *whether* `WEEK` works but
-*what request shape* makes it work, which is why `probe_usage` now asks it over three ranges —
-400 days (the original, kept as the control), 90 days (~12 buckets) and 28 days (4 buckets,
-about what a week tab displays). Where those diverge locates the real constraint. `DAY` over 14
-days is asked beside them, on the same reasoning. All three date formats
+**The row-cap theory is dead.** `WEEK` is refused at four buckets while `DAY` is served at
+fifteen in the same run, so the rejection cannot be about result size. This endpoint simply
+does not take `WEEK` for a GCS valve, whatever the app's `tab_week` string suggests — the app
+presumably builds its weekly view from daily buckets, exactly as this integration now does.
+
+**`DAY` is the finding that matters**, and it was never asked until this probe. It gives both
+a daily and a weekly figure, since seven daily buckets are a week.
+
+**Validated against `MONTH` in the same run**: the daily buckets for 2026-09 summed to exactly
+465 L, the figure the `MONTH` series reported for that month. That is what rules out the daily
+series being a different unit, a different window, or an artifact.
+
+⚠️ **The original single-range test could not have told us this.** `WEEK` was first asked only
+over 400 days, where a row cap and an unsupported interval are indistinguishable — both answer
+the same generic 400. Asking the same interval over three ranges is what separated them, and
+asking `DAY` at all is what found the usable one. The lesson is the endpoint's, not one
+probe's: **a 400 here means "something about this request was wrong", never "this feature does
+not exist"**, and the same uniform error already misled the camelCase probe of 2026-09-10. All three date formats
 tried (`yyyy-MM-dd`, ISO-8601 with `Z`, `MM-dd-yyyy`) were accepted and returned identical
 payloads, so the parser is lenient.
 

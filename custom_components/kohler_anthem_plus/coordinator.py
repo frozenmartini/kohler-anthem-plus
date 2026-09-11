@@ -125,6 +125,7 @@ from .const import (
     REPORT_LOG_MAX_BYTES,
     SCAN_INTERVAL,
     SYNC_DEFAULT_PRESET_TIMER,
+    USAGE_REFRESH_DELAY_SECONDS,
     WARMUP_CONTEXT_AFTER_SECONDS,
     WARMUP_CONTEXT_BEFORE_SECONDS,
     WARMUP_CONTEXT_MAX_MESSAGES,
@@ -601,6 +602,12 @@ class Valve:
         #: the seed only — a monthly series does not change between reconnects, and this is
         #: a diagnostic rather than something an automation waits on.
         self.usage: dict[str, Any] = {}
+        # The per-day series, refreshed when a shower ends — see `async_refresh_daily_usage`.
+        self.usage_daily: dict[str, Any] = {}
+        # Guards the refresh against a burst of stop-messages: the valve sends several as a
+        # shower winds down, and each must not become its own cloud read.
+        self._daily_usage_task: asyncio.Task | None = None
+        self._was_running = False
         # The flow each zone's Flow number is currently showing, keyed by zone. Written by
         # that entity and read by the outlet switches, so toggling an outlet does not
         # silently reset a flow the user chose — see `async_set_zone_outlet`. Seeded with
@@ -880,10 +887,50 @@ class Valve:
         )
         self._remember_open_masks()
         self._check_runtime_cutoff()
+        self._note_running_for_usage()
         # A valve message is proof of reachability, and settles any pending
         # contradiction check. CLOUD CONNECTION WATCH.
         self.cloud_watch.note_gcs_message()
         return changed
+
+    def _note_running_for_usage(self) -> None:
+        """Re-read the daily usage when a shower ends.
+
+        **The one moment the number can have changed.** Water usage moves only while water
+        runs, and this integration has no polling clock (`SCAN_INTERVAL` is None) — so
+        without this, `Water Used Today` would hold whatever it read at startup for the rest
+        of the day. Tying the read to the event that changes the value keeps the push-only
+        design intact: no timer, and no read on a day nobody showered.
+
+        Fires on the running -> stopped edge only. The valve sends several messages as a
+        shower winds down and the running flag can flicker, so `_daily_usage_task` makes a
+        second edge a no-op while the first read is still in flight.
+        """
+        running = self.gcs_state.is_running
+        was_running, self._was_running = self._was_running, running
+        if running or not was_running:
+            return
+        if self._daily_usage_task is not None and not self._daily_usage_task.done():
+            return
+        self._daily_usage_task = self._track(self._async_refresh_daily_usage_soon())
+
+    async def _async_refresh_daily_usage_soon(self) -> None:
+        """Wait for Kohler to record the session, then re-read and re-render.
+
+        The delay is not politeness: the cloud aggregates a session after the valve reports
+        it closed, so reading the instant the water stops returns the total *without* the
+        shower that just happened — the one reading a user would check.
+        """
+        await asyncio.sleep(USAGE_REFRESH_DELAY_SECONDS)
+        try:
+            await self.async_refresh_daily_usage()
+        except (
+            KohlerError
+        ) as err:  # pragma: no cover - async_get_usage swallows its own
+            _LOGGER.debug("Could not refresh daily usage: %s", err)
+            return
+        # Entities read `usage_daily` directly; this is what re-renders them.
+        self.coordinator.async_refresh_entities()
 
     def forget_timings(self) -> None:
         """Drop the cutoff detector's clocks across a stream gap. See `_handle_connected`."""
@@ -1005,11 +1052,41 @@ class Valve:
         # back covers a full year plus the current partial one, which is what a
         # year-on-year comparison needs. `async_get_usage` answers `{}` on failure rather
         # than raising, so this needs no guard of its own.
+        # The two series are independent of each other, so they overlap rather than
+        # queueing — the same reasoning as `_seed_independent_reads` one level up.
         now = datetime.now(UTC)
-        self.usage = await self.client.async_get_usage(
+
+        async def _monthly() -> None:
+            self.usage = await self.client.async_get_usage(
+                self.gcs_device.device_id,
+                from_date=(now - timedelta(days=400)).date().isoformat(),
+                to_date=now.date().isoformat(),
+            )
+
+        await asyncio.gather(_monthly(), self.async_refresh_daily_usage())
+
+    async def async_refresh_daily_usage(self) -> None:
+        """Read the per-day usage series — `Interval=DAY`, verified working 2026-09-11.
+
+        **Why DAY and not WEEK.** `WEEK` is refused at every range tried: 400 days, 90 days
+        and 28 days alike, the last being four buckets against the fifteen `DAY` happily
+        serves. So the earlier row-cap theory is dead and the endpoint simply does not take
+        `WEEK` — while `DAY` gives both the day and the week, since seven daily buckets are
+        a week. See `docs/gcs/api.md`.
+
+        Validated on the owner's account the day it was added: the fifteen daily entries
+        summed to exactly the 465 L the `MONTH` series reported for the same month, which is
+        what rules out the series being an artifact of a different unit or window.
+
+        Thirty-five days back: enough for a seven-day window whatever the timezone, plus
+        slack so a restart never renders the week short.
+        """
+        now = datetime.now(UTC)
+        self.usage_daily = await self.client.async_get_usage(
             self.gcs_device.device_id,
-            from_date=(now - timedelta(days=400)).date().isoformat(),
+            from_date=(now - timedelta(days=35)).date().isoformat(),
             to_date=now.date().isoformat(),
+            interval="DAY",
         )
 
     async def _async_seed_presets(self) -> None:

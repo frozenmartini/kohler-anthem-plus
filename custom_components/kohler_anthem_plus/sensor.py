@@ -15,7 +15,7 @@ hex sensor, where a zero reads as data rather than as a broken entity.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, ClassVar
 
 from homeassistant.components.sensor import (
@@ -32,6 +32,7 @@ from homeassistant.const import (
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.util import dt as dt_util
 
 from .anthem_plus.models import OutletStateSource, resolve_outlet_source
 from .anthem_plus.state import usage_series, usage_volume_gallons
@@ -81,6 +82,8 @@ async def async_setup_entry(
             ValveSystemStateSensor(coordinator, valve),
             ValveMonthlyWaterSensor(coordinator, valve),
             ValveYearlyWaterSensor(coordinator, valve),
+            ValveDailyWaterSensor(coordinator, valve),
+            ValveWeeklyWaterSensor(coordinator, valve),
             ValveLastUpdateSensor(coordinator, valve),
             ValveFirmwareSensor(coordinator, valve),
             # The other two firmwares the Konnect app shows. Separate entities rather than
@@ -485,6 +488,139 @@ class ValveYearlyWaterSensor(KohlerValveEntity, SensorEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         return self._rendered()[1]
+
+
+class _DailyWaterSensor(KohlerValveEntity, SensorEntity):
+    """Shared base for the day- and week-scoped water totals.
+
+    Both read the same `Interval=DAY` series and differ only in how many trailing days they
+    sum, so the parsing, the unit handling and the cache live here once.
+
+    **`DAY` is the only sub-monthly interval this endpoint serves.** `WEEK` was refused at
+    400, 90 and 28 days on 2026-09-11 — the last being four buckets, against the fifteen
+    `DAY` returned happily in the same run — so a week is seven daily buckets rather than a
+    `WEEK` call. `docs/gcs/api.md` records the whole probe.
+
+    `volume` is litres on the wire whatever the account's unit, exactly as in the monthly
+    series; the account's `waterUnits` decides only the display. Verified the day this was
+    written: the daily entries for the current month summed to the same 465 L the `MONTH`
+    series reported for it.
+    """
+
+    _attr_device_class = SensorDeviceClass.WATER
+    # `TOTAL`, not `TOTAL_INCREASING`: both of these reset — one at midnight, one as the
+    # window rolls — and calling that a meter reset would inject phantom water into
+    # long-term statistics.
+    _attr_state_class = SensorStateClass.TOTAL
+    _attr_entity_registry_enabled_default = True
+
+    #: Trailing days to sum, counting today.
+    _days: int = 1
+
+    def __init__(self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve) -> None:
+        super().__init__(coordinator, valve)
+        self._cache_key: int | None = None
+        self._cached: tuple[float | None, dict[str, Any]] = (None, {})
+
+    @property
+    def _metric(self) -> bool:
+        return self.coordinator.water_units == "Liters"
+
+    @property
+    def native_unit_of_measurement(self) -> str:
+        return UnitOfVolume.LITERS if self._metric else UnitOfVolume.GALLONS
+
+    def _rendered(self) -> tuple[float | None, dict[str, Any]]:
+        """Sum the trailing `_days` buckets, cached on the payload's identity.
+
+        Cached the same way the monthly sensors are: every MQTT message re-renders every
+        entity, and this series changes only when a shower ends.
+        """
+        usage = self._valve.usage_daily
+        key = id(usage)
+        if key == self._cache_key:
+            return self._cached
+
+        # **Local dates, not UTC.** "Today" is the owner's today; the series keys its
+        # buckets by calendar date, and comparing them against a UTC date would roll the
+        # day over at the wrong hour for most of the world.
+        today = dt_util.now().date()
+        wanted = {
+            (today - timedelta(days=offset)).isoformat() for offset in range(self._days)
+        }
+        litres = 0.0
+        days: dict[str, float] = {}
+        for entry in usage_series(usage):
+            interval = entry.get("intervalKey")
+            if not isinstance(interval, str) or interval not in wanted:
+                continue
+            volume = entry.get("volume")
+            if not isinstance(volume, (int, float)):
+                continue
+            litres += float(volume)
+            days[interval] = round(
+                float(volume) if self._metric else usage_volume_gallons(float(volume)),
+                1,
+            )
+
+        total: float | None = None
+        attributes: dict[str, Any] = {}
+        if days:
+            value = litres if self._metric else usage_volume_gallons(litres)
+            total = round(value, 1)
+            attributes = {"days_counted": len(days)}
+            if self._days > 1:
+                # The per-day breakdown is the point of a rolling window: it says which day
+                # the water went, which a single figure cannot.
+                attributes["per_day"] = dict(sorted(days.items()))
+                attributes["window_days"] = self._days
+
+        self._cache_key = key
+        self._cached = (total, attributes)
+        return self._cached
+
+    @property
+    def native_value(self) -> float | None:
+        return self._rendered()[0]
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return self._rendered()[1]
+
+
+class ValveDailyWaterSensor(_DailyWaterSensor):
+    """Water used today, from Kohler's own per-day usage series.
+
+    **Refreshed when a shower ends, not on a clock.** Usage moves only while water runs, so
+    the read is tied to the running -> stopped edge; a day with no shower costs no calls.
+    There is a short delay first, because Kohler aggregates the session after the valve
+    reports it closed — see `USAGE_REFRESH_DELAY_SECONDS`.
+    """
+
+    _attr_name = "Water Used Today"
+    _attr_icon = "mdi:water-check"
+    _days = 1
+
+    def __init__(self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve) -> None:
+        super().__init__(coordinator, valve)
+        self._attr_unique_id = f"{self._device_id}_water_today"
+
+
+class ValveWeeklyWaterSensor(_DailyWaterSensor):
+    """Water used over the last seven days, today included.
+
+    A rolling seven-day window rather than a calendar week: `Interval=WEEK` is refused by
+    this endpoint (see `_DailyWaterSensor`), and a rolling week answers "how much have we
+    used lately" without depending on which day Kohler would have called the start.
+    """
+
+    _attr_name = "Water Used This Week"
+    _attr_icon = "mdi:calendar-week"
+    _days = 7
+
+    def __init__(self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve) -> None:
+        super().__init__(coordinator, valve)
+        self._attr_unique_id = f"{self._device_id}_water_this_week"
 
 
 class ValveLastUpdateSensor(ValveDiagnosticSensor):

@@ -64,6 +64,17 @@ CONF_VALVES = "valves"
 # and the only one.
 SCAN_INTERVAL = None
 
+# How long to wait after a shower stops before re-reading the daily usage series.
+#
+# Kohler aggregates a session server-side *after* the valve reports it closed, so reading
+# the moment the water stops returns the day's total without the shower that just finished —
+# which is precisely the reading someone would go and check. Ninety seconds is comfortably
+# past that and still fast enough to be there when they look.
+#
+# This is the only delayed read in the integration and it is not polling: it fires on the
+# running -> stopped edge, so a day with no shower costs no calls at all.
+USAGE_REFRESH_DELAY_SECONDS = 90
+
 # ---------------------------------------------------------------------------
 # Shower switch
 # ---------------------------------------------------------------------------
