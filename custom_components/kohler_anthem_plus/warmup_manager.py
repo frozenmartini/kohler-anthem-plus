@@ -325,6 +325,10 @@ class WarmupManager:
         report_log = self._valve.coordinator.report_log
         if report_log is not None:
             report_log.note("warmup", event, dict(tagged))
+            # `note` never opens a file — it runs on the loop. Same deferred open the
+            # warm-up journal below uses.
+            if report_log.wants_open:
+                self._valve.hass.async_add_executor_job(report_log.prepare)
         if self._valve.warmup_log is None:
             return
         self._valve.warmup_log.note(event, **tagged)

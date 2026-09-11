@@ -785,7 +785,14 @@ class GcsState:
             elif self.model.uses_valve2:
                 self.valve2 = word
 
-        warm = state.get("warmUpState") or {}
+        # The one container this method's docstring promises to type-check and did not:
+        # `or {}` rescues a null `warmUpState` but hands a list or a string straight
+        # through, and the next `.get` raises `AttributeError` inside the REST seed —
+        # aborting setup with a traceback, which is the exact failure the guards above exist
+        # to prevent. Caught 2026-09-11 by review.
+        warm = state.get("warmUpState")
+        if not isinstance(warm, dict):
+            warm = {}
         self.warmup_mode = warm.get("warmUp") or self.warmup_mode
         progress = warm.get("state")
         if progress is not None:
@@ -967,9 +974,18 @@ class HubState:
             count = (
                 self.model.outlets_valve1 if number == 1 else self.model.outlets_valve2
             )
+            # Same guard as the REST path, and for the same two reasons. `outlet_flags`
+            # indexes positionally, so a string `"110"` decomposes into truthy characters
+            # and reads as **every outlet running** — wrong state with no error at all. And
+            # an int raises `TypeError` on `len()`: not hypothetical, since
+            # `docs/hub/cloud_api.md` records Kohler serving `"outlets": 2` as a *count*
+            # elsewhere in the same API. The REST sibling had this guard; this one did not.
+            outlets = attribute.get("outlets")
             zone = HubZone(
                 status=attribute.get("status"),
-                outlets=outlet_flags(attribute.get("outlets"), count),
+                outlets=outlet_flags(
+                    outlets if isinstance(outlets, list) else None, count
+                ),
                 temperature=attribute.get("temperature"),
                 flowrate=attribute.get("flowrate"),
             )

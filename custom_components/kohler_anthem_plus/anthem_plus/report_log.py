@@ -108,11 +108,36 @@ class ReportLog:
         self._written = 0
         self._path: str | None = None
         self._stem: str | None = None
+        # Set when `note()` had a record but no open file. See `wants_open`.
+        self._wants_open = False
 
     @property
     def active(self) -> bool:
         """Whether an episode is being written by this object right now."""
         return self._stem is not None
+
+    @property
+    def wants_open(self) -> bool:
+        """True when a decision arrived with no file open, so `prepare()` should be called.
+
+        `write()` is called from paho's network thread, where opening a file is fine.
+        `note()` is called from the **event loop**, where it is not — so `note()` never
+        opens one and raises this instead, exactly as `CutoffDebugLog` does. The caller
+        schedules `prepare()` in an executor; the record that raised the flag is lost and
+        the next one lands.
+        """
+        return self._wants_open
+
+    def prepare(self) -> None:
+        """Open the episode's file. **Blocking — call from an executor.**"""
+        with self._lock:
+            self._wants_open = False
+            if self._stem is None or self._handle is not None:
+                return
+            try:
+                self._open_locked()
+            except OSError as err:  # pragma: no cover - defensive
+                _LOGGER.warning("Report log could not open: %s", err)
 
     @property
     def path(self) -> str | None:
@@ -225,6 +250,19 @@ class ReportLog:
             return
         with self._lock:
             if self._stem is None:
+                return
+            # ⚠️ **Never opens a file.** Unlike `write()`, which paho calls on its own network
+            # thread, this runs on the **event loop** — the cutoff detector and the warm-up
+            # watcher both live there — and `_open_locked` creates a directory and opens two
+            # files. Blocking calls on the loop are an error in Home Assistant, and this
+            # shipped doing exactly that in 0.15.0.
+            #
+            # Same answer as `CutoffDebugLog.note`: raise a flag and let the caller schedule
+            # `prepare()` in an executor. The cost is that a decision arriving while no file
+            # is open is dropped and the next one lands — acceptable for a diagnostic, and
+            # the usual case is a file already open from `start()` or `resume()`.
+            if self._handle is None or self._written >= self._max_bytes:
+                self._wants_open = True
                 return
             try:
                 self._write_line_locked(line)

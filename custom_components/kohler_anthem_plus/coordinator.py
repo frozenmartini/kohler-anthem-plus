@@ -472,6 +472,7 @@ class _TaggedJournal:
         *,
         report_log: Any = None,
         kind: str = "",
+        hass: Any = None,
     ) -> None:
         self._journal = journal
         self._tag = tag
@@ -481,6 +482,7 @@ class _TaggedJournal:
         # a reader needs to know which watcher spoke. See `report_log.ReportLog.note`.
         self._report_log = report_log
         self._kind = kind
+        self._hass = hass
 
     def note(self, event: str, **fields: Any) -> None:
         if self._tag is None:
@@ -495,6 +497,10 @@ class _TaggedJournal:
             if self._tag is not None:
                 tagged["valve"] = self._tag
             self._report_log.note(self._kind, event, tagged)
+            # `note` never opens a file — the detector runs on the loop, and opening one
+            # there is a blocking call. See `ReportLog.wants_open`.
+            if self._report_log.wants_open and self._hass is not None:
+                self._hass.async_add_executor_job(self._report_log.prepare)
 
 
 class Valve:
@@ -849,6 +855,7 @@ class Valve:
                 self.tag,
                 report_log=self.coordinator.report_log,
                 kind="cutoff",
+                hass=self.hass,
             )
 
     def _note_local_write(self) -> None:
@@ -2141,6 +2148,9 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # REPORT LOG: the consumer-side capture behind the "Report Log" switch — one file
         # per switch-on, appended across restarts. See `anthem_plus/report_log.py`.
         self.report_log: ReportLog | None = None
+        #: The reseed spawned on every MQTT connect. Held so `async_shutdown_stream` can
+        #: cancel it — it outlives an unload otherwise, see `_handle_connected`.
+        self._reseed_task: asyncio.Task | None = None
         # One-shot: `async_setup` seeds, then `async_config_entry_first_refresh()` runs
         # milliseconds later and would seed the identical state all over again. See
         # `_async_update_data`.
@@ -2428,7 +2438,20 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # rather than judged on a number we made up.
         for valve in self.valves:
             valve.forget_timings()
-        self.hass.async_create_task(self._async_reseed_after_connect())
+        # **Held, so an unload can cancel it.** This was the one `async_create_task` in the
+        # file with no reference kept, and it is the longest-running: `_async_seed_state`
+        # can be a dozen REST round trips. A reload inside that window left it awaiting HTTP
+        # against a coordinator Home Assistant had already discarded — and it ends in
+        # `_persist_refresh_token()` (a config-entry write) and `async_set_updated_data()`
+        # (a push into entities that no longer exist), which is exactly the hazard
+        # `Valve._background_tasks` was built for.
+        if self._reseed_task is not None and not self._reseed_task.done():
+            # A second connect while the first reseed is still running: let it finish rather
+            # than starting a rival that would race it over the same state objects.
+            return
+        self._reseed_task = self.hass.async_create_task(
+            self._async_reseed_after_connect()
+        )
 
     async def _async_reseed_after_connect(self) -> None:
         try:
@@ -2447,6 +2470,11 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def async_shutdown_stream(self) -> None:
         """Stop the MQTT stream on unload."""
+        # Before the valves and the stream: it writes to the config entry and pushes state
+        # into entities, neither of which is safe against an entry that is going away.
+        if self._reseed_task is not None:
+            self._reseed_task.cancel()
+            self._reseed_task = None
         for valve in self.valves:
             valve.stop()
         if self.stream is not None:
@@ -2569,9 +2597,6 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         Runs at setup, on every MQTT connect, and on a manual `update_entity`. Failures for
         one device do not blank the other.
         """
-        for valve in self.valves:
-            await valve.async_seed()
-
         # **In parallel.** Each device's reads are independent, and the only ordering that
         # matters is inside one device — settings before state on a valve, configuration
         # before state on a controller — which stays sequential within each coroutine. Run

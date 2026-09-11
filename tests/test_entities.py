@@ -1787,3 +1787,177 @@ def test_the_report_log_ignores_decisions_when_no_episode_is_active(tmp_path):
     log = ReportLog(str(tmp_path))
     log.note("cutoff", "zone_start", {"zone": 1})
     assert list(tmp_path.glob("*.jsonl")) == []
+
+
+def test_the_report_log_never_opens_a_file_from_the_event_loop(tmp_path):
+    """`note()` runs on the loop; opening a file there is a blocking-call error in HA.
+
+    Shipped doing exactly that in 0.15.0 — `note()` fell through to `_write_line_locked`,
+    which calls `_open_locked`, which does `os.makedirs`, a README write and an `open()`.
+    `write()` is fine because paho calls it on its own network thread; `note()` is not,
+    because the cutoff detector and the warm-up watcher both live on the loop.
+    """
+    import builtins
+
+    from custom_components.kohler_anthem_plus.anthem_plus.report_log import ReportLog
+
+    log = ReportLog(str(tmp_path))
+    log.start()
+    # The state `note()` must tolerate: an episode is live but no handle is open.
+    log._close_locked(quiet=True)
+
+    opened: list[str] = []
+    real_open = builtins.open
+
+    def tracking_open(path, *args, **kwargs):
+        opened.append(str(path))
+        return real_open(path, *args, **kwargs)
+
+    builtins.open = tracking_open
+    try:
+        log.note("cutoff", "zone_start", {"zone": 1})
+    finally:
+        builtins.open = real_open
+
+    assert opened == [], f"note() opened files on the event loop: {opened}"
+    # It must ask for the open instead, so the caller can schedule it in an executor.
+    assert log.wants_open is True
+
+    log.prepare()
+    log.note("cutoff", "zone_stop", {"zone": 1})
+    log.close()
+    written = [
+        line for p in tmp_path.glob("*.jsonl") for line in p.read_text().splitlines()
+    ]
+    assert len(written) == 1, "the record after prepare() must land"
+
+
+# --------------------------------------------------------------------------- #
+# Lifecycle bugs found by review (0.15.1)
+# --------------------------------------------------------------------------- #
+
+
+def test_the_quiet_timer_survives_a_valve_that_has_never_spoken():
+    """`_last_gcs_at` is None until the first MQTT message — which can be hours away.
+
+    Unguarded, the subtraction raised `TypeError` **after** `_quiet_cancel` was nulled and
+    **before** either re-arm, so trigger B died for the life of the coordinator. A
+    push-only integration on a quiet shower is the normal case, not the edge case: the
+    module records benign silences of 12 h and 35 h.
+    """
+    from custom_components.kohler_anthem_plus.cloud_watch import CloudConnectionWatch
+
+    watch = CloudConnectionWatch.__new__(CloudConnectionWatch)
+    watch._last_gcs_at = None
+    watch._quiet_cancel = object()
+    armed: list = []
+    checked: list = []
+    watch._arm_quiet_timer = lambda *a: armed.append(a)
+    watch._request_check = lambda reason: checked.append(reason)
+
+    CloudConnectionWatch._quiet_elapsed(watch, None)
+
+    assert checked, "silence since setup is exactly what trigger B asks about"
+    assert armed, "the timer must be re-armed or the trigger is dead for ever"
+
+
+def test_valves_are_seeded_once_not_twice():
+    """A serial loop was left in place when the concurrent gather was added (0.9.0).
+
+    Every valve was seeded twice on every setup, reconnect and manual refresh — double the
+    REST traffic the change existed to reduce, and two `async_seed` coroutines for one valve
+    interleaving over the same state objects.
+    """
+    import ast
+    import inspect
+    import textwrap
+
+    from custom_components.kohler_anthem_plus import coordinator as module
+
+    source = textwrap.dedent(
+        inspect.getsource(module.KohlerAnthemPlusCoordinator._async_seed_state)
+    )
+    calls = [
+        node
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "async_seed"
+    ]
+    assert len(calls) == 1, f"async_seed is called {len(calls)} times per seed"
+
+
+def test_the_reseed_task_is_held_so_unload_can_cancel_it():
+    """It ends in a config-entry write and a push into entities, and outlived an unload.
+
+    `_async_seed_state` is a dozen REST round trips; a reload inside that window left the
+    task awaiting HTTP against a coordinator Home Assistant had already discarded.
+    """
+    import inspect
+
+    from custom_components.kohler_anthem_plus import coordinator as module
+
+    spawn = inspect.getsource(module.KohlerAnthemPlusCoordinator._handle_connected)
+    assert "_reseed_task = self.hass.async_create_task" in spawn, spawn
+
+    shutdown = inspect.getsource(
+        module.KohlerAnthemPlusCoordinator.async_shutdown_stream
+    )
+    assert "_reseed_task.cancel()" in shutdown, shutdown
+
+
+@pytest.mark.parametrize("warm", [[], "x", 5, 0, True])
+def test_a_malformed_warmupstate_does_not_abort_the_seed(warm, valve_model):
+    """The one container `apply_rest_state` promised to type-check and did not.
+
+    `or {}` rescues a null but hands a list or a string through, and the next `.get` raises
+    `AttributeError` inside the REST seed — aborting setup with a traceback. Both call sites
+    catch only `KohlerError`, so nothing downstream would have absorbed it.
+    """
+    from custom_components.kohler_anthem_plus.anthem_plus.state import GcsState
+
+    state = GcsState(valve_model, "Fahrenheit")
+    state.apply_rest_state({"state": {"warmUpState": warm}})  # must not raise
+    assert state.warmup_mode is None
+
+
+def test_a_good_warmupstate_still_parses(valve_model):
+    """The guard must not cost the normal case."""
+    from custom_components.kohler_anthem_plus.anthem_plus.state import GcsState
+
+    state = GcsState(valve_model, "Fahrenheit")
+    state.apply_rest_state(
+        {"state": {"warmUpState": {"warmUp": "warmUpDisabled", "state": "x"}}}
+    )
+    assert state.warmup_mode == "warmUpDisabled"
+
+
+@pytest.mark.parametrize(
+    ("outlets", "expected"),
+    [
+        # A string decomposes into truthy characters and read as EVERY outlet running —
+        # wrong state, silently, with no error anywhere.
+        ("110", [False, False, False]),
+        # Kohler serves `"outlets": 2` as a *count* elsewhere in the same API
+        # (docs/hub/cloud_api.md), and `len()` on an int raises.
+        (2, [False, False, False]),
+        (None, [False, False, False]),
+        # The legitimate shape must still work.
+        ([1, 0, 1], [True, False, True]),
+    ],
+)
+def test_the_mqtt_outlet_array_is_guarded_like_the_rest_one(
+    outlets, expected, valve_model
+):
+    """The REST path guarded this; the MQTT path did not."""
+    from types import SimpleNamespace
+
+    from custom_components.kohler_anthem_plus.anthem_plus.state import HubState
+
+    state = HubState(valve_model)
+    state._apply_valve(
+        SimpleNamespace(
+            attributes=[{"zone": "1", "status": "ON", "outlets": outlets}], raw={}
+        )
+    )
+    assert state.zones[1].outlets == expected

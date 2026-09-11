@@ -311,6 +311,22 @@ class CloudConnectionWatch:
         nothing is wrong and the timer is simply re-armed for the time that remains.
         """
         self._quiet_cancel = None
+        # ⚠️ **`_last_gcs_at` is None until the valve's first MQTT message**, and on a
+        # push-only integration that can be hours — the module header records benign
+        # silences of 12 h and 35 h. Unguarded, this raised `TypeError` **after**
+        # `_quiet_cancel` was nulled and **before** either re-arm below, so trigger B died
+        # for the life of the coordinator: exactly the "fires once and never re-arms"
+        # failure the `@callback` note above describes, through a different door.
+        #
+        # No timestamp means nothing has been heard since setup, which is precisely what
+        # this trigger exists to ask about — so treat it as the full quiet window rather
+        # than skipping the check.
+        if self._last_gcs_at is None:
+            self._request_check(
+                f"no valve message since setup ({CLOUD_CHECK_QUIET_SECONDS / 3600:.0f}h)"
+            )
+            self._arm_quiet_timer()
+            return
         quiet_for = time.monotonic() - self._last_gcs_at
         if quiet_for >= CLOUD_CHECK_QUIET_SECONDS:
             self._request_check(
