@@ -56,6 +56,10 @@ from .raw_log import format_record
 
 _LOGGER = logging.getLogger(__name__)
 
+# Episode names this class generates: `report_` plus a UTC stamp. Anything else did not
+# come from `start()` — see `resume`.
+_SAFE_STEM = re.compile(r"report_\d{8}T\d{6}Z")
+
 DEFAULT_MAX_BYTES = 8 * 1024 * 1024
 
 _PART_RE = re.compile(r"_p(\d+)\.jsonl$")
@@ -167,7 +171,21 @@ class ReportLog:
 
         Blocking I/O: call from an executor. A vanished file (user deleted it mid-episode)
         is simply recreated by the append open — the episode name is the identity.
+
+        The stem is only ever written by `start()` from its own timestamp, so a hostile
+        value means the config entry has already been edited — at which point far more is
+        available than this. Validated anyway because the value round-trips through a file
+        an operator may hand-edit, and `_part_path` joins it straight onto the directory:
+        a stem carrying `..` or a separator would write outside the log folder.
         """
+        if not _SAFE_STEM.fullmatch(stem):
+            _LOGGER.warning(
+                "Ignoring a report-log episode name that is not one we could have "
+                "written: %r. Starting a new episode instead.",
+                stem,
+            )
+            self.start()
+            return
         with self._lock:
             self._close_locked()
             self._stem = stem

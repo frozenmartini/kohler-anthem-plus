@@ -28,6 +28,7 @@ owner's own words and stay out too; counts carry the signal.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from typing import Any
 
@@ -134,6 +135,27 @@ _VERSION_KEY_SKIP = {
 # serial or GUID is not, and none of them belong in a report that redacts those elsewhere.
 _VERSION_VALUE_MAX_LEN = 24
 
+# ⚠️ **Length alone is not enough.** A Kohler device id is `gcs-sio32343h7` — fourteen
+# characters, well under the ceiling above — so a device id sitting under a version-shaped
+# key (`deviceVersionId`, say) would have been copied out verbatim. No captured payload has
+# such a key today, and this scanner exists precisely to walk fields no capture has covered
+# on accounts unlike the owner's, so the shape is checked as well as the length.
+#
+# Matched on the value, not the key: any string carrying a device prefix, a long hex or
+# GUID run, or an Azure connection-string fragment is reported as its type and length.
+_IDENTIFIER_VALUE = re.compile(
+    r"(?:^|[^a-z0-9])(?:gcs|hub)-[a-z0-9]{4,}"  # device ids
+    r"|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"  # GUID
+    r"|[0-9a-f]{16,}"  # long hex run: serials, keys
+    r"|(?:hostname|deviceid|sharedaccesskey|accountkey)=",  # connection strings
+    re.IGNORECASE,
+)
+
+
+def _identity_shaped(value: str) -> bool:
+    """True when a value looks like identity rather than a version number."""
+    return bool(_IDENTIFIER_VALUE.search(value))
+
 
 def _version_fields(
     node: Any, path: str = "", found: dict[str, Any] | None = None
@@ -170,7 +192,9 @@ def _version_fields(
                 continue
             if not any(hint in lowered for hint in _VERSION_KEY_HINTS):
                 continue
-            if isinstance(value, str) and len(value) > _VERSION_VALUE_MAX_LEN:
+            if isinstance(value, str) and (
+                len(value) > _VERSION_VALUE_MAX_LEN or _identity_shaped(value)
+            ):
                 found[here] = f"<{type(value).__name__}, {len(value)} chars>"
             else:
                 found[here] = value

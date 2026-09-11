@@ -570,6 +570,16 @@ _SECRET_KEY_PARTS = (
 )
 
 
+# Credential-bearing VALUES whose key name gives nothing away. `_SECRET_KEY_PARTS` catches
+# the field names Kohler is known to use, but this runs on whatever the cloud returns —
+# including `probe_usage`, which deliberately calls undocumented endpoints. An Azure
+# connection string is the realistic case: the whole secret sits inside one string under a
+# neutral key like `connectionString`, so a key-only check copies it out in full.
+_SECRET_IN_VALUE = re.compile(
+    r"(?:SharedAccessKey|AccountKey|SharedAccessSignature|sig)=", re.IGNORECASE
+)
+
+
 def _redact_payload(value: Any, _depth: int = 0) -> Any:
     """Copy a payload with credential values replaced, for the API probe log.
 
@@ -593,6 +603,9 @@ def _redact_payload(value: Any, _depth: int = 0) -> Any:
         return redacted
     if isinstance(value, list):
         return [_redact_payload(item, _depth + 1) for item in value]
+    # A secret can hide in the value under an innocuous key — see `_SECRET_IN_VALUE`.
+    if isinstance(value, str) and _SECRET_IN_VALUE.search(value):
+        return "**REDACTED**"
     return value
 
 

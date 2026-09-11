@@ -946,10 +946,12 @@ class Valve:
             # The read answered and agreed with the entry — settled, so latch it. Returning
             # False here would re-read on every reconnect for ever.
             return True
+        # The valve's NAME, not its id: this is INFO, so it lands in the log people paste
+        # into issues, and a Kohler device id is a cloud address (see 0.9.0). The name is
+        # what identifies the valve to its owner anyway.
         _LOGGER.info(
-            "%s (%s) reports %s; using that for this valve instead of the entry's %s",
+            "%s reports %s; using that for this valve instead of the entry's %s",
             self.name,
-            self.device_id,
             describe_topology(detected),
             current.sku,
         )
@@ -2449,10 +2451,12 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.hass.config_entries.async_update_entry(
             self.entry, data=data, options=options
         )
+        # No device id: this is INFO, and an id is a cloud address (see 0.9.0). The
+        # migration targets the first valve the cloud lists and runs once, so naming the
+        # keys is the whole of what a reader needs.
         _LOGGER.info(
-            "Moved per-valve settings (%s) under valve %s",
+            "Moved per-valve settings (%s) under the first valve on the account",
             ", ".join(sorted([*moved_data, *moved_options])),
-            device_id,
         )
 
     @callback
@@ -2752,10 +2756,10 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             current.outlets_valve2,
         ):
             return
+        # Name, not id — same reasoning as the valve's topology message above.
         _LOGGER.info(
-            "%s (%s) reports %s; using that for this controller instead of the entry's %s",
+            "%s reports %s; using that for this controller instead of the entry's %s",
             controller.name,
-            controller.device_id,
             describe_topology(detected),
             current.sku,
         )

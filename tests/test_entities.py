@@ -2145,3 +2145,163 @@ def test_zone_word_entity_reads_the_right_zone_everywhere():
     assert hex2.unique_id == "gcs-test0001_zone_2_hex"
     assert hex2.entity_registry_enabled_default is False
     assert hex2.entity_category is not None
+
+
+# --------------------------------------------------------------------------- #
+# Security (0.16.0)
+# --------------------------------------------------------------------------- #
+
+
+def test_version_scanner_does_not_copy_out_identifiers():
+    """A device id is short enough to pass the length ceiling — shape must be checked too.
+
+    `_version_fields` walks whatever the cloud returns, so it meets keys no capture has
+    covered. A real device id is `gcs-sio32343h7` — fourteen characters, well under
+    `_VERSION_VALUE_MAX_LEN` — so length alone could never have caught one sitting under a
+    version-shaped key.
+    """
+    from custom_components.kohler_anthem_plus.diagnostics import _version_fields
+
+    found = _version_fields(
+        {
+            "configuration": {
+                "about": {
+                    "interface": {"firmware": "2.20"},
+                    "valve": {"firmware": 10},
+                    "gateway": {"firmware": "00.74"},
+                }
+            },
+            "shortDeviceVersion": "gcs-sio32343h7",
+            "hubVersionId": "hub-ab12cd34",
+            "swVersion": "00112233-4455-6677-8899-001122334455",
+            "iotVersion": "HostName=x;DeviceId=gcs-1122;SharedAccessKey=k==",
+            "serialVersion": "0011223344556677aabb",
+            "version": "2.88",
+        }
+    )
+
+    # Every real firmware still comes through, including the bare integer.
+    assert found["configuration.about.interface.firmware"] == "2.20"
+    assert found["configuration.about.valve.firmware"] == 10
+    assert found["configuration.about.gateway.firmware"] == "00.74"
+    assert found["version"] == "2.88"
+
+    # Nothing identifier-shaped survives as its own value.
+    for key in (
+        "shortDeviceVersion",
+        "hubVersionId",
+        "swVersion",
+        "iotVersion",
+        "serialVersion",
+    ):
+        assert found[key].startswith("<str,"), f"{key} leaked as {found[key]!r}"
+    assert "gcs-sio32343h7" not in repr(found)
+    assert "SharedAccessKey" not in repr(found)
+
+
+def test_a_secret_hidden_in_a_value_is_redacted():
+    """`_redact_payload` matched key names only; an Azure connection string hides in one.
+
+    It runs on whatever the cloud returns — including `probe_usage`, which deliberately
+    calls undocumented endpoints — so a credential under a neutral key was copied out whole.
+    """
+    from custom_components.kohler_anthem_plus.anthem_plus.client import _redact_payload
+
+    out = _redact_payload(
+        {
+            "connectionString": (
+                "HostName=k.azure-devices.net;DeviceId=gcs-x;SharedAccessKey=SECRET=="
+            ),
+            "sasUri": "https://x/?sig=ABC123&se=1",
+            "password": "hunter2",
+            "ioTHub": "kohler.azure-devices.net",
+            "firmware": "2.20",
+        }
+    )
+
+    assert out["connectionString"] == "**REDACTED**"
+    assert out["sasUri"] == "**REDACTED**"
+    assert out["password"] == "**REDACTED**"
+    assert "SECRET" not in repr(out)
+    assert "ABC123" not in repr(out)
+    # Still useful: non-secret context survives.
+    assert out["ioTHub"] == "kohler.azure-devices.net"
+    assert out["firmware"] == "2.20"
+
+
+def test_report_log_will_not_resume_outside_its_directory(tmp_path):
+    """`_part_path` joins the stem straight onto the directory.
+
+    Only `start()` ever writes the stem, so a hostile value means the config entry was
+    already edited — but it round-trips through a file an operator may hand-edit, and the
+    guard is one comparison.
+    """
+    from custom_components.kohler_anthem_plus.anthem_plus.report_log import ReportLog
+
+    log = ReportLog(str(tmp_path / "reports"), max_bytes=10_000)
+    try:
+        log.resume("../../../../../../tmp/kohler_pwned_report")
+        # Rejected, and a fresh legitimate episode started in its place.
+        assert log._stem is not None
+        assert log._stem.startswith("report_")
+        assert not Path("/tmp/kohler_pwned_report.jsonl").exists()
+        for written in (tmp_path / "reports").glob("*.jsonl"):
+            assert written.parent == tmp_path / "reports"
+    finally:
+        log.close()
+
+    # A name this class could have written is still honoured.
+    log2 = ReportLog(str(tmp_path / "reports"), max_bytes=10_000)
+    try:
+        log2.resume("report_20260911T120000Z")
+        assert log2._stem == "report_20260911T120000Z"
+    finally:
+        log2.close()
+
+
+def test_no_device_id_reaches_a_non_debug_log():
+    """Device ids are cloud addresses and must not reach the log people paste into issues.
+
+    0.9.0 removed them from the startup line and from read errors; three INFO messages
+    added since then had reintroduced them — two topology-mismatch messages (which a
+    multi-valve account triggers) and the per-valve settings migration.
+
+    DEBUG is exempt: it is opt-in, and the raw captures already carry ids with their own
+    warning. `mqtt.py` is allowed the last 8 characters of the *mobile* identity, which is
+    this integration's own registration, not a device address.
+    """
+    import ast
+
+    base = (
+        Path(__file__).resolve().parents[1] / "custom_components" / "kohler_anthem_plus"
+    )
+    risky = (
+        "device_id",
+        "serial_number",
+        "refresh_token",
+        "access_token",
+        "tenant_id",
+        "password",
+    )
+    offenders = []
+    for path in sorted([*base.glob("*.py"), *base.glob("anthem_plus/*.py")]):
+        tree = ast.parse(path.read_text())
+        for node in ast.walk(tree):
+            if not (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr in {"info", "warning", "error", "critical"}
+                and isinstance(node.func.value, ast.Name)
+                and "LOGGER" in node.func.value.id.upper()
+            ):
+                continue
+            for arg in node.args[1:]:
+                source = ast.unparse(arg)
+                if any(name in source for name in risky):
+                    offenders.append(f"{path.name}:{node.lineno} {source}")
+
+    # Matched on content, not on a line number, so this does not break when mqtt.py moves.
+    def _allowed(entry: str) -> bool:
+        return "_mobile_device_id" in entry and "[-8:]" in entry
+
+    assert not [o for o in offenders if not _allowed(o)], offenders
