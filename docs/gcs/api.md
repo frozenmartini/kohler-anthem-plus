@@ -997,6 +997,10 @@ and inner model. Every value is a **string**.
 from both read surfaces here, so this integration omits it. `purge` is declared but **has no
 setter** — R8 stripped it as unreachable, so the app's real body is 11 keys and never 12.
 
+**This integration writes the 10 keys above** — the app's 11 less `maxVolume`, which it cannot
+read and therefore must not invent. The example body in this section is those 10; if you are
+counting against the "11", that is the difference.
+
 ### 🚨 The read and write key spellings differ
 
 | MQTT read (`READ_GCS_OUTLET_CONFIG_CFG`) | REST write body |

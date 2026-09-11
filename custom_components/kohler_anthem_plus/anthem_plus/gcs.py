@@ -17,16 +17,18 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
-from .client import KohlerClient
+from .client import KohlerClient, KohlerError
 from .const import (
     GCS_CONTROL_PRESET,
     GCS_CREATE_PRESET,
     GCS_SOLOWRITESYSTEM,
     GCS_WARMUP,
+    GCS_WRITE_OUTLET_CONFIG,
     GCS_WRITE_PRESET,
     SKU_GCS,
 )
 from .models import DEFAULT_VALVE_MODEL, ValveModel, get_valve_model
+from .state import OutletLimits
 from .valve_hex import (
     UNUSED_VALVE_WORD,
     VALVE1_PREFIX,
@@ -322,6 +324,90 @@ class GcsDevice:
         }
         return await self._client.async_request(
             "POST", GCS_WRITE_PRESET, json_body=payload
+        )
+
+    async def async_write_outlet_config(
+        self,
+        limits: OutletLimits,
+        *,
+        maximum_run_time: int | None = None,
+        maximum_temperature_tenths: int | None = None,
+        default_temperature_tenths: int | None = None,
+    ) -> Any:
+        """Replace one outlet's configuration record. **This writes a scald limit.**
+
+        `writeoutletconfig` has no partial form: the body is all eleven keys, and whatever
+        is sent becomes the record. So this takes the outlet's *current* limits and
+        overrides only the named fields — every other value is echoed back exactly as read.
+
+        🚨 **Three ways to silently corrupt a safety setting**, all documented in
+        `docs/gcs/api.md` §1c and all guarded here:
+
+        * **Omitting a key.** Gson drops unmatched keys, the API returns 201, and the field
+          takes whatever the server defaults to. A record with an unknown field cannot be
+          written at all — that is what the `None` check below refuses.
+        * **The write keys are not the read keys.** `maximumRuntime`, `maximumFlowrate`,
+          `minimumFlowrate`, `defaultFlowrate` — lowercase `t`/`r` on the write side,
+          capitalised on the MQTT read side. Four of eleven fields would vanish.
+        * **The wrong scale.** The body wants wire units: tenths of °C and flow bytes. REST
+          reports display units, which is why `OutletLimits` normalises on the way in and
+          this sends what it holds without converting again.
+
+        A 201 means *accepted for delivery*, never *applied* — the response carries no echo
+        and the app performs no read-back. Callers must verify by reading the value back,
+        and must allow time: an immediate `gcsadvancestate` read still shows the old value.
+        """
+        run_time = (
+            limits.maximum_run_time if maximum_run_time is None else maximum_run_time
+        )
+        maximum = (
+            limits.maximum_temperature_tenths
+            if maximum_temperature_tenths is None
+            else maximum_temperature_tenths
+        )
+        default = (
+            limits.default_temperature_tenths
+            if default_temperature_tenths is None
+            else default_temperature_tenths
+        )
+        record = {
+            "outLetId": limits.outlet_id,
+            "outLetType": limits.outlet_type,
+            "outLetFlags": limits.outlet_flags,
+            "minimumOutletTemperature": limits.minimum_temperature_tenths,
+            "defaultOutletTemperature": default,
+            "maximumOutletTemperature": maximum,
+            "minimumFlowrate": limits.minimum_flow_byte,
+            "defaultFlowrate": limits.default_flow_byte,
+            "maximumFlowrate": limits.maximum_flow_byte,
+            "maximumRuntime": run_time,
+        }
+        # **Refuse rather than guess.** Every field here is part of the record being
+        # replaced; a None is something this integration has not read, and inventing it
+        # would change a setting the caller never asked to touch.
+        missing = sorted(key for key, value in record.items() if value is None)
+        if missing:
+            raise KohlerError(
+                f"Refusing to write outlet {limits.outlet_id}: {', '.join(missing)} "
+                "has not been read from the valve, and this endpoint replaces the whole "
+                "record. Reload the integration to re-read the outlet configuration."
+            )
+        if default > maximum:
+            raise KohlerError(
+                f"Default temperature {default / 10:.1f} °C is above the scald limit "
+                f"{maximum / 10:.1f} °C for outlet {limits.outlet_id}."
+            )
+        payload = {
+            "deviceId": self.device_id,
+            "sku": SKU_GCS,
+            "tenantId": self._client.tenant_id,
+            # Every value is a string on the wire.
+            "gcsOutletConfigControlModel": {
+                key: str(value) for key, value in record.items()
+            },
+        }
+        return await self._client.async_request(
+            "POST", GCS_WRITE_OUTLET_CONFIG, json_body=payload
         )
 
     async def async_sync_preset_timer(

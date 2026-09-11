@@ -25,7 +25,13 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_call_later
 
 from .anthem_plus import WARMUP_MODES_CURRENT
-from .const import DOMAIN, PRESET_HIDDEN_IDS, WARMUP_LABELS
+from .const import (
+    DOMAIN,
+    OUTLET_RUN_TIME_APP_SAFE_MAX_SECONDS,
+    OUTLET_RUN_TIME_CHOICES_SECONDS,
+    PRESET_HIDDEN_IDS,
+    WARMUP_LABELS,
+)
 from .coordinator import Controller, KohlerAnthemPlusCoordinator, Valve
 from .entity import KohlerControllerEntity, KohlerValveEntity
 
@@ -140,6 +146,7 @@ async def async_setup_entry(
     for valve in coordinator.valves:
         entities.append(FavouriteSelect(coordinator, valve))
         entities.append(ValveWarmupSelect(coordinator, valve))
+        entities.append(OutletRunTimeSelect(coordinator, valve))
     # Each controller keeps its own favourites on a different command surface from the
     # valve's. Both can exist on one account, on their own devices, which is why they are
     # separate entities rather than one merged list — and why a second controller gets
@@ -611,3 +618,92 @@ class HubFavouriteSelect(OptimisticOptionMixin, KohlerControllerEntity, SelectEn
         # for a controller favourite, measured — so hold the guess until it lands rather than
         # dropping it on the next unrelated message.
         self._arm_optimistic_expiry()
+
+
+def _duration_label(seconds: int) -> str:
+    """`1800` -> `"30 minutes"`, the way the Konnect app words it."""
+    return f"{seconds // 60} minutes"
+
+
+class OutletRunTimeSelect(KohlerValveEntity, SelectEntity):
+    """Max Shower Duration — the Konnect app's own six options.
+
+    **A select rather than a slider, and that is a finding rather than a style choice.**
+    `docs/gcs/api.md` left it open whether 3600 s is a ceiling or the top of an allowed list:
+    the app's picker is curated — 15/20/25/30/45/60 minutes — skipping 35, 40, 50 and 55,
+    which are legal multiples of 300 s that no shipped picker can produce. Whether the valve
+    would accept one is untested. Offering exactly what the app offers claims only what is
+    known; a slider would imply the gaps are reachable.
+
+    3600 s is live-verified writable (write sweep, 2026-08-21), which is what makes 45 and 60
+    real options rather than guesses.
+
+    ⚠️ **Konnect 3.0.1 misreads anything above 30 minutes.** Its picker snaps the device's
+    value into 15-30 before choosing a wheel index, so a valve set to 45 or 60 displays as 25
+    and a single tap of Save silently writes 1500 s. Fixed in 3.0.5. Choosing a higher value
+    here is safe for the valve and safe in a current app; it is only an out-of-date app that
+    would quietly undo it, which `long_duration_app_warning` says on the entity itself.
+    """
+
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_icon = "mdi:timer-cog-outline"
+    _attr_entity_registry_enabled_default = True
+
+    @property
+    def options(self) -> list[str]:
+        """Built per instance — a shared mutable class attribute is one edit from a bug."""
+        return [_duration_label(s) for s in OUTLET_RUN_TIME_CHOICES_SECONDS]
+
+    def __init__(self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve) -> None:
+        super().__init__(coordinator, valve)
+        self._attr_name = "Max Shower Duration"
+        # Not the diagnostic sensor's id: that entity stays as the read-only reading, and
+        # reusing its id would swap one for the other in every existing dashboard.
+        self._attr_unique_id = f"{self._device_id}_max_run_time_setting"
+
+    @property
+    def _seconds(self) -> int | None:
+        """What the valve currently holds — the shortest, as the sensor reports."""
+        run_times = self._valve.outlet_run_times
+        return min(run_times.values()) if run_times else None
+
+    @property
+    def current_option(self) -> str | None:
+        """`None` where the valve holds something the app cannot offer.
+
+        A duration outside the six is not an error — 2700 and others are legal and this
+        integration could have written one before the list existed — but reporting it as one
+        of the options would be a lie, and inventing an option would let a save rewrite it.
+        `reported_minutes` publishes the real figure either way.
+        """
+        seconds = self._seconds
+        if seconds is None or seconds not in OUTLET_RUN_TIME_CHOICES_SECONDS:
+            return None
+        return _duration_label(seconds)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        seconds = self._seconds
+        return {
+            # Always the truth, including when it is not one of the six above.
+            "reported_minutes": None if seconds is None else seconds / 60,
+            "in_app_picker": seconds in OUTLET_RUN_TIME_CHOICES_SECONDS,
+            # See the class docstring: only an out-of-date Konnect build is affected.
+            "long_duration_app_warning": (
+                seconds is not None and seconds > OUTLET_RUN_TIME_APP_SAFE_MAX_SECONDS
+            ),
+        }
+
+    async def async_select_option(self, option: str) -> None:
+        try:
+            seconds = next(
+                s
+                for s in OUTLET_RUN_TIME_CHOICES_SECONDS
+                if _duration_label(s) == option
+            )
+        except (
+            StopIteration
+        ) as err:  # pragma: no cover - Home Assistant validates first
+            raise HomeAssistantError(f"{option} is not a Max Shower Duration") from err
+        await self._valve.async_write_outlet_setting(maximum_run_time=seconds)
+        self.async_write_ha_state()

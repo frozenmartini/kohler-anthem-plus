@@ -75,6 +75,18 @@ SCAN_INTERVAL = None
 # running -> stopped edge, so a day with no shower costs no calls at all.
 USAGE_REFRESH_DELAY_SECONDS = 90
 
+# How long to wait after writing an outlet configuration before reading it back.
+#
+# ⚠️ **An immediate read-back lies.** `gcsadvancestate` is a cloud document that only updates
+# once the device reports, so a read about a second after a 201 still shows the OLD value —
+# measured in the live write sweep of 2026-08-21, where the change appeared within 25 s.
+# Verifying too early is precisely how a working write looks like a device-side limit, which
+# is a mistake this project has already made about this API more than once.
+#
+# Thirty seconds: past the observed 25, and still inside what someone will wait for a
+# confirmation after changing a setting.
+OUTLET_WRITE_VERIFY_DELAY_SECONDS = 30
+
 # ---------------------------------------------------------------------------
 # Shower switch
 # ---------------------------------------------------------------------------
@@ -485,6 +497,29 @@ OUTLET_TYPE_NAMES: dict[int, str] = {
 
 UI_TEMPERATURE_MIN_F = 92
 UI_TEMPERATURE_MAX_F = 118
+
+# ---------------------------------------------------------------------------
+# Writable outlet configuration — the Konnect app's own three settings
+# ---------------------------------------------------------------------------
+# **Max Shower Duration** is a curated list, not a range. Konnect 3.0.5 offers exactly these
+# six; 35/40/50/55 minutes are skipped even though they are legal multiples of 300 s, and
+# whether the valve would take one is untested (`docs/gcs/api.md` — "still open"). A select of
+# what the app offers is honest about that; a slider would imply the gaps are reachable.
+#
+# 3600 s is live-verified writable (sweep, 2026-08-21), which is what makes 45 and 60 real
+# rather than theoretical.
+OUTLET_RUN_TIME_CHOICES_SECONDS = (900, 1200, 1500, 1800, 2700, 3600)
+
+# ⚠️ **Konnect 3.0.1 misreads any duration above 1800 s.** Its picker snaps the device value
+# into 15-30 before choosing a wheel index, so a valve set to 45 or 60 minutes displays as 25
+# and one tap of Save silently writes 1500. A vendor defect in that build, fixed by 3.0.5 —
+# but worth a warning wherever this integration lets someone choose the higher values.
+OUTLET_RUN_TIME_APP_SAFE_MAX_SECONDS = 1800
+
+# **Default Temperature** — what a shower starts at when nothing specifies otherwise. The app
+# bounds it below by a fixed floor and above by whatever the scald limit currently is, which
+# is why the maximum here is read from the valve rather than being a constant.
+UI_DEFAULT_TEMPERATURE_MIN_F = 59
 
 # ---------------------------------------------------------------------------
 # Flow

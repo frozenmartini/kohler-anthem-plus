@@ -50,6 +50,12 @@ class FakeLimits:
         self.maximum_run_time = run_time
         self.default_flow_byte = 200
         self.outlet_type = outlet_type
+        # The three temperature/flag fields `writeoutletconfig` also replaces. Values from
+        # the owner's own hardware: 59 °F floor, 101.8 °F default, 117.9 °F scald limit.
+        self.minimum_temperature_tenths = 150
+        self.default_temperature_tenths = 388
+        self.maximum_temperature_tenths = 477
+        self.outlet_flags = 1
 
 
 class FakeState:

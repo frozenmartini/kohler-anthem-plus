@@ -36,6 +36,7 @@ from homeassistant.components.number import NumberDeviceClass, NumberEntity, Num
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import PERCENTAGE, UnitOfTemperature
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .anthem_plus.valve_hex import (
@@ -50,11 +51,12 @@ from .anthem_plus.valve_hex import (
 from .const import (
     DEFAULT_FLOW_PERCENT,
     DOMAIN,
+    UI_DEFAULT_TEMPERATURE_MIN_F,
     UI_TEMPERATURE_MAX_F,
     UI_TEMPERATURE_MIN_F,
 )
 from .coordinator import KohlerAnthemPlusCoordinator, Valve
-from .entity import ZoneWordEntity, zone_label
+from .entity import KohlerValveEntity, ZoneWordEntity, zone_label
 
 
 async def async_setup_entry(
@@ -72,6 +74,10 @@ async def async_setup_entry(
         for zone in valve.model.zones:
             entities.append(ZoneTemperatureNumber(coordinator, valve, zone))
             entities.append(ZoneFlowNumber(coordinator, valve, zone))
+        # Per valve, not per zone: `writeoutletconfig` replaces every outlet's record with
+        # the same value, and the Konnect app offers one setting for the whole valve.
+        entities.append(OutletMaxTemperatureNumber(coordinator, valve))
+        entities.append(OutletDefaultTemperatureNumber(coordinator, valve))
     async_add_entities(entities)
 
 
@@ -346,4 +352,152 @@ class ZoneFlowNumber(ZoneNumberBase):
         # the byte it happens to be holding, and so an outlet toggle preserves it. Recorded
         # only after the write is accepted.
         self._valve.zone_flow[self._zone] = float(value)
+        self.async_write_ha_state()
+
+
+class _OutletTemperatureNumber(KohlerValveEntity, NumberEntity):
+    """Shared plumbing for the two writable outlet temperatures.
+
+    Both live in `outletConfigurations` and both are written by `writeoutletconfig`, which
+    replaces an outlet's **whole record** — so the coordinator does the write, one call per
+    outlet, and reads the value back before reporting success. See
+    `Valve.async_write_outlet_setting`.
+
+    Configuration entities rather than diagnostics: these are settings the Konnect app
+    offers, and a read-only copy of a setting someone can change is a worse answer than
+    either a real control or nothing.
+    """
+
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_device_class = NumberDeviceClass.TEMPERATURE
+    _attr_mode = NumberMode.SLIDER
+    _attr_native_step = 1
+    _attr_entity_registry_enabled_default = True
+
+    def __init__(self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve) -> None:
+        super().__init__(coordinator, valve)
+        unit = coordinator.temperature_unit
+        self._fahrenheit = unit.lower().startswith("f")
+        self._attr_native_unit_of_measurement = (
+            UnitOfTemperature.FAHRENHEIT
+            if self._fahrenheit
+            else UnitOfTemperature.CELSIUS
+        )
+
+    def _display(self, tenths: int | None) -> float | None:
+        """Tenths of °C from the valve, in the account's unit."""
+        if tenths is None:
+            return None
+        return round(celsius_to_unit(tenths / 10, self.coordinator.temperature_unit))
+
+    def _tenths(self, value: float) -> int:
+        """The account's unit back to the tenths of °C the wire wants."""
+        celsius = unit_to_celsius(float(value), self.coordinator.temperature_unit)
+        return round(celsius * 10)
+
+    @property
+    def _limits(self):
+        """Any outlet's limits — they agree, and a disagreement is a fault, not a setting."""
+        limits = self._state.outlet_limits if self._state else {}
+        return limits[min(limits)] if limits else None
+
+    @property
+    def available(self) -> bool:
+        return super().available and self._limits is not None
+
+
+class OutletMaxTemperatureNumber(_OutletTemperatureNumber):
+    """The scald limit — the Konnect app's "Max Temperature". 🚨 **A safety setting.**
+
+    Writable because it is writable in the app and on the panel, and a Home Assistant entity
+    that could only watch it change was the odd one out. The range matches the app's:
+    92-118 °F.
+
+    The write is verified. `writeoutletconfig` returns a 201 that means *accepted for
+    delivery* and carries no echo of the value; the app performs no read-back at all. This
+    entity reports failure rather than optimism — including the partial-write case, where
+    some outlets took the new limit and others did not.
+    """
+
+    _attr_name = "Max Temperature"
+    _attr_icon = "mdi:thermometer-alert"
+
+    def __init__(self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve) -> None:
+        super().__init__(coordinator, valve)
+        # Unique id deliberately unlike the old sensor's: that entity still exists as the
+        # read-only reading, and reusing its id would silently swap one for the other.
+        self._attr_unique_id = f"{self._device_id}_max_temperature_setting"
+        if self._fahrenheit:
+            low, high = float(UI_TEMPERATURE_MIN_F), float(UI_TEMPERATURE_MAX_F)
+        else:
+            low = float(round(unit_to_celsius(UI_TEMPERATURE_MIN_F, "Fahrenheit")))
+            high = float(round(unit_to_celsius(UI_TEMPERATURE_MAX_F, "Fahrenheit")))
+        self._attr_native_min_value = low
+        self._attr_native_max_value = high
+
+    @property
+    def native_value(self) -> float | None:
+        limits = self._limits
+        return (
+            None if limits is None else self._display(limits.maximum_temperature_tenths)
+        )
+
+    async def async_set_native_value(self, value: float) -> None:
+        await self._valve.async_write_outlet_setting(
+            maximum_temperature_tenths=self._tenths(value)
+        )
+        self.async_write_ha_state()
+
+
+class OutletDefaultTemperatureNumber(_OutletTemperatureNumber):
+    """Where a shower starts when nothing else says — the app's "Default Temperature".
+
+    **Bounded above by the scald limit, not by a constant.** The app does the same, and it
+    is the only bound that stays correct: lowering Max Temperature below this value would
+    otherwise leave a default the valve cannot honour. The upper bound therefore moves when
+    `Max Temperature` moves.
+    """
+
+    _attr_name = "Default Temperature"
+    _attr_icon = "mdi:thermometer-water"
+
+    def __init__(self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve) -> None:
+        super().__init__(coordinator, valve)
+        self._attr_unique_id = f"{self._device_id}_default_temperature"
+        self._attr_native_min_value = (
+            float(UI_DEFAULT_TEMPERATURE_MIN_F)
+            if self._fahrenheit
+            else float(
+                round(unit_to_celsius(UI_DEFAULT_TEMPERATURE_MIN_F, "Fahrenheit"))
+            )
+        )
+
+    @property
+    def native_max_value(self) -> float:
+        """The scald limit as it stands right now — see the class docstring."""
+        limits = self._limits
+        ceiling = (
+            None if limits is None else self._display(limits.maximum_temperature_tenths)
+        )
+        if ceiling is None:
+            # No limit read yet: fall back to the app's own maximum rather than to
+            # something unbounded.
+            return (
+                float(UI_TEMPERATURE_MAX_F)
+                if self._fahrenheit
+                else float(round(unit_to_celsius(UI_TEMPERATURE_MAX_F, "Fahrenheit")))
+            )
+        return float(ceiling)
+
+    @property
+    def native_value(self) -> float | None:
+        limits = self._limits
+        return (
+            None if limits is None else self._display(limits.default_temperature_tenths)
+        )
+
+    async def async_set_native_value(self, value: float) -> None:
+        await self._valve.async_write_outlet_setting(
+            default_temperature_tenths=self._tenths(value)
+        )
         self.async_write_ha_state()

@@ -117,6 +117,10 @@ GCS_SOLOWRITESYSTEM = f"{COMMANDS}/gcs/solowritesystem"
 GCS_CONTROL_PRESET = f"{COMMANDS}/gcs/controlpresetorexperience"
 GCS_START_PRESET = f"{COMMANDS}/gcs/startpreset"
 GCS_WRITE_PRESET = f"{COMMANDS}/gcs/writepreset"
+# Whole-record replace of one outlet's configuration — eleven string keys, one call per
+# outlet, chained on success. See `docs/gcs/api.md` §1c, and `GcsDevice.async_write_outlet_config`
+# for the guards this endpoint needs.
+GCS_WRITE_OUTLET_CONFIG = f"{COMMANDS}/gcs/writeoutletconfig"
 GCS_CREATE_PRESET = f"{COMMANDS}/gcs/createpreset"
 GCS_WARMUP = f"{COMMANDS}/gcs/warmup"
 GCS_VALVE_RESET = f"{COMMANDS}/gcs/valvereset"

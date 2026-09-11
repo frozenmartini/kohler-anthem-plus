@@ -116,6 +116,7 @@ from .const import (
     ENDLESS_SHOWER_ON,
     ENDLESS_SHOWER_RESTARTED,
     ISSUE_NOT_SET_UP,
+    OUTLET_WRITE_VERIFY_DELAY_SECONDS,
     RAW_MQTT_LOG_DIR,
     RAW_MQTT_LOG_KEEP_FILES,
     RAW_MQTT_LOG_MAX_BYTES,
@@ -1007,6 +1008,115 @@ class Valve:
         if not model.uses_valve2:
             self.gcs_state.valve2 = None
         return True
+
+    async def async_write_outlet_setting(
+        self,
+        *,
+        maximum_run_time: int | None = None,
+        maximum_temperature_tenths: int | None = None,
+        default_temperature_tenths: int | None = None,
+    ) -> None:
+        """Write one outlet setting across every outlet, then verify it landed.
+
+        **There is no list form.** The app writes one call per outlet, each carrying that
+        outlet's whole record, and issues the next only after a 2xx — so a failure part-way
+        leaves the valve holding the new value on some outlets and the old one on others.
+        That is not hypothetical: it is what produced the `outlets_agree: false` this
+        integration already reports (`docs/gcs/api.md`, "one outlet per call").
+
+        So this chains the same way and then **reads back**. A 201 from this endpoint means
+        *accepted for delivery*, never *applied* — the response carries no echo of the value
+        and the Konnect app performs no verification at all.
+
+        Raises `HomeAssistantError` with what actually happened: which outlets took the new
+        value and which did not. A partial write is reported as a partial write rather than
+        being retried, because retrying a half-applied safety setting without knowing why the
+        first attempt failed is how one bad outlet becomes several.
+        """
+        limits = self.gcs_state.outlet_limits
+        if not limits:
+            raise HomeAssistantError(
+                f"{self.name} has not reported its outlet configuration yet, so there is "
+                "nothing to write back. Try again once it has."
+            )
+        self._note_local_write()
+
+        written: list[int] = []
+        try:
+            for outlet_id in sorted(limits):
+                await self.gcs.async_write_outlet_config(
+                    limits[outlet_id],
+                    maximum_run_time=maximum_run_time,
+                    maximum_temperature_tenths=maximum_temperature_tenths,
+                    default_temperature_tenths=default_temperature_tenths,
+                )
+                written.append(outlet_id)
+        except KohlerError as err:
+            # Say exactly how far it got: the outlets already written hold the new value.
+            done = ", ".join(str(o + 1) for o in written) or "none"
+            raise HomeAssistantError(
+                f"Writing {self.name} failed after outlet {done}. Outlets are now in a "
+                f"mixed state — re-saving the setting rewrites them all. ({err})"
+            ) from err
+
+        await self._async_verify_outlet_write(
+            maximum_run_time=maximum_run_time,
+            maximum_temperature_tenths=maximum_temperature_tenths,
+            default_temperature_tenths=default_temperature_tenths,
+        )
+
+    async def _async_verify_outlet_write(
+        self,
+        *,
+        maximum_run_time: int | None,
+        maximum_temperature_tenths: int | None,
+        default_temperature_tenths: int | None,
+    ) -> None:
+        """Re-read the outlet configuration and confirm every outlet took the value.
+
+        ⚠️ **An immediate read-back lies.** `gcsadvancestate` is a cloud document that
+        updates only once the device reports, and a read ~1 s after a 201 still showed the
+        old value in the live sweep of 2026-08-21; the change appeared within 25 s. Reading
+        too early is exactly how a working write looks like a device-side limit, so this
+        waits first.
+        """
+        await asyncio.sleep(OUTLET_WRITE_VERIFY_DELAY_SECONDS)
+        try:
+            settings = await self.client.async_get_gcs_settings(
+                self.gcs_device.device_id
+            )
+        except KohlerError as err:
+            raise HomeAssistantError(
+                f"{self.name} accepted the change, but reading it back failed, so whether "
+                f"it applied is unknown. ({err})"
+            ) from err
+
+        fresh = outlet_limits_from_settings(settings)
+        if not fresh:
+            raise HomeAssistantError(
+                f"{self.name} accepted the change, but the valve reported no outlet "
+                "configuration to verify it against."
+            )
+        self.gcs_state.outlet_limits.update(fresh)
+        self._learn_run_times(self.gcs_state)
+
+        wanted = {
+            "maximum_run_time": maximum_run_time,
+            "maximum_temperature_tenths": maximum_temperature_tenths,
+            "default_temperature_tenths": default_temperature_tenths,
+        }
+        stale = [
+            outlet_id + 1
+            for outlet_id, limit in sorted(fresh.items())
+            for field, value in wanted.items()
+            if value is not None and getattr(limit, field) != value
+        ]
+        if stale:
+            raise HomeAssistantError(
+                f"{self.name} did not apply the change on outlet(s) "
+                f"{', '.join(str(o) for o in stale)}. The valve was asked and did not "
+                "report the new value; re-saving rewrites every outlet."
+            )
 
     def _seed_independent_reads(self) -> asyncio.Task[None]:
         """Start the seed reads that depend on nothing, so they overlap the ones that do.

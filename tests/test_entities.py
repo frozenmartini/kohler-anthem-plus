@@ -22,6 +22,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
+from homeassistant.helpers.entity import EntityCategory
 
 from .conftest import make_controller, make_coordinator, make_valve
 
@@ -51,7 +52,12 @@ def collect(name: str, coordinator) -> list:
 def test_temperature_and_flow_numbers_exist(coordinator):
     """**The 0.6.6 regression test.** Both numbers must be created and usable."""
     entities = collect("number", coordinator)
-    assert sorted(e.name for e in entities) == ["Flow", "Temperature"]
+    assert sorted(e.name for e in entities) == [
+        "Default Temperature",
+        "Flow",
+        "Max Temperature",
+        "Temperature",
+    ]
     for entity in entities:
         # A constructor that produced an unusable entity would still pass a name check;
         # reading the value proves the inherited plumbing survived.
@@ -145,9 +151,19 @@ def test_max_shower_duration_is_unknown_before_it_is_learned(valve_model):
     assert sensor.native_value is None
 
 
+def _zone_number_names(coordinator):
+    """The per-zone numbers only.
+
+    `Max Temperature` and `Default Temperature` are per *valve* — `writeoutletconfig`
+    replaces every outlet's record with the same value — so they carry no zone in their
+    name and are not what these naming tests are about.
+    """
+    valve_level = {"Max Temperature", "Default Temperature"}
+    return {e.name for e in collect("number", coordinator)} - valve_level
+
+
 def test_single_zone_valve_drops_the_zone_prefix(coordinator):
-    names = {e.name for e in collect("number", coordinator)}
-    assert names == {"Temperature", "Flow"}
+    assert _zone_number_names(coordinator) == {"Temperature", "Flow"}
 
 
 def test_two_zone_valve_numbers_each_zone(valve_model):
@@ -159,13 +175,12 @@ def test_two_zone_valve_numbers_each_zone(valve_model):
 
     model = get_valve_model("K-28212")
     coordinator = make_coordinator([make_valve(model, [31, 11, 1, 11, None, 21])])
-    names = {e.name for e in collect("number", coordinator)}
-    assert names == {
+    assert _zone_number_names(coordinator) == {
         "Temperature 1",
         "Flow 1",
         "Temperature 2",
         "Flow 2",
-    }, sorted(names)
+    }
 
 
 def test_unknown_outlet_type_falls_back_to_position(valve_model):
@@ -2696,3 +2711,264 @@ def test_missing_write_fields_are_none_not_zero():
     assert limit.minimum_temperature_tenths is None
     assert limit.default_temperature_tenths is None
     assert limit.outlet_flags is None
+
+
+# --------------------------------------------------------------------------- #
+# Writable outlet configuration (0.18.0)
+# --------------------------------------------------------------------------- #
+
+
+def _config_entities(coordinator, valve):
+    from custom_components.kohler_anthem_plus.number import (
+        OutletDefaultTemperatureNumber,
+        OutletMaxTemperatureNumber,
+    )
+    from custom_components.kohler_anthem_plus.select import OutletRunTimeSelect
+
+    return (
+        OutletMaxTemperatureNumber(coordinator, valve),
+        OutletDefaultTemperatureNumber(coordinator, valve),
+        OutletRunTimeSelect(coordinator, valve),
+    )
+
+
+def test_the_three_settings_match_the_konnect_app(valve_model):
+    """Ranges and options taken from the app, against the owner's own valve values."""
+    valve = make_valve(valve_model, [31, 11, 1])
+    coordinator = make_coordinator([valve])
+    maximum, default, duration = _config_entities(coordinator, valve)
+
+    # 92-118 °F, the app's Max Temperature range.
+    assert (maximum.native_min_value, maximum.native_max_value) == (92.0, 118.0)
+    assert maximum.native_value == 118  # 477 tenths
+    # 59 °F up to whatever the scald limit is — not a constant.
+    assert default.native_min_value == 59.0
+    assert default.native_value == 102  # 388 tenths
+    # The app's six, in order.
+    assert duration.options == [
+        "15 minutes",
+        "20 minutes",
+        "25 minutes",
+        "30 minutes",
+        "45 minutes",
+        "60 minutes",
+    ]
+    assert duration.current_option == "30 minutes"
+    # All three are settings, not diagnostics.
+    for entity in (maximum, default, duration):
+        assert entity.entity_category == EntityCategory.CONFIG
+
+
+def test_default_temperature_ceiling_follows_the_scald_limit(valve_model):
+    """Lowering Max Temperature must lower what Default Temperature will accept.
+
+    The app bounds it the same way, and it is the only bound that stays correct: a fixed
+    ceiling would let someone set a default the valve cannot honour.
+    """
+    valve = make_valve(valve_model, [31, 11, 1])
+    _, default, _ = _config_entities(make_coordinator([valve]), valve)
+
+    for tenths, expected in ((477, 118.0), (450, 113.0), (400, 104.0)):
+        for limit in valve.gcs_state.outlet_limits.values():
+            limit.maximum_temperature_tenths = tenths
+        assert default.native_max_value == expected
+
+
+def test_duration_reports_a_value_the_app_cannot_offer_honestly(valve_model):
+    """A valve holding 2100 s is not an error, and must not be shown as one of the six."""
+    valve = make_valve(valve_model, [31, 11, 1])
+    valve.outlet_run_times = {1: 2100, 2: 2100, 3: 2100}
+    _, _, duration = _config_entities(make_coordinator([valve]), valve)
+
+    assert duration.current_option is None
+    attributes = duration.extra_state_attributes
+    assert attributes["reported_minutes"] == 35.0
+    assert attributes["in_app_picker"] is False
+    # 2100 is above 1800, so an out-of-date Konnect build would misread it.
+    assert attributes["long_duration_app_warning"] is True
+
+
+def test_the_write_body_is_the_whole_record_in_wire_units():
+    """Ten string keys, write-side spellings, tenths and flow bytes — never the read keys."""
+    from custom_components.kohler_anthem_plus.anthem_plus.gcs import GcsDevice
+    from custom_components.kohler_anthem_plus.anthem_plus.state import OutletLimits
+
+    sent: dict = {}
+
+    class _Client:
+        tenant_id = "tenant-guid"
+
+        async def async_request(self, method, path, json_body=None):
+            sent.update(json_body)
+            return {"correlationId": "x"}
+
+    device = GcsDevice.__new__(GcsDevice)
+    device._client = _Client()
+    device.device_id = "gcs-x"
+    limits = OutletLimits(0, 16, 200, 1800, 200, 31, 477, 150, 388, 1)
+
+    asyncio.run(
+        device.async_write_outlet_config(limits, maximum_temperature_tenths=460)
+    )
+    model = sent["gcsOutletConfigControlModel"]
+
+    # The app's eleven less `maxVolume`, which neither read surface carries.
+    assert len(model) == 10
+    assert all(isinstance(v, str) for v in model.values())
+    # Write-side spellings: lowercase t/r. The read side capitalises them, and Gson drops
+    # unmatched keys silently while still returning 201.
+    for key in (
+        "maximumRuntime",
+        "maximumFlowrate",
+        "minimumFlowrate",
+        "defaultFlowrate",
+    ):
+        assert key in model
+    # Only the named field changed; everything else echoes what was read.
+    assert model["maximumOutletTemperature"] == "460"
+    assert model["defaultOutletTemperature"] == "388"
+    assert model["minimumOutletTemperature"] == "150"
+    assert model["maximumRuntime"] == "1800"
+    assert model["outLetFlags"] == "1"
+
+
+def test_a_write_refuses_rather_than_inventing_a_field():
+    """This endpoint replaces the record, so an unread field cannot be guessed.
+
+    🚨 One of these sits beside the scald limit; a spurious value would change a safety
+    setting the caller never asked to touch.
+    """
+    from custom_components.kohler_anthem_plus.anthem_plus.client import KohlerError
+    from custom_components.kohler_anthem_plus.anthem_plus.gcs import GcsDevice
+    from custom_components.kohler_anthem_plus.anthem_plus.state import OutletLimits
+
+    class _Client:
+        tenant_id = "tenant-guid"
+
+        async def async_request(self, method, path, json_body=None):
+            raise AssertionError("must not reach the network")
+
+    device = GcsDevice.__new__(GcsDevice)
+    device._client = _Client()
+    device.device_id = "gcs-x"
+
+    for limits, missing in (
+        (OutletLimits(0, 16, 200, 1800, 200, 31, 477, None, 388, 1), "minimum"),
+        (OutletLimits(0, 16, 200, 1800, 200, 31, 477, 150, None, 1), "default"),
+        (OutletLimits(0, 16, 200, 1800, 200, 31, 477, 150, 388, None), "outLetFlags"),
+        (OutletLimits(0, 16, 200, None, 200, 31, 477, 150, 388, 1), "maximumRuntime"),
+    ):
+        # The message must name the field that is missing, or it cannot be acted on.
+        with pytest.raises(KohlerError, match=missing):
+            asyncio.run(device.async_write_outlet_config(limits))
+
+    # And a default above the scald limit is refused before it reaches the valve.
+    full = OutletLimits(0, 16, 200, 1800, 200, 31, 477, 150, 388, 1)
+    with pytest.raises(KohlerError, match="above the scald limit"):
+        asyncio.run(
+            device.async_write_outlet_config(full, maximum_temperature_tenths=380)
+        )
+
+
+def _write_valve(monkeypatch, *, fail_after=None, verify_as=None):
+    """A Valve wired for `async_write_outlet_setting`, with the network faked."""
+    from custom_components.kohler_anthem_plus import coordinator as module
+    from custom_components.kohler_anthem_plus.anthem_plus.client import KohlerError
+    from custom_components.kohler_anthem_plus.anthem_plus.state import OutletLimits
+
+    written: list[int] = []
+
+    class _Gcs:
+        async def async_write_outlet_config(self, limits, **kwargs):
+            if fail_after is not None and len(written) >= fail_after:
+                raise KohlerError("device offline")
+            written.append(limits.outlet_id)
+
+    valve = object.__new__(module.Valve)
+    valve.name = "Anthem Valve"
+    valve.gcs = _Gcs()
+    valve.gcs_device = SimpleNamespace(device_id="gcs-x")
+    valve.gcs_state = SimpleNamespace(
+        outlet_limits={
+            i: OutletLimits(i, 16, 200, 1800, 200, 31, 477, 150, 388, 1)
+            for i in range(3)
+        }
+    )
+    valve._note_local_write = lambda: None
+    valve._learn_run_times = lambda state: None
+
+    # The verification read returns whatever the caller asked it to.
+    async def _read_back(device_id):
+        return _settings(verify_as)
+
+    valve.coordinator = SimpleNamespace(
+        client=SimpleNamespace(async_get_gcs_settings=_read_back)
+    )
+    monkeypatch.setattr(module.asyncio, "sleep", _noop_sleep)
+    return valve, written
+
+
+def _settings(run_time):
+    """A `gcsadvancestate` response for three outlets at `run_time` seconds."""
+    return {
+        "setting": {
+            "valveSettings": [
+                {
+                    "outletConfigurations": [
+                        {
+                            "outLetId": str(i),
+                            "outLetType": "31",
+                            "outLetFlags": "1",
+                            "minimumOutletTemperature": "15",
+                            "defaultOutletTemperature": "38.8",
+                            "maximumOutletTemperature": "47.7",
+                            "minimumFlowrate": "4",
+                            "maximumFlowrate": "50",
+                            "defaultFlowrate": "50",
+                            "maximumRuntime": str(run_time),
+                        }
+                        for i in range(3)
+                    ]
+                }
+            ]
+        }
+    }
+
+
+@pytest.mark.asyncio
+async def test_a_write_is_verified_against_a_read_back(monkeypatch):
+    """A 201 means accepted for delivery, never applied — so the value is read back.
+
+    The endpoint echoes nothing and the Konnect app performs no verification at all.
+    """
+    valve, written = _write_valve(monkeypatch, verify_as=2700)
+    await valve.async_write_outlet_setting(maximum_run_time=2700)
+    # One call per outlet, in order — there is no list form.
+    assert written == [0, 1, 2]
+
+
+@pytest.mark.asyncio
+async def test_a_write_the_valve_ignored_is_reported_not_assumed(monkeypatch):
+    """The valve took the call and kept its old value: that is a failure, not a success."""
+    from homeassistant.exceptions import HomeAssistantError
+
+    valve, written = _write_valve(monkeypatch, verify_as=1800)
+    with pytest.raises(HomeAssistantError, match="did not apply"):
+        await valve.async_write_outlet_setting(maximum_run_time=2700)
+    assert written == [0, 1, 2]
+
+
+@pytest.mark.asyncio
+async def test_a_partial_write_says_which_outlets_took_it(monkeypatch):
+    """A failure part-way leaves outlets in mixed state — the user needs to know that.
+
+    This is not hypothetical: it is what produced the `outlets_agree: false` this
+    integration already reports, seen on the owner's own hardware.
+    """
+    from homeassistant.exceptions import HomeAssistantError
+
+    valve, written = _write_valve(monkeypatch, fail_after=2)
+    with pytest.raises(HomeAssistantError, match="mixed state"):
+        await valve.async_write_outlet_setting(maximum_run_time=2700)
+    # Two landed, the third did not — and the error names how far it got.
+    assert written == [0, 1]
