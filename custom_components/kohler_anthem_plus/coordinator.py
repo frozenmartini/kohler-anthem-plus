@@ -23,6 +23,7 @@ import os
 import time
 import uuid
 from collections import Counter, deque
+from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -958,6 +959,69 @@ class Valve:
             self.gcs_state.valve2 = None
         return True
 
+    def _seed_independent_reads(self) -> asyncio.Task[None]:
+        """Start the seed reads that depend on nothing, so they overlap the ones that do.
+
+        `gcs-configuration`, `gcs-usage` and `gcs-preset` are independent of the outlet
+        topology and of each other — none of them is decoded against the valve's model, so
+        none needs the `gcs-settings` read that `gcs-state` genuinely does. Issuing them
+        while that pair is in flight removes three serial round trips from every cold start.
+
+        Wrapped in a task rather than awaited inline so the caller can keep working; every
+        read inside is individually guarded, so one failure cannot blank the others and
+        nothing here can fail setup. Cancellation-safe: the caller always awaits it.
+        """
+
+        async def _run() -> None:
+            await asyncio.gather(
+                self._async_seed_configuration(),
+                self._async_seed_presets(),
+            )
+
+        return asyncio.ensure_future(_run())
+
+    async def _async_seed_configuration(self) -> None:
+        """Firmware and the structural fields, plus the usage series beside them.
+
+        **First seed only:** installation-time data that cannot change while Home Assistant
+        runs, so a reconnect must not spend a call on it. Entirely diagnostic; a failure is
+        logged and setup continues.
+        """
+        if self.configuration is not None:
+            return
+        try:
+            self.configuration = await self.client.async_get_gcs_configuration(
+                self.gcs_device.device_id
+            )
+        except KohlerError as err:
+            _LOGGER.debug("Could not read gcs-configuration: %s", err)
+            # `{}` rather than leaving None, so a failed read is not retried on every
+            # reconnect for data that is static anyway.
+            self.configuration = {}
+
+        # The monthly usage series, read once beside the configuration. Thirteen months
+        # back covers a full year plus the current partial one, which is what a
+        # year-on-year comparison needs. `async_get_usage` answers `{}` on failure rather
+        # than raising, so this needs no guard of its own.
+        now = datetime.now(UTC)
+        self.usage = await self.client.async_get_usage(
+            self.gcs_device.device_id,
+            from_date=(now - timedelta(days=400)).date().isoformat(),
+            to_date=now.date().isoformat(),
+        )
+
+    async def _async_seed_presets(self) -> None:
+        """Seed the preset slots. Independent of topology — see `_seed_independent_reads`."""
+        try:
+            presets = await self.client.async_get_gcs_presets(self.gcs_device.device_id)
+            self.gcs_state.apply_preset_list(presets)
+            # Kept for `_async_sync_default_preset_timer`, which needs the *raw* record
+            # — title, volume and each valve's `hexString` — none of which survive
+            # `apply_preset_list`; `GcsPreset` keeps only id, name and is_experience.
+            self._seeded_presets = presets
+        except KohlerError as err:
+            _LOGGER.debug("Could not read GCS presets: %s", err)
+
     async def async_seed(self) -> None:
         """Read this valve's state, limits and presets over REST.
 
@@ -982,6 +1046,31 @@ class Valve:
         #
         # Runs on every re-seed, not just the first: cheap, and it re-checks the limit
         # after a reconnect rather than trusting a value that may be hours stale.
+        #
+        # **The independent reads start here and are awaited at the end.** Only one
+        # ordering in this method is real: `gcs-settings` decides the outlet topology, and
+        # `gcs-state` cannot be decoded until it has been applied (see `_apply_topology`).
+        # The configuration, usage and preset reads depend on none of that, so waiting for
+        # the settings/state pair before issuing them spent three extra round trips of
+        # wall-clock on every cold start for no ordering benefit. Launched as tasks now,
+        # they overlap the pair above; the awaits below collect them.
+        background = self._seed_independent_reads()
+        try:
+            await self._async_seed_topology_and_state()
+        except BaseException:
+            # **Cancelled or failed — do not leave the reads running.** A reload that
+            # cancels this coroutine mid-seed would otherwise orphan them against an entry
+            # that is going away: the class of bug 0.15.1 fixed for the reconnect reseed.
+            # Awaiting inside a plain `finally` would not do it — the await is cancelled
+            # too — so the task is cancelled explicitly and then reaped.
+            background.cancel()
+            with suppress(asyncio.CancelledError):
+                await background
+            raise
+        await background
+
+    async def _async_seed_topology_and_state(self) -> None:
+        """The one genuinely ordered pair: settings decide topology, topology decodes state."""
         try:
             settings = await self.client.async_get_gcs_settings(
                 self.gcs_device.device_id
@@ -1000,31 +1089,6 @@ class Valve:
                 self._learn_run_times(self.gcs_state)
         except KohlerError as err:
             _LOGGER.debug("Could not read outlet limits over REST: %s", err)
-
-        # Firmware, and — on a controller-free account — possibly the structural fields no
-        # capture has ever covered. **First seed only:** this is installation-time data
-        # that cannot change while Home Assistant runs, so a reconnect must not spend a
-        # call on it. Entirely diagnostic; a failure is logged and setup continues.
-        if self.configuration is None:
-            try:
-                self.configuration = await self.client.async_get_gcs_configuration(
-                    self.gcs_device.device_id
-                )
-            except KohlerError as err:
-                _LOGGER.debug("Could not read gcs-configuration: %s", err)
-                # `{}` rather than leaving None, so a failed read is not retried on every
-                # reconnect for data that is static anyway.
-                self.configuration = {}
-
-            # The monthly usage series, read once beside the configuration. Thirteen months
-            # back covers a full year plus the current partial one, which is what a
-            # year-on-year comparison needs.
-            now = datetime.now(UTC)
-            self.usage = await self.client.async_get_usage(
-                self.gcs_device.device_id,
-                from_date=(now - timedelta(days=400)).date().isoformat(),
-                to_date=now.date().isoformat(),
-            )
 
         try:
             payload = await self.client.async_get_gcs_state(self.gcs_device.device_id)
@@ -1051,18 +1115,6 @@ class Valve:
             self.warmup.note_seeded_mode(was_warmup, self.gcs_state.warmup_mode)
         except KohlerError as err:
             _LOGGER.debug("Could not seed GCS state: %s", err)
-
-        # Presets push over MQTT on every create, edit, rename, and delete, so this is
-        # only the seed — nothing re-reads them on a clock.
-        try:
-            presets = await self.client.async_get_gcs_presets(self.gcs_device.device_id)
-            self.gcs_state.apply_preset_list(presets)
-            # Kept for `_async_sync_default_preset_timer`, which needs the *raw* record
-            # — title, volume and each valve's `hexString` — none of which survive
-            # `apply_preset_list`; `GcsPreset` keeps only id, name and is_experience.
-            self._seeded_presets = presets
-        except KohlerError as err:
-            _LOGGER.debug("Could not read GCS presets: %s", err)
 
     def announce_readiness(self) -> None:
         """Say at startup whether the cutoff feature can act — the coordinator's old

@@ -14,7 +14,9 @@ here rather than on someone's shower.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import importlib
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -1961,3 +1963,154 @@ def test_the_mqtt_outlet_array_is_guarded_like_the_rest_one(
         )
     )
     assert state.zones[1].outlets == expected
+
+
+# --------------------------------------------------------------------------- #
+# Seeding concurrency (0.16.0)
+# --------------------------------------------------------------------------- #
+
+
+class _SeedRecorder:
+    """A stand-in client that records call order and sleeps like a round trip."""
+
+    def __init__(self, delay: float = 0.02) -> None:
+        self.delay = delay
+        self.started: list[str] = []
+        self.fail: set[str] = set()
+
+    async def _read(self, name: str) -> dict:
+        self.started.append(name)
+        await asyncio.sleep(self.delay)
+        if name in self.fail:
+            from custom_components.kohler_anthem_plus.anthem_plus.client import (
+                KohlerError,
+            )
+
+            raise KohlerError(f"{name} failed")
+        return {}
+
+    async def async_get_gcs_settings(self, device_id):
+        return await self._read("settings")
+
+    async def async_get_gcs_state(self, device_id):
+        return await self._read("state")
+
+    async def async_get_gcs_configuration(self, device_id):
+        return await self._read("configuration")
+
+    async def async_get_gcs_presets(self, device_id):
+        return await self._read("presets")
+
+    async def async_get_usage(self, device_id, *, from_date, to_date, interval="MONTH"):
+        # Mirrors the real client, which answers {} rather than raising.
+        try:
+            return await self._read("usage")
+        except Exception:
+            return {}
+
+
+def _seed_valve(client):
+    """A Valve with just enough wired up to run `async_seed`."""
+    from custom_components.kohler_anthem_plus import coordinator as module
+
+    valve = object.__new__(module.Valve)
+    # `client` is a read-only property reading through the coordinator.
+    valve.coordinator = SimpleNamespace(client=client)
+    valve.gcs_device = SimpleNamespace(device_id="dev-1")
+    valve.configuration = None
+    valve.usage = {}
+    valve._seeded_presets = None
+    valve._topology_checked = True
+    valve.cloud_watch = None
+    valve.gcs_state = SimpleNamespace(
+        outlet_limits={},
+        warmup_mode=None,
+        apply_rest_state=lambda payload: None,
+        apply_preset_list=lambda payload: False,
+    )
+    valve.warmup = SimpleNamespace(note_seeded_mode=lambda before, after: None)
+    valve._learn_run_times = lambda state: None
+    return valve
+
+
+@pytest.mark.asyncio
+async def test_independent_seed_reads_overlap_the_ordered_pair():
+    """Three of the five seed reads depend on nothing and must not wait their turn.
+
+    Only `gcs-settings` → `gcs-state` is a real ordering (topology decodes the state word).
+    Run serially, a cold start paid five round trips deep per valve; the configuration,
+    usage and preset reads now overlap the pair, making it two deep.
+    """
+    client = _SeedRecorder()
+    valve = _seed_valve(client)
+
+    await valve.async_seed()
+
+    # The independent reads must have been *issued* before the ordered pair finished —
+    # which is what proves they overlap rather than merely being reordered.
+    assert client.started.index("configuration") < client.started.index("state")
+    assert client.started.index("presets") < client.started.index("state")
+    # And the dependency that is real still holds.
+    assert client.started.index("settings") < client.started.index("state")
+
+
+@pytest.mark.asyncio
+async def test_seed_is_two_round_trips_deep_not_five():
+    """Measured, not asserted from the source: the whole seed is two sleeps deep."""
+    client = _SeedRecorder(delay=0.05)
+    valve = _seed_valve(client)
+
+    start = time.monotonic()
+    await valve.async_seed()
+    elapsed = time.monotonic() - start
+
+    assert len(client.started) == 5, client.started
+    # Two round trips (~0.10s) plus slack; five serial would be ~0.25s.
+    assert elapsed < 0.20, f"seed took {elapsed:.3f}s — reads went serial again"
+
+
+@pytest.mark.asyncio
+async def test_one_failed_seed_read_does_not_blank_the_others():
+    """Each read is guarded individually; a gather must not let one cancel its siblings."""
+    client = _SeedRecorder()
+    client.fail = {"configuration", "settings"}
+    valve = _seed_valve(client)
+
+    await valve.async_seed()
+
+    # Every read was still attempted, and the failures were absorbed.
+    assert set(client.started) == {
+        "settings",
+        "state",
+        "configuration",
+        "presets",
+        "usage",
+    }
+    # A failed configuration read latches {} so a reconnect does not retry static data.
+    assert valve.configuration == {}
+
+
+@pytest.mark.asyncio
+async def test_cancelling_a_seed_leaves_no_orphaned_reads():
+    """A reload mid-seed must not leave reads running against a discarded entry.
+
+    The same class of bug 0.15.1 fixed for the reconnect reseed: awaiting the background
+    task in a plain `finally` would not do it, because that await is cancelled too.
+    """
+    client = _SeedRecorder(delay=0.05)
+    valve = _seed_valve(client)
+
+    task = asyncio.ensure_future(valve.async_seed())
+    await asyncio.sleep(0.01)
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+
+    # Give anything orphaned a chance to still be pending.
+    await asyncio.sleep(0.12)
+    pending = [
+        t
+        for t in asyncio.all_tasks()
+        if t is not asyncio.current_task() and not t.done()
+    ]
+    assert not pending, f"{len(pending)} seed read(s) outlived the cancelled seed"
