@@ -314,10 +314,20 @@ class WarmupManager:
 
     @callback
     def _warmup_journal(self, event: str, **fields: Any) -> None:
-        """Append to the warmup journal. Mirrors `_journal`, including the deferred open."""
+        """Append to the warmup journal, and to any active Report Log.
+
+        Mirrors `_journal`, including the deferred open. The Report Log copy is written
+        **independently of the standalone journal** — that one has its own enabled flag, and
+        a decision must reach an active report whether or not the dedicated warm-up journal
+        is switched on. One switch, one attachment; see `report_log.ReportLog.note`.
+        """
+        tagged = self._valve._tagged(fields)
+        report_log = self._valve.coordinator.report_log
+        if report_log is not None:
+            report_log.note("warmup", event, dict(tagged))
         if self._valve.warmup_log is None:
             return
-        self._valve.warmup_log.note(event, **self._valve._tagged(fields))
+        self._valve.warmup_log.note(event, **tagged)
         if self._valve.warmup_log.wants_open:
             self._valve.hass.async_add_executor_job(self._valve.warmup_log.prepare)
 

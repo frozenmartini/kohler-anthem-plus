@@ -1686,3 +1686,104 @@ def test_yearly_water_stays_in_litres_on_a_metric_account(valve_model):
 
 def test_yearly_water_is_none_without_a_series(valve_model):
     assert _yearly_sensor(valve_model, []).native_value is None
+
+
+# --------------------------------------------------------------------------- #
+# Upstream parity (0.15.0)
+# --------------------------------------------------------------------------- #
+
+
+def test_topology_latches_only_on_an_answer(valve_model):
+    """A read with no layout in it must not pin the entry's model for ever.
+
+    `_topology_checked` was set to True *before* `_apply_topology` ran, so a first
+    `gcsadvancestate` read carrying no layout latched anyway — and on an account whose
+    valves differ, that leaves the wrong layout on every valve but the first, permanently.
+    Found by GitHub Copilot's review of upstream #3.
+    """
+    from custom_components.kohler_anthem_plus.coordinator import Valve
+
+    valve = make_valve(valve_model, [31, 11, 1])
+    # An empty settings payload says nothing about the layout.
+    assert Valve._apply_topology(valve, {}) is False
+    assert Valve._apply_topology(valve, {"valveSettings": []}) is False
+
+
+def test_topology_latches_when_the_read_agrees(valve_model):
+    """An answer that matches the entry is still an answer — it must not re-read for ever."""
+    from custom_components.kohler_anthem_plus.coordinator import Valve
+
+    valve = make_valve(valve_model, [31, 11, 1])
+    # The real shape: `valve` names the slot, `noOfOutlets` is the count.
+    settings = {"valveSettings": [{"valve": "valve1", "noOfOutlets": 3}]}
+    assert Valve._apply_topology(valve, settings) is True
+
+
+def test_a_zone2_word_is_refused_on_a_single_zone_valve(valve_model):
+    """The form offers Zone 2 whenever *any* valve has one — including for one that has not.
+
+    The word used to be encoded and sent to a valve with nothing to receive it. All zeroes
+    stays legal: that is the sentinel this valve genuinely uses for "no second valve".
+
+    Drives the real coroutine so the guard itself is exercised, not a restatement of its
+    condition — the valve double raises on any actual write, so reaching the send is a
+    failure too.
+    """
+    import asyncio
+
+    from homeassistant.exceptions import HomeAssistantError
+
+    from custom_components.kohler_anthem_plus.coordinator import Valve
+
+    assert valve_model.uses_valve2 is False
+    valve = make_valve(valve_model, [31, 11, 1])
+    # The guard runs after the "is there a valve at all" check, so both must be present.
+    valve.gcs = object()
+    valve.name = "Shower Left"
+
+    with pytest.raises(HomeAssistantError, match="one zone"):
+        asyncio.run(Valve.async_send_valve_hex(valve, "0184C801", "1184C801"))
+
+
+def test_the_report_log_records_decisions_beside_messages(tmp_path):
+    """One switch, one attachment: the wire traffic and the reasoning, on one clock.
+
+    A report that shows a cutoff was *seen and skipped* answers "why did Endless Shower not
+    fire" without asking the reader to line two files up by timestamp.
+    """
+    import json
+
+    from custom_components.kohler_anthem_plus.anthem_plus.report_log import ReportLog
+
+    log = ReportLog(str(tmp_path))
+    log.start()
+    log.write("$iothub/twin/PATCH", b'{"data":{"code":"GCS_SOLO_STS"}}')
+    log.note("cutoff", "zone_start", {"zone": 1})
+    log.note(
+        "warmup", "mode", {"before": "warmUpDisabled", "after": "warmUpAllOutlets"}
+    )
+    log.stop()
+    log.close()
+
+    lines = [
+        json.loads(line)
+        for path in tmp_path.glob("*.jsonl")
+        for line in path.read_text().splitlines()
+    ]
+    messages = [r for r in lines if "topic" in r]
+    decisions = [r for r in lines if "journal" in r]
+    assert len(messages) == 1
+    assert {r["journal"] for r in decisions} == {"cutoff", "warmup"}
+    # The two vocabularies reuse event names, which is why `journal` has to be there.
+    assert all("event" in r and "ts" in r for r in decisions)
+    # A decision must never be mistakable for a message, or `jq select(.topic)` breaks.
+    assert not any("topic" in r for r in decisions)
+
+
+def test_the_report_log_ignores_decisions_when_no_episode_is_active(tmp_path):
+    """Off means off — a note outside an episode must not create a file."""
+    from custom_components.kohler_anthem_plus.anthem_plus.report_log import ReportLog
+
+    log = ReportLog(str(tmp_path))
+    log.note("cutoff", "zone_start", {"zone": 1})
+    assert list(tmp_path.glob("*.jsonl")) == []

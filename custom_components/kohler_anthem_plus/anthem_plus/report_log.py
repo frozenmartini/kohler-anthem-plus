@@ -43,11 +43,14 @@ an executor. The lock covers all file state, same pattern as `raw_log.py`.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
 import threading
 import time
+from datetime import UTC, datetime
+from typing import Any
 
 from .raw_log import format_record
 
@@ -185,6 +188,47 @@ class ReportLog:
                 # A diagnostic must never take the stream down. Drop the handle but keep
                 # the episode: the disk may come back, and the persisted name means a
                 # restart re-attaches either way.
+                _LOGGER.warning("Report log write failed: %s", err)
+                self._close_locked()
+
+    def note(self, journal: str, event: str, fields: dict[str, Any]) -> None:
+        """Record one **decision** — what the integration concluded, not what arrived.
+
+        The raw messages say what the valve sent; these say what was made of it. Both in one
+        file, in the order they happened, on one clock, so a report answers "the cutoff did
+        not fire" without asking the reader to line two files up by timestamp. One switch,
+        one attachment.
+
+        Told apart from a raw message by their keys: a message has `topic`, a decision has
+        `journal` (`cutoff` or `warmup`, since the two vocabularies reuse event names) and
+        `event`. To read one or the other:
+
+            jq -c 'select(.topic)'    report_*.jsonl   # the wire
+            jq -c 'select(.journal)'  report_*.jsonl   # the reasoning
+
+        **Written whether or not the features are switched on**, exactly as the standalone
+        journals are, so a report from an install with Endless Shower and Auto-Restore both
+        off still shows a cutoff that was seen and deliberately skipped — which is usually
+        the question being asked.
+        """
+        if self._stem is None:
+            return
+        record: dict[str, Any] = {
+            "ts": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+            "journal": journal,
+            "event": event,
+        }
+        record.update(fields)
+        try:
+            line = json.dumps(record, default=str)
+        except (TypeError, ValueError):  # pragma: no cover - defensive
+            return
+        with self._lock:
+            if self._stem is None:
+                return
+            try:
+                self._write_line_locked(line)
+            except OSError as err:
                 _LOGGER.warning("Report log write failed: %s", err)
                 self._close_locked()
 

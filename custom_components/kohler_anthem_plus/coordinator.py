@@ -465,15 +465,36 @@ class _TaggedJournal:
     byte-for-byte what it always was and the tools that read it need no change.
     """
 
-    def __init__(self, journal: Any, tag: str | None) -> None:
+    def __init__(
+        self,
+        journal: Any,
+        tag: str | None,
+        *,
+        report_log: Any = None,
+        kind: str = "",
+    ) -> None:
         self._journal = journal
         self._tag = tag
+        # The Report Log gets a copy of every decision, so one switch produces one
+        # attachment holding the wire traffic and the reasoning about it, interleaved on one
+        # clock. `kind` is `cutoff` or `warmup` — the two vocabularies reuse event names, so
+        # a reader needs to know which watcher spoke. See `report_log.ReportLog.note`.
+        self._report_log = report_log
+        self._kind = kind
 
     def note(self, event: str, **fields: Any) -> None:
         if self._tag is None:
             self._journal.note(event, **fields)
         else:
             self._journal.note(event, valve=self._tag, **fields)
+        # Independent of the standalone journal above: that one is gated by its own enabled
+        # flag, and a decision must reach an active report whether or not the dedicated
+        # journal is switched on.
+        if self._report_log is not None and self._kind:
+            tagged = dict(fields)
+            if self._tag is not None:
+                tagged["valve"] = self._tag
+            self._report_log.note(self._kind, event, tagged)
 
 
 class Valve:
@@ -817,9 +838,18 @@ class Valve:
     # Lifecycle, driven by the coordinator
     # ------------------------------------------------------------------ #
     def attach_journal(self, journal: CutoffDebugLog | None) -> None:
-        """Point the cutoff detector at the (shared) debug log, once it exists."""
+        """Point the cutoff detector at the (shared) debug log, once it exists.
+
+        Also hands it the Report Log, so every cutoff decision reaches an active report
+        alongside the raw traffic that produced it — see `_TaggedJournal`.
+        """
         if journal is not None:
-            self._cutoff.journal = _TaggedJournal(journal, self.tag)
+            self._cutoff.journal = _TaggedJournal(
+                journal,
+                self.tag,
+                report_log=self.coordinator.report_log,
+                kind="cutoff",
+            )
 
     def _note_local_write(self) -> None:
         """Count a command sent from this integration to this valve.
@@ -879,24 +909,35 @@ class Valve:
         self.cloud_watch.async_stop()
 
     @callback
-    def _apply_topology(self, settings: dict[str, Any]) -> None:
+    def _apply_topology(self, settings: dict[str, Any]) -> bool:
         """Give this valve the outlet layout its own settings report.
 
-        The entry's model came from the config flow, which asked the *first* valve — right
-        for it, and not necessarily for a second one on the account. Same reasoning as
-        `KohlerAnthemPlusCoordinator._apply_controller_topology`, and the same fallback:
-        a read that yields nothing leaves the entry's model in place.
+        Returns **whether the read actually said something** — which is what the caller
+        latches on. The entry's model came from the config flow, which asked the *first*
+        valve: right for it, and not necessarily for a second one on the account. Same
+        reasoning as `KohlerAnthemPlusCoordinator._apply_controller_topology`, and the same
+        fallback: a read that yields nothing leaves the entry's model in place.
+
+        ⚠️ **The caller used to latch before knowing the answer** (fixed 0.15.0, found by
+        GitHub Copilot's review of upstream #3). `_topology_checked` was set to `True` and
+        *then* this was called, so a first read carrying no layout pinned the entry's model
+        for the life of the entry — and on an account whose valves differ, that is the wrong
+        layout on every valve but the first, permanently. Returning the answer lets the next
+        reconnect try again. Entities already built keep their outlet count until a reload;
+        the decode is what gets fixed immediately.
         """
         detected = topology_from_valve_settings(settings)
         if not detected:
-            return
+            return False
         model = model_for_topology(*detected)
         current = self.model
         if (model.outlets_valve1, model.outlets_valve2) == (
             current.outlets_valve1,
             current.outlets_valve2,
         ):
-            return
+            # The read answered and agreed with the entry — settled, so latch it. Returning
+            # False here would re-read on every reconnect for ever.
+            return True
         _LOGGER.info(
             "%s (%s) reports %s; using that for this valve instead of the entry's %s",
             self.name,
@@ -908,6 +949,7 @@ class Valve:
         self.gcs.model = model
         if not model.uses_valve2:
             self.gcs_state.valve2 = None
+        return True
 
     async def async_seed(self) -> None:
         """Read this valve's state, limits and presets over REST.
@@ -941,8 +983,8 @@ class Valve:
             # this valve decodes and encodes every word with — its own layout, not the
             # entry's. See `_apply_topology`; once is enough, plumbing does not change.
             if not self._topology_checked:
-                self._topology_checked = True
-                self._apply_topology(settings)
+                # Latched only once the read actually said something — see `_apply_topology`.
+                self._topology_checked = self._apply_topology(settings)
             limits = outlet_limits_from_settings(settings)
             if limits:
                 self.gcs_state.outlet_limits.update(limits)
@@ -1704,6 +1746,19 @@ class Valve:
             )
             zone2_hex = None
 
+        if zone2_hex and not self.model.uses_valve2 and zone2_hex.strip("0") != "":
+            # **Refused, not silently sent.** The service form shows Zone 2 whenever *any*
+            # valve on the account has one, so on a mixed account the field is offered for a
+            # single-zone valve too — and the word used to be encoded and sent to a valve
+            # with nothing to receive it. Found by GitHub Copilot's review of upstream #3.
+            #
+            # All zeroes is exempt: that is the sentinel this valve genuinely uses for "no
+            # second valve", and the branch below produces it anyway. Only a word that tries
+            # to *command* a zone that does not exist is a mistake worth naming.
+            raise HomeAssistantError(
+                f"{self.name} has one zone, so zone2_hex addresses nothing. Leave it empty "
+                f"(or all zeroes) — the word {zone2_hex!r} was not sent."
+            )
         if zone2_hex:
             word2 = _command_half(zone2_hex, "zone2_hex")
         elif not self.model.uses_valve2:
