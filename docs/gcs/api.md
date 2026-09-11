@@ -338,7 +338,19 @@ Each series entry: `timestamp` (long), `volume` (double), `onDuration`,
 
 **Live-verified 2026-09-10.** `FromDate=2025-08-06&ToDate=2026-09-10&Interval=MONTH` returns
 the full series; `Interval=WEEK` and `Interval=YEAR` were both rejected with the generic 400
-on this account, so `MONTH` may be the only one a GCS valve supports. All three date formats
+on this account, so `MONTH` may be the only one a GCS valve supports.
+
+⚠️ **That test cannot support the conclusion drawn from it** (noted 2026-09-11). Both
+rejections used the same 400-day window as the MONTH call — which asks for roughly **57
+weekly buckets against 13 monthly ones**. A server that caps result rows answers the same
+generic 400 as an unsupported interval, so "WEEK is unsupported" and "that range is too long
+for WEEK" are indistinguishable in that evidence. `DAY` was never asked at all, yet the
+MONTH-only conclusion was written as though it had been.
+
+`probe_usage` now asks three more questions to separate the causes: `DAY` over 14 days,
+`WEEK` over 90 days (13 buckets — the same count MONTH is known to serve), and the original
+long-range `WEEK` kept beside it as the control. Until that runs, treat the interval support
+as **open**, not settled. All three date formats
 tried (`yyyy-MM-dd`, ISO-8601 with `Z`, `MM-dd-yyyy`) were accepted and returned identical
 payloads, so the parser is lenient.
 

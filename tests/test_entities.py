@@ -2349,3 +2349,66 @@ def test_max_shower_duration_publishes_attributes_without_raising():
         "Showerhead",
         "Handshower",
     ]
+
+
+def test_max_shower_duration_shows_plain_minutes():
+    """It must read "30 min", the way the Konnect app says it — not `0:30:00`.
+
+    `SensorDeviceClass.DURATION` looks right and is wrong here: Home Assistant renders
+    duration entities as `H:MM:SS` and attaches a unit converter, so the value can also be
+    re-expressed in hours or seconds. Matching the app is the reason this entity was renamed
+    to `Max Shower Duration` in 0.11.1, and the display is the half that makes it match.
+    """
+    from homeassistant.const import UnitOfTime
+
+    from custom_components.kohler_anthem_plus.anthem_plus.models import (
+        model_for_topology,
+    )
+    from custom_components.kohler_anthem_plus.sensor import OutletMaxRunTimeSensor
+
+    model = model_for_topology(3, 0)
+    valve = make_valve(model, [31, 11, 1])
+    sensor = OutletMaxRunTimeSensor(make_coordinator([valve]), valve, 1)
+
+    assert sensor.native_value == 30.0
+    assert sensor.native_unit_of_measurement == UnitOfTime.MINUTES
+    # The assertion that matters: no device class, so nothing reformats or converts it.
+    assert sensor.device_class is None
+
+
+def test_usage_probe_separates_interval_from_range():
+    """WEEK was rejected over 400 days — which is ~57 buckets, not 13.
+
+    A row cap answers the same generic 400 as an unsupported interval, so that test could
+    not tell the two apart. Both the long and the short WEEK call must be present for the
+    result to mean anything, and DAY must be asked at all — it never was.
+    """
+    from custom_components.kohler_anthem_plus.services import (
+        _USAGE_ATTEMPTS,
+        usage_probe_substitutions,
+    )
+
+    rendered = {
+        label: query.format(**usage_probe_substitutions())
+        for label, query in _USAGE_ATTEMPTS
+    }
+    weeks = [q for label, q in rendered.items() if "Interval=WEEK" in q]
+    assert len(weeks) == 2, (
+        "need a long and a short WEEK call to separate the two causes"
+    )
+    assert any("Interval=DAY" in q for q in rendered.values())
+    # The short calls must actually be shorter, or they test nothing.
+    import re
+    from datetime import date
+
+    def span_days(query: str) -> int:
+        frm, to = (
+            date.fromisoformat(m)
+            for m in re.findall(r"Date=(\d{4}-\d{2}-\d{2})", query)
+        )
+        return (to - frm).days
+
+    spans = sorted(span_days(q) for q in weeks)
+    assert spans[0] <= 90 < spans[1], (
+        f"WEEK spans are {spans}; need a short one and a long one"
+    )

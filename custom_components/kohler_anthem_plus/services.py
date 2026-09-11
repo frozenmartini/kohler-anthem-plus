@@ -536,6 +536,13 @@ _USAGE_ATTEMPTS: tuple[tuple[str, str], ...] = (
     # A short range on purpose: 400 days of daily buckets is a large response for a probe,
     # and if DAY works at all it works on 14 days.
     ("DAY iso (14d)", "FromDate={from_recent}&ToDate={to}&Interval=DAY"),
+    # **WEEK again, over a short range.** WEEK was rejected on 2026-09-10 — but over a
+    # 400-day window, which asks for ~57 weekly buckets against the 13 monthly ones that
+    # succeeded. A server that caps result rows would answer the same generic 400 to a
+    # perfectly valid interval, so that test could not tell "WEEK is unsupported" apart from
+    # "that range is too long for WEEK". Re-asked over 90 days, which is 13 buckets — the
+    # same count MONTH is known to serve.
+    ("WEEK iso (90d)", "FromDate={from_quarter}&ToDate={to}&Interval=WEEK"),
     # Same contract, other date formats from the app's string pool.
     ("MONTH iso8601-Z", "FromDate={from_z}&ToDate={to_z}&Interval=MONTH"),
     ("MONTH us", "FromDate={from_us}&ToDate={to_us}&Interval=MONTH"),
@@ -561,8 +568,9 @@ def usage_probe_substitutions(now: datetime | None = None) -> dict[str, str]:
         "to_z": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "from_us": start.strftime("%m-%d-%Y"),
         "to_us": now.strftime("%m-%d-%Y"),
-        # Short window for the DAY attempt — see `_USAGE_ATTEMPTS`.
+        # Short windows for the DAY and WEEK attempts — see `_USAGE_ATTEMPTS`.
         "from_recent": (now - timedelta(days=14)).date().isoformat(),
+        "from_quarter": (now - timedelta(days=90)).date().isoformat(),
     }
 
 

@@ -253,7 +253,7 @@ the valve's own byte is authoritative, including a change made at the panel mid-
 | `Start new MQTT capture` | both | Button; rolls the raw capture over to a fresh file |
 | `Report Log` | both | Switch; one-file bug-report capture of the raw MQTT stream — see [The Report Log switch](#the-report-log-switch) |
 | `Hex` | valve | The current command word for that zone — copy it into `send_valve_hex`. `Zone N Hex` on a two-zone valve |
-| `Max Shower Duration` | valve | The valve's configured run-time ceiling, **in minutes** — the same name and unit the Konnect app uses. **One sensor, not one per outlet**: every outlet observed reports the same figure, and the valve times the limit per zone rather than per outlet. Enabled by default, unlike the rest of this table |
+| `Max Shower Duration` | valve | The valve's configured run-time ceiling, **in minutes** — the same name and unit the Konnect app uses, and shown as `30 min` rather than `0:30:00` because it deliberately carries no duration device class (which would also let the frontend convert it to hours). **One sensor, not one per outlet**: every outlet observed reports the same figure, and the valve times the limit per zone rather than per outlet. Enabled by default, unlike the rest of this table |
 | `Max Temperature` | valve | 🚨 The **scald limit** — the ceiling the valve will not exceed however it is commanded, shown in the account's own unit (118 °F on the reference system). Read-only; this integration never writes it. Enabled by default |
 | `Zone N Active` | valve | Whether that zone is currently running water |
 | `Preset Active` | valve | Whether a stored preset is driving the valve |

@@ -759,7 +759,18 @@ class OutletMaxRunTimeSensor(ValveDiagnosticSensor):
     """
 
     _attr_icon = "mdi:timer-cog-outline"
-    _attr_device_class = SensorDeviceClass.DURATION
+    # ⚠️ **Deliberately no `SensorDeviceClass.DURATION`.** It looks like the right class and
+    # it is the wrong one here, for two reasons. Home Assistant renders duration entities as
+    # `H:MM:SS`, so a 30-minute ceiling displayed as `0:30:00` — and `DURATION` carries a
+    # unit converter, so the frontend is free to re-express the value in hours or seconds on
+    # a whim or a user override. The Konnect app, the touchscreen and Kohler's own
+    # documentation all say "30 minutes", and matching the app is the whole reason this
+    # entity was renamed to `Max Shower Duration` in 0.11.1. Without the device class the
+    # unit below is shown verbatim and nothing converts it.
+    #
+    # The cost is real and accepted: no automatic unit conversion for someone who would
+    # rather see seconds. That is a setting nobody has asked for, against a display everyone
+    # reads at a glance.
     # **Minutes, not seconds.** The valve reports `maximumRunTime` in seconds (1800), and
     # this published that number raw — while the Konnect app, the touchscreen and Kohler's
     # own documentation all say "30 minutes". Home Assistant converts for display where a
