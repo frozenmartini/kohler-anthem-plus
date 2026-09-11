@@ -424,9 +424,20 @@ Every structural field comes back `null`: `zoneone`, `zonetwo`, `parts`, `valve1
 `valve2Settings`, `systemConfiguration`, `systemSettings`. Only `about.firmware` (valve
 firmware, `00.74` here) and `firmwareOTADetails` carry data.
 
-The reason is that a valve wired to an Anthem Plus controller reports its configuration
-**through the controller**. Whether a GCS-only install populates these fields is **unknown
-and untested** — that is exactly the case no one has been able to check.
+The reason was assumed to be that a valve wired to an Anthem Plus controller reports its
+configuration **through the controller**.
+
+✅ **ANSWERED 2026-09-11 — a GCS-only install is null too.** The owner's account has no
+controller at all (`controller_present: false`, zero controllers listed), two K-28210 valves
+speaking straight to the cloud, and its diagnostics report every one of the seven structural
+fields as unpopulated: `zoneone`, `zonetwo`, `parts`, `valve1Settings`, `valve2Settings`,
+`systemConfiguration`, `systemSettings` — all `false`, with `read: true` proving the call
+itself succeeded.
+
+So the controller is **not** the reason. These fields are null on this endpoint for every
+install shape we have seen, and the outlet topology has to come from `gcsadvancestate`
+(§1c) — which is where this integration already reads it. Nothing needs to change; the
+open question is closed, and no capture is needed for it.
 
 ### Outlet topology: read it from the controller
 
