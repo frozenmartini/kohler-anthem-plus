@@ -102,53 +102,13 @@ def test_outlets_named_after_their_fixture(coordinator):
     assert "Shower on" in names
 
 
-def test_limit_sensors_are_named_for_the_setting_not_the_outlet(coordinator):
-    """0.11.1 renamed `Rainhead Max Run Time`, which named the wrong thing.
-
-    The limit is timed per zone rather than per outlet, every outlet on the reference
-    install reports the same figure, and only one entity is created — so naming it after one
-    fixture read as a property of that fixture. `Max Shower Duration` is what the Konnect app
-    calls it, and matching the app is what makes a value recognisable.
-    """
-    names = {e.name for e in collect("sensor", coordinator)}
-    assert "Max Shower Duration" in names, sorted(names)
-    assert "Max Temperature" in names, sorted(names)
-    assert not any("Max Run Time" in name for name in names), sorted(names)
-
-
-def test_the_duration_rename_kept_its_unique_id(coordinator):
-    """A rename that moved the id would orphan history and every automation using it."""
-    ids = [e.unique_id for e in collect("sensor", coordinator)]
-    assert any(i.endswith("_outlet_1_max_run_time") for i in ids), sorted(ids)
-
-
-def test_max_shower_duration_is_reported_in_minutes(valve_model):
-    """The valve reports 1800 seconds; the app, the panel and Kohler all say 30 minutes."""
-    from homeassistant.const import UnitOfTime
-
-    valve = make_valve(valve_model, [31, 11, 1])
-    valve.outlet_run_times = {1: 1800}
-    coordinator = make_coordinator([valve])
-    sensor = next(
-        e
-        for e in collect("sensor", coordinator)
-        if e.unique_id.endswith("_outlet_1_max_run_time")
-    )
-    assert sensor.native_value == 30
-    assert sensor.native_unit_of_measurement == UnitOfTime.MINUTES
-
-
 def test_max_shower_duration_is_unknown_before_it_is_learned(valve_model):
     """`unknown` and zero are different answers; only one of them is safe to show."""
     valve = make_valve(valve_model, [31, 11, 1])
     valve.outlet_run_times = {}
-    coordinator = make_coordinator([valve])
-    sensor = next(
-        e
-        for e in collect("sensor", coordinator)
-        if e.unique_id.endswith("_outlet_1_max_run_time")
-    )
-    assert sensor.native_value is None
+    sensor = _duration_sensor(valve_model, {})
+    assert sensor.current_option is None
+    assert sensor.extra_state_attributes["reported_minutes"] is None
 
 
 def _zone_number_names(coordinator):
@@ -1313,17 +1273,26 @@ def test_firmware_entities_keep_their_ids_and_do_not_collide(valve_model):
 
 
 def _max_temperature_sensor(valve_model, tenths, unit):
+    """The Max Temperature **control**.
+
+    Was a diagnostic sensor until 0.18.1, when the read-only copy was retired — the
+    configuration entity reports the same value and can also change it. These tests moved
+    with it rather than being deleted: what they protect is how the valve's tenths are read
+    and converted, which is unchanged.
+    """
     from custom_components.kohler_anthem_plus.anthem_plus.state import OutletLimits
+    from custom_components.kohler_anthem_plus.number import OutletMaxTemperatureNumber
 
     valve = make_valve(valve_model, [31, 11, 1])
-    valve.gcs_state.outlet_limits[1] = OutletLimits(1, 16, 200, 1800, 200, 11, tenths)
+    # Replace every outlet: the control reads the lowest-numbered one, and a valve's
+    # outlets agree unless a write was lost.
+    for outlet_id in list(valve.gcs_state.outlet_limits):
+        valve.gcs_state.outlet_limits[outlet_id] = OutletLimits(
+            outlet_id, 16, 200, 1800, 200, 11, tenths, 150, 388, 1
+        )
     coordinator = make_coordinator([valve])
     coordinator.temperature_unit = unit
-    return next(
-        e
-        for e in collect("sensor", coordinator)
-        if e.unique_id.endswith("_outlet_1_max_temperature")
-    )
+    return OutletMaxTemperatureNumber(coordinator, valve)
 
 
 def test_max_temperature_reads_118f_on_a_fahrenheit_account(valve_model):
@@ -1339,7 +1308,8 @@ def test_max_temperature_stays_celsius_on_a_metric_account(valve_model):
     from homeassistant.const import UnitOfTemperature
 
     sensor = _max_temperature_sensor(valve_model, 478, "Celsius")
-    assert sensor.native_value == pytest.approx(47.8)
+    # A whole-degree control: 47.8 °C is reported as 48, the nearest settable value.
+    assert sensor.native_value == 48
     assert sensor.native_unit_of_measurement == UnitOfTemperature.CELSIUS
 
 
@@ -1425,14 +1395,11 @@ def _duration_sensor(valve_model, run_times):
     silently absorbed — two mistakes cancelling out, and the reason a `ValueError` on real
     hardware went uncaught.
     """
+    from custom_components.kohler_anthem_plus.select import OutletRunTimeSelect
+
     valve = make_valve(valve_model, [31, 11, 1])
     valve.outlet_run_times = run_times
-    coordinator = make_coordinator([valve])
-    return next(
-        e
-        for e in collect("sensor", coordinator)
-        if e.unique_id.endswith("_outlet_1_max_run_time")
-    )
+    return OutletRunTimeSelect(make_coordinator([valve]), valve)
 
 
 def test_max_shower_duration_reports_the_shortest_outlet(valve_model):
@@ -1444,7 +1411,9 @@ def test_max_shower_duration_reports_the_shortest_outlet(valve_model):
     to and the soonest the water can stop.
     """
     sensor = _duration_sensor(valve_model, {1: 1800, 2: 3600, 3: 1800})
-    assert sensor.native_value == 30
+    # The control reports the shortest, same as the retired sensor did.
+    assert sensor.extra_state_attributes["reported_minutes"] == 30.0
+    assert sensor.current_option == "30 minutes"
     assert sensor.extra_state_attributes["outlets_agree"] is False
     assert sensor.extra_state_attributes["per_outlet"] == {
         "Rainhead": 30,
@@ -1456,14 +1425,16 @@ def test_max_shower_duration_reports_the_shortest_outlet(valve_model):
 def test_max_shower_duration_says_so_when_outlets_agree(valve_model):
     """Shower Left: all three at 1800 s — the healthy state, and the normal one."""
     sensor = _duration_sensor(valve_model, {1: 1800, 2: 1800, 3: 1800})
-    assert sensor.native_value == 30
+    assert sensor.current_option == "30 minutes"
     assert sensor.extra_state_attributes["outlets_agree"] is True
 
 
 def test_max_shower_duration_has_no_attributes_before_it_is_learned(valve_model):
     sensor = _duration_sensor(valve_model, {})
-    assert sensor.native_value is None
-    assert sensor.extra_state_attributes == {}
+    assert sensor.current_option is None
+    # No run times learned: no per-outlet breakdown to publish.
+    assert "per_outlet" not in sensor.extra_state_attributes
+    assert sensor.extra_state_attributes["reported_minutes"] is None
 
 
 def test_a_longer_first_outlet_does_not_hide_a_shorter_one(valve_model):
@@ -1473,8 +1444,9 @@ def test_a_longer_first_outlet_does_not_hide_a_shorter_one(valve_model):
     telling somebody they have twice the shower they have. Same lost-write cause, with the
     surviving stale value on a different outlet.
     """
-    sensor = _duration_sensor(valve_model, {0: 3600, 1: 1800, 2: 1800})
-    assert sensor.native_value == 30
+    sensor = _duration_sensor(valve_model, {1: 3600, 2: 1800, 3: 1800})
+    assert sensor.extra_state_attributes["reported_minutes"] == 30.0
+    assert sensor.extra_state_attributes["outlets_agree"] is False
 
 
 # --------------------------------------------------------------------------- #
@@ -1571,12 +1543,12 @@ def test_max_temperature_is_a_setting_not_a_hardware_ceiling(valve_model):
     """
     before = _max_temperature_sensor(valve_model, 450, "Fahrenheit")
     after = _max_temperature_sensor(valve_model, 477, "Fahrenheit")
-    assert before.native_value == pytest.approx(113.0, abs=0.05)
-    # 477 tenths is 47.7 °C = 117.86 °F, which the entity's display precision shows as 118 —
-    # and 477 is exactly what `unit_to_celsius(118, "Fahrenheit")` produces, so Kohler's
-    # stored value and this integration's conversion table agree on what "118 °F" means.
-    assert after.native_value == pytest.approx(117.86, abs=0.05)
-    assert round(after.native_value) == 118
+    assert before.native_value == 113
+    # 477 tenths is 47.7 °C = 117.86 °F, reported as a whole 118 because this is a
+    # whole-degree control — 117.86 is not a value anyone can set. The round trip is exact
+    # in both directions: `unit_to_celsius(118, "Fahrenheit")` produces 47.7 °C = 477
+    # tenths, so Kohler's stored value and this integration agree on what "118 °F" means.
+    assert after.native_value == 118
 
 
 def test_the_slider_does_not_follow_the_scald_limit(valve_model):
@@ -2340,17 +2312,17 @@ def test_max_shower_duration_publishes_attributes_without_raising():
     from custom_components.kohler_anthem_plus.anthem_plus.models import (
         model_for_topology,
     )
-    from custom_components.kohler_anthem_plus.sensor import OutletMaxRunTimeSensor
+    from custom_components.kohler_anthem_plus.select import OutletRunTimeSelect
 
     for topology in ((3, 0), (2, 0), (3, 3)):
         model = model_for_topology(*topology)
         types = [31, 11, 1, 11, None, 21][: model.total_outlets]
         valve = make_valve(model, types)
         coordinator = make_coordinator([valve])
-        sensor = OutletMaxRunTimeSensor(coordinator, valve, 1)
+        sensor = OutletRunTimeSelect(coordinator, valve)
 
         # The value was always right; the attributes are what failed.
-        assert sensor.native_value == 30.0, model.sku
+        assert sensor.current_option == "30 minutes", model.sku
         attributes = sensor.extra_state_attributes
         assert attributes["outlets_agree"] is True, model.sku
         # One entry per outlet, each named for the fixture actually at that position.
@@ -2361,37 +2333,12 @@ def test_max_shower_duration_publishes_attributes_without_raising():
     # invisible in the count and only showed in the names.
     model = model_for_topology(3, 0)
     valve = make_valve(model, [31, 11, 1])
-    sensor = OutletMaxRunTimeSensor(make_coordinator([valve]), valve, 1)
+    sensor = OutletRunTimeSelect(make_coordinator([valve]), valve)
     assert list(sensor.extra_state_attributes["per_outlet"]) == [
         "Rainhead",
         "Showerhead",
         "Handshower",
     ]
-
-
-def test_max_shower_duration_shows_plain_minutes():
-    """It must read "30 min", the way the Konnect app says it — not `0:30:00`.
-
-    `SensorDeviceClass.DURATION` looks right and is wrong here: Home Assistant renders
-    duration entities as `H:MM:SS` and attaches a unit converter, so the value can also be
-    re-expressed in hours or seconds. Matching the app is the reason this entity was renamed
-    to `Max Shower Duration` in 0.11.1, and the display is the half that makes it match.
-    """
-    from homeassistant.const import UnitOfTime
-
-    from custom_components.kohler_anthem_plus.anthem_plus.models import (
-        model_for_topology,
-    )
-    from custom_components.kohler_anthem_plus.sensor import OutletMaxRunTimeSensor
-
-    model = model_for_topology(3, 0)
-    valve = make_valve(model, [31, 11, 1])
-    sensor = OutletMaxRunTimeSensor(make_coordinator([valve]), valve, 1)
-
-    assert sensor.native_value == 30.0
-    assert sensor.native_unit_of_measurement == UnitOfTime.MINUTES
-    # The assertion that matters: no device class, so nothing reformats or converts it.
-    assert sensor.device_class is None
 
 
 def test_usage_probe_separates_interval_from_range():
@@ -2972,3 +2919,55 @@ async def test_a_partial_write_says_which_outlets_took_it(monkeypatch):
         await valve.async_write_outlet_setting(maximum_run_time=2700)
     # Two landed, the third did not — and the error names how far it got.
     assert written == [0, 1]
+
+
+def test_the_purge_removes_the_retired_sensors_and_nothing_else():
+    """The retired diagnostics go; the controls that replaced them must not.
+
+    🚨 The purge matches on **suffix**, and the controls' ids contain the same words as the
+    sensors they replaced. A bare `_max_temperature` suffix would be one careless id away
+    from deleting the very entity the sensor was retired in favour of — so the suffixes name
+    the outlet, which no control id does.
+    """
+    from custom_components.kohler_anthem_plus import _REMOVED_UNIQUE_ID_SUFFIXES
+
+    retired = (
+        "gcs-x_outlet_1_max_run_time",
+        "gcs-x_outlet_1_max_temperature",
+        "gcs-x_total_water",
+    )
+    kept = (
+        # The three configuration entities from 0.18.0.
+        "gcs-x_max_run_time_setting",
+        "gcs-x_max_temperature_setting",
+        "gcs-x_default_temperature",
+        # And a sample of everything else.
+        "gcs-x_water_today",
+        "gcs-x_water_this_week",
+        "gcs-x_firmware",
+        "gcs-x_zone_1_hex",
+    )
+
+    for unique_id in retired:
+        assert unique_id.endswith(_REMOVED_UNIQUE_ID_SUFFIXES), unique_id
+    for unique_id in kept:
+        assert not unique_id.endswith(_REMOVED_UNIQUE_ID_SUFFIXES), unique_id
+
+
+def test_the_duration_control_kept_the_lost_write_diagnosis(valve_model):
+    """`outlets_agree` moved to the control rather than being retired with the sensor.
+
+    It is the signal that a write was lost part-way — established on real hardware, where
+    one valve held 3600 s on its Showerhead and 1800 s on the other two — and losing it
+    with the sensor would have thrown away the only way to see that state.
+    """
+    disagreeing = _duration_sensor(valve_model, {1: 1800, 2: 3600, 3: 1800})
+    assert disagreeing.extra_state_attributes["outlets_agree"] is False
+    assert disagreeing.extra_state_attributes["per_outlet"] == {
+        "Rainhead": 30.0,
+        "Showerhead": 60.0,
+        "Handshower": 30.0,
+    }
+
+    agreeing = _duration_sensor(valve_model, {1: 1800, 2: 1800, 3: 1800})
+    assert agreeing.extra_state_attributes["outlets_agree"] is True

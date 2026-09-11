@@ -33,7 +33,7 @@ from .const import (
     WARMUP_LABELS,
 )
 from .coordinator import Controller, KohlerAnthemPlusCoordinator, Valve
-from .entity import KohlerControllerEntity, KohlerValveEntity
+from .entity import KohlerControllerEntity, KohlerValveEntity, outlet_name
 
 # Shown when no favourite is driving the valve. A `select` must always have its current
 # option present in the option list or Home Assistant logs an error on every update, and
@@ -683,8 +683,20 @@ class OutletRunTimeSelect(KohlerValveEntity, SelectEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
+        """What the valve holds, and whether its outlets agree about it.
+
+        `outlets_agree: false` means **a write was lost**, not that the outlets are
+        configured differently — there is one duration to configure, and the app writes it
+        one outlet at a time, stopping at the first failure. Selecting a duration here
+        rewrites every outlet and repairs it.
+
+        Carried over from the diagnostic sensor this control replaced in 0.18.1: the
+        distinction was established on real hardware (one valve at 3600 s on its Showerhead
+        and 1800 s on the other two) and would have been lost with it.
+        """
         seconds = self._seconds
-        return {
+        run_times = self._valve.outlet_run_times
+        attributes: dict[str, Any] = {
             # Always the truth, including when it is not one of the six above.
             "reported_minutes": None if seconds is None else seconds / 60,
             "in_app_picker": seconds in OUTLET_RUN_TIME_CHOICES_SECONDS,
@@ -693,6 +705,17 @@ class OutletRunTimeSelect(KohlerValveEntity, SelectEntity):
                 seconds is not None and seconds > OUTLET_RUN_TIME_APP_SAFE_MAX_SECONDS
             ),
         }
+        if run_times:
+            attributes["outlets_agree"] = len(set(run_times.values())) == 1
+            per_outlet: dict[str, float] = {}
+            for outlet, value in sorted(run_times.items()):
+                # `outlet_run_times` is 1-based and `outlet_location` expects that — passing
+                # `outlet + 1` here is the off-by-one that made the old sensor raise on every
+                # attribute read and show `unknown` (fixed 0.16.1).
+                zone, index = self._valve.model.outlet_location(outlet)
+                per_outlet[outlet_name(self._valve, zone, index + 1)] = value / 60
+            attributes["per_outlet"] = per_outlet
+        return attributes
 
     async def async_select_option(self, option: str) -> None:
         try:

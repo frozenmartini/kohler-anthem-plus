@@ -198,6 +198,34 @@ An outlet whose type the valve has not reported falls back to its position: `Out
 | `At Temperature` | binary sensor | Whether the water has reached its setpoint |
 | `Problem` | binary sensor | Whether the valve reports a fault. **Never yet observed set** on any captured system — see `fault_detection_verified` on the entity |
 
+#### The three settings the Konnect app also has
+
+Configuration entities — they report what the valve holds **and change it**. Writable since
+0.18.0; the read-only copies that used to sit in the diagnostics table were retired in 0.18.1
+once they were a second, weaker view of the same thing.
+
+| Entity | Kind | Range |
+|---|---|---|
+| `Max Temperature` | number | 🚨 The **scald limit**, 92-118 °F — the app's own range |
+| `Default Temperature` | number | Where a shower starts, 59 °F up to **whatever the scald limit currently is**. Lower `Max Temperature` and this entity's ceiling follows it down, exactly as the app does |
+| `Max Shower Duration` | select | 15 / 20 / 25 / 30 / 45 / 60 minutes — the app's six options, not a free range: its picker skips 35/40/50/55, and whether the valve accepts those is untested |
+
+**Every change is verified.** The valve's endpoint replaces one outlet's whole record and has
+no list form, so a change is one call per outlet, chained. Afterwards this re-reads the valve
+and tells you what actually landed — including the partial case, where some outlets took the
+new value and others did not. A `201` from that endpoint means *accepted for delivery*, never
+*applied*, and the Konnect app never checks.
+
+Expect about **30 seconds** before a change confirms. That is not a hang: the cloud document
+only updates once the valve reports back, and reading sooner returns the old value.
+
+`Max Shower Duration` carries `outlets_agree` — `false` means a write was lost part-way and
+the outlets now hold different durations. Selecting a duration rewrites all of them.
+
+⚠️ **Konnect 3.0.1 misreads any duration above 30 minutes**, showing it as 25 and writing 1500 s
+if you tap Save. Fixed in 3.0.5. Setting 45 or 60 here is safe for the valve and safe in a
+current app; only an out-of-date one would quietly undo it.
+
 #### Outlet names
 
 Outlet switches are named after the fixture the valve reports for that outlet, not its
@@ -255,8 +283,6 @@ the valve's own byte is authoritative, including a change made at the panel mid-
 | `Hex` | valve | The current command word for that zone — copy it into `send_valve_hex`. `Zone N Hex` on a two-zone valve |
 | `Water Used Today` | valve | Water used since local midnight, from Kohler's own per-day usage series — the same data behind the app's chart. Refreshed about 90 seconds after a shower ends, not on a clock: usage only moves while water runs, so a day with no shower costs no cloud calls. Enabled by default |
 | `Water Used This Week` | valve | The last seven days including today, as a rolling window. **Not a calendar week**: `gcs-usage` refuses `Interval=WEEK` outright (verified at three ranges — see [`gcs/api.md`](gcs/api.md)), so a week is summed from seven daily buckets. `per_day` carries the breakdown. Enabled by default |
-| `Max Shower Duration` | valve | The valve's configured run-time ceiling, **in minutes** — the same name and unit the Konnect app uses, and shown as `30 min` rather than `0:30:00` because it deliberately carries no duration device class (which would also let the frontend convert it to hours). **One sensor, not one per outlet**: every outlet observed reports the same figure, and the valve times the limit per zone rather than per outlet. Enabled by default, unlike the rest of this table |
-| `Max Temperature` | valve | 🚨 The **scald limit** — the ceiling the valve will not exceed however it is commanded, shown in the account's own unit (118 °F on the reference system). Read-only; this integration never writes it. Enabled by default |
 | `Zone N Active` | valve | Whether that zone is currently running water |
 | `Preset Active` | valve | Whether a stored preset is driving the valve |
 | `Interface Firmware` | valve | The touchscreen's own version — what the Konnect app calls the interface firmware. Reads `unknown` where the record carries no interface version |

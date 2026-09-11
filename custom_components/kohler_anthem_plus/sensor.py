@@ -26,7 +26,6 @@ from homeassistant.components.sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     UnitOfTemperature,
-    UnitOfTime,
     UnitOfVolume,
 )
 from homeassistant.core import HomeAssistant
@@ -43,7 +42,6 @@ from .entity import (
     KohlerControllerEntity,
     KohlerValveEntity,
     ZoneWordEntity,
-    outlet_name,
     zone_label,
 )
 
@@ -97,8 +95,6 @@ async def async_setup_entry(
             ),
             ValveRegisteredSensor(coordinator, valve),
             ValveHexSensor(coordinator, valve, 1),
-            OutletMaxRunTimeSensor(coordinator, valve, 1),
-            OutletMaxTemperatureSensor(coordinator, valve, 1),
         ]
         if valve.model.uses_valve2:
             entities.append(ValveHexSensor(coordinator, valve, 2))
@@ -855,192 +851,6 @@ class ValveHexSensor(ZoneWordEntity, ValveDiagnosticSensor):
             # Absent on a REST-seeded word, present on anything from MQTT.
             "from_device": bool(word.raw),
         }
-
-
-class OutletMaxRunTimeSensor(ValveDiagnosticSensor):
-    """The `maximumRunTime` the valve has reported for one outlet.
-
-    Learned two ways: read over REST from `gcsadvancestate` at setup and on every MQTT
-    reconnect (the 2026-08-17 correction — this was long believed unreadable on demand),
-    and absorbed from the valve's unprompted one-outlet-at-a-time MQTT announcements.
-    Both funnel through `Valve._learn_run_times`. This sensor exists so a
-    shower-time-limit change made on the panel or the app shows up in Home Assistant
-    without waiting for a shower: watch this value after changing the limit, rather than
-    guessing whether it took.
-
-    **Reads `unknown` until this specific outlet has been learned at least once** —
-    normally within seconds of Home Assistant starting, via the REST read, but genuinely
-    unknown before that, not zero. It is also the same figure the run-time cutoff feature arms itself from
-    (`Valve.outlet_run_times`), so a value showing up here means that outlet is now
-    protected by the cutoff, too.
-
-    **There is one duration, not one per outlet** — the Konnect app offers a single master
-    setting, and the valve stores that same number on every outlet's record.
-
-    ⚠️ **But the outlets can disagree, and when they do it is a fault rather than a
-    setting.** The app has no list form: it writes **one call per outlet**, each carrying the
-    same `maximumRuntime`, and only issues the next after a 2xx — so a failure part-way
-    leaves the valve holding the new value on some outlets and the old one on others
-    (`docs/gcs/api.md`, "one outlet per call, chained on success").
-
-    Caught on the owner's own hardware 2026-09-10: one valve read 3600 s on all three outlets
-    at 08:38, then 1800 s on its Rainhead and Handshower and **still 3600 s on its
-    Showerhead** at 15:22 — a 60→30 minute change where one of the three writes did not land.
-    The app kept showing 30, because the app shows the value it sent.
-
-    So this reports the **shortest**: with a stale outlet in the mix the master setting is the
-    lower one (the write was moving that way), and it is the soonest the water can stop
-    either way. `per_outlet` publishes the full map and `outlets_agree` goes `false`, which
-    is the signal that a write was lost — re-save the duration in the app to repair it.
-    """
-
-    _attr_icon = "mdi:timer-cog-outline"
-    # ⚠️ **Deliberately no `SensorDeviceClass.DURATION`.** It looks like the right class and
-    # it is the wrong one here, for two reasons. Home Assistant renders duration entities as
-    # `H:MM:SS`, so a 30-minute ceiling displayed as `0:30:00` — and `DURATION` carries a
-    # unit converter, so the frontend is free to re-express the value in hours or seconds on
-    # a whim or a user override. The Konnect app, the touchscreen and Kohler's own
-    # documentation all say "30 minutes", and matching the app is the whole reason this
-    # entity was renamed to `Max Shower Duration` in 0.11.1. Without the device class the
-    # unit below is shown verbatim and nothing converts it.
-    #
-    # The cost is real and accepted: no automatic unit conversion for someone who would
-    # rather see seconds. That is a setting nobody has asked for, against a display everyone
-    # reads at a glance.
-    # **Minutes, not seconds.** The valve reports `maximumRunTime` in seconds (1800), and
-    # this published that number raw — while the Konnect app, the touchscreen and Kohler's
-    # own documentation all say "30 minutes". Home Assistant converts for display where a
-    # device class and unit are set, but the *stored* value is what automations and history
-    # read, so it is converted here rather than left to the frontend.
-    _attr_native_unit_of_measurement = UnitOfTime.MINUTES
-    _attr_suggested_display_precision = 0
-    _attr_entity_registry_enabled_default = True
-
-    def __init__(
-        self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve, outlet: int
-    ) -> None:
-        super().__init__(coordinator, valve)
-        self._outlet = outlet
-        # **Named for the setting, not the outlet.** It was `Rainhead Max Run Time` — the
-        # fixture its switch is named after — which read as a property of that one outlet.
-        # It is not: the limit is timed per zone (see `runtime_cutoff.py`), every outlet on
-        # this install reports the same figure, and only one entity is created. "Max Shower
-        # Duration" is what the Konnect app calls it, and matching the app is what makes a
-        # value recognisable.
-        self._attr_name = "Max Shower Duration"
-        # Unique id unchanged: a rename must not orphan history or an automation.
-        self._attr_unique_id = f"{self._device_id}_outlet_{outlet}_max_run_time"
-
-    @property
-    def available(self) -> bool:
-        """A learned setting, not a live reading — available once known, not gated on state."""
-        return self.coordinator.last_update_success
-
-    @property
-    def native_value(self) -> float | None:
-        run_times = self._valve.outlet_run_times
-        if not run_times:
-            return None
-        # The soonest the water can stop, and — where a write was lost part-way — the value
-        # the master setting was moving to. See the class docstring.
-        seconds = min(run_times.values())
-        # 1800 -> 30. Kept as a float so a limit that is not a whole number of minutes is
-        # reported honestly rather than rounded into a lie; the display precision above
-        # shows the usual whole-minute case as `30`.
-        return seconds / 60
-
-    @property
-    def extra_state_attributes(self) -> dict[str, object]:
-        """The per-outlet breakdown, named the way the outlets are named elsewhere.
-
-        `outlets_agree: false` means **a write was lost**, not that the outlets are
-        configured differently — there is only one duration to configure. Re-saving the
-        duration in the Konnect app rewrites every outlet and repairs it.
-
-        Published either way, so a report from a healthy install says so positively rather
-        than leaving it to be inferred from an absent attribute.
-        """
-        run_times = self._valve.outlet_run_times
-        if not run_times:
-            return {}
-        per_outlet: dict[str, float] = {}
-        for outlet, seconds in sorted(run_times.items()):
-            # ⚠️ **`outlet_run_times` is already 1-based** — it maps the 0-based internal
-            # store up by one. This passed `outlet + 1`, so every outlet was looked up one
-            # place too high and the last one ran off the end: `outlet_location` raises
-            # `ValueError` for an outlet the model does not have, and an exception while
-            # Home Assistant reads attributes fails the whole entity — which is why Max
-            # Shower Duration read `unknown` while `native_value` was returning 30 the
-            # entire time. Fixed 2026-09-11; the test fixture had hidden it by handing
-            # entities 0-based keys no real valve produces.
-            zone, index = self._valve.model.outlet_location(outlet)
-            per_outlet[outlet_name(self._valve, zone, index + 1)] = seconds / 60
-        return {
-            "outlets_agree": len(set(run_times.values())) == 1,
-            "per_outlet": per_outlet,
-        }
-
-
-class OutletMaxTemperatureSensor(ValveDiagnosticSensor):
-    """The scald limit — ``maximumOutletTemperature``, as the app's "Max Temperature".
-
-    🚨 **A safety setting, and a configurable one** — not a fixed hardware ceiling. Demonstrated
-    2026-09-10: the owner's left valve read 450 tenths (113 °F), was changed to 118 °F in the
-    Konnect app, and read 477 tenths on the next diagnostics download minutes later, all three
-    outlets together. So this reports *what the valve is currently set to*, which can change
-    at any time from the app or the panel — it is the ceiling in force now, not a property of
-    the hardware.
-
-    Worth surfacing because the Konnect app is otherwise the only place it is visible, and
-    because two valves on one account can sit at different values without anything saying so.
-
-    Read-only here — this integration never writes it, and `docs/gcs/api.md` warns that a
-    whole-record write which omits it or sends it on the wrong scale silently changes it.
-
-    Reported in the account's own temperature unit, like every other temperature this
-    integration publishes, so an install set to Fahrenheit reads `118 °F` rather than a
-    converted-looking 47.8.
-
-    Reads `unknown` until the valve has reported it — which is not the same as "no limit".
-    """
-
-    _attr_icon = "mdi:thermometer-alert"
-    _attr_device_class = SensorDeviceClass.TEMPERATURE
-    _attr_suggested_display_precision = 0
-    _attr_entity_registry_enabled_default = True
-
-    def __init__(
-        self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve, outlet: int
-    ) -> None:
-        super().__init__(coordinator, valve)
-        self._outlet = outlet
-        # Named for the setting, like the duration beside it — and for the same reason: the
-        # limit is the valve's, not one outlet's.
-        self._attr_name = "Max Temperature"
-        self._attr_unique_id = f"{self._device_id}_outlet_{outlet}_max_temperature"
-
-    @property
-    def native_unit_of_measurement(self) -> str:
-        """The account's own unit, matching every other temperature on the device."""
-        if self.coordinator.temperature_unit == "Fahrenheit":
-            return UnitOfTemperature.FAHRENHEIT
-        return UnitOfTemperature.CELSIUS
-
-    @property
-    def available(self) -> bool:
-        """A learned setting, not a live reading — available once known."""
-        return self.coordinator.last_update_success
-
-    @property
-    def native_value(self) -> float | None:
-        limits = self._valve.gcs_state.outlet_limits.get(self._outlet)
-        tenths = None if limits is None else limits.maximum_temperature_tenths
-        if tenths is None:
-            return None
-        celsius = tenths / 10
-        if self.coordinator.temperature_unit == "Fahrenheit":
-            return celsius * 9 / 5 + 32
-        return celsius
 
 
 class ControllerDiagnosticSensor(KohlerControllerEntity, SensorEntity):

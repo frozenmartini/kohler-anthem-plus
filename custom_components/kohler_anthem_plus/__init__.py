@@ -67,6 +67,17 @@ _REMOVED_UNIQUE_ID_SUFFIXES = (
     # statistics. `Water Used This Year` and `Water Used This Month` publish Kohler's own
     # usage series instead, in units that are actually established.
     "_total_water",
+    # `Max Shower Duration` and `Max Temperature` as read-only diagnostics, retired in
+    # 0.18.1. Both became configuration entities in 0.18.0 — a number and a select that
+    # report the same values and can also change them — so the sensors were a second copy
+    # of a setting, showing the same figure with no way to act on it.
+    #
+    # ⚠️ **Outlet-qualified on purpose.** The controls' own ids end `_max_temperature_setting`
+    # and `_max_run_time_setting`; a bare `_max_temperature` suffix would not match those
+    # today, but naming the outlet makes it impossible for a future id to collide and purge
+    # the control along with the sensor it replaced.
+    "_outlet_1_max_run_time",
+    "_outlet_1_max_temperature",
 )
 
 
