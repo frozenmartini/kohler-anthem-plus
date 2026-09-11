@@ -340,17 +340,25 @@ Each series entry: `timestamp` (long), `volume` (double), `onDuration`,
 the full series; `Interval=WEEK` and `Interval=YEAR` were both rejected with the generic 400
 on this account, so `MONTH` may be the only one a GCS valve supports.
 
-⚠️ **That test cannot support the conclusion drawn from it** (noted 2026-09-11). Both
-rejections used the same 400-day window as the MONTH call — which asks for roughly **57
-weekly buckets against 13 monthly ones**. A server that caps result rows answers the same
-generic 400 as an unsupported interval, so "WEEK is unsupported" and "that range is too long
-for WEEK" are indistinguishable in that evidence. `DAY` was never asked at all, yet the
-MONTH-only conclusion was written as though it had been.
+🚨 **`WEEK` IS SUPPORTED — that conclusion was wrong** (corrected 2026-09-11). The owner
+confirmed the Konnect app shows weekly statistics on this same account and hardware. The app
+reaches this endpoint through `getAnthemWaterUsageData` and its week tab sends `Interval=WEEK`
+(the `tab_week` const-string above), so the endpoint plainly serves weekly buckets. Whatever
+produced that 400, it was not an unsupported interval.
 
-`probe_usage` now asks three more questions to separate the causes: `DAY` over 14 days,
-`WEEK` over 90 days (13 buckets — the same count MONTH is known to serve), and the original
-long-range `WEEK` kept beside it as the control. Until that runs, treat the interval support
-as **open**, not settled. All three date formats
+**The test could never have shown otherwise.** Both rejections used the same 400-day window as
+the MONTH call — which asks for roughly **57 weekly buckets against 13 monthly ones**. A server
+that caps result rows answers the same generic 400 as one that does not know the interval, so
+"WEEK is unsupported" and "that range is too long for WEEK" were indistinguishable in that
+evidence. The conclusion went beyond what the test could support, and `DAY` was never asked at
+all yet was covered by it too.
+
+**The live evidence beats the inference**: a feature visible in the app is proof the API serves
+it, and no probe result outranks that. The remaining question is not *whether* `WEEK` works but
+*what request shape* makes it work, which is why `probe_usage` now asks it over three ranges —
+400 days (the original, kept as the control), 90 days (~12 buckets) and 28 days (4 buckets,
+about what a week tab displays). Where those diverge locates the real constraint. `DAY` over 14
+days is asked beside them, on the same reasoning. All three date formats
 tried (`yyyy-MM-dd`, ISO-8601 with `Z`, `MM-dd-yyyy`) were accepted and returned identical
 payloads, so the parser is lenient.
 

@@ -543,6 +543,12 @@ _USAGE_ATTEMPTS: tuple[tuple[str, str], ...] = (
     # "that range is too long for WEEK". Re-asked over 90 days, which is 13 buckets — the
     # same count MONTH is known to serve.
     ("WEEK iso (90d)", "FromDate={from_quarter}&ToDate={to}&Interval=WEEK"),
+    # **And shorter still.** The owner confirmed 2026-09-11 that the Konnect app *does* show
+    # weekly stats, so the endpoint serves WEEK and the 400 came from something else in the
+    # request. The app's week tab shows a handful of weeks, not 57, so if a row cap is the
+    # cause it may bite well below 90 days. 28 days is 4 buckets — about what a week tab
+    # displays, and the smallest range that still proves a series came back.
+    ("WEEK iso (28d)", "FromDate={from_month}&ToDate={to}&Interval=WEEK"),
     # Same contract, other date formats from the app's string pool.
     ("MONTH iso8601-Z", "FromDate={from_z}&ToDate={to_z}&Interval=MONTH"),
     ("MONTH us", "FromDate={from_us}&ToDate={to_us}&Interval=MONTH"),
@@ -571,6 +577,7 @@ def usage_probe_substitutions(now: datetime | None = None) -> dict[str, str]:
         # Short windows for the DAY and WEEK attempts — see `_USAGE_ATTEMPTS`.
         "from_recent": (now - timedelta(days=14)).date().isoformat(),
         "from_quarter": (now - timedelta(days=90)).date().isoformat(),
+        "from_month": (now - timedelta(days=28)).date().isoformat(),
     }
 
 

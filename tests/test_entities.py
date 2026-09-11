@@ -2377,11 +2377,15 @@ def test_max_shower_duration_shows_plain_minutes():
 
 
 def test_usage_probe_separates_interval_from_range():
-    """WEEK was rejected over 400 days — which is ~57 buckets, not 13.
+    """WEEK **is** supported — the Konnect app shows weekly stats on this same account.
 
-    A row cap answers the same generic 400 as an unsupported interval, so that test could
-    not tell the two apart. Both the long and the short WEEK call must be present for the
-    result to mean anything, and DAY must be asked at all — it never was.
+    So the 400 it once returned was not an unsupported interval. It was asked over 400 days,
+    which is ~57 weekly buckets against the 13 monthly ones that succeeded, and a row cap
+    answers with the same generic 400 — the test could never have told the two apart.
+
+    The question now is which request shape works, so several WEEK ranges must be asked with
+    the original long call kept as a control. DAY is asked on the same reasoning: it was
+    never tried at all, yet the MONTH-only conclusion was written as though it had been.
     """
     from custom_components.kohler_anthem_plus.services import (
         _USAGE_ATTEMPTS,
@@ -2393,9 +2397,7 @@ def test_usage_probe_separates_interval_from_range():
         for label, query in _USAGE_ATTEMPTS
     }
     weeks = [q for label, q in rendered.items() if "Interval=WEEK" in q]
-    assert len(weeks) == 2, (
-        "need a long and a short WEEK call to separate the two causes"
-    )
+    assert len(weeks) >= 3, "need several WEEK ranges to locate where the limit bites"
     assert any("Interval=DAY" in q for q in rendered.values())
     # The short calls must actually be shorter, or they test nothing.
     import re
@@ -2409,6 +2411,10 @@ def test_usage_probe_separates_interval_from_range():
         return (to - frm).days
 
     spans = sorted(span_days(q) for q in weeks)
-    assert spans[0] <= 90 < spans[1], (
-        f"WEEK spans are {spans}; need a short one and a long one"
+    # A short range (roughly what the app's week tab shows), a middling one, and the original
+    # long call kept as the control. Where those diverge locates the real constraint.
+    assert spans[0] <= 30, f"need a short WEEK range; spans are {spans}"
+    assert spans[-1] >= 365, (
+        f"keep the original long call as a control; spans are {spans}"
     )
+    assert len(set(spans)) == len(spans), f"WEEK ranges must differ; spans are {spans}"
