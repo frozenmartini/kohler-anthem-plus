@@ -46,12 +46,13 @@
         "step": {
           "confirm": {
             "title": "Delete the old capture folder?",
-            "description": "Versions before 0.4.1 wrote debug captures to `{path}` on every install \u2014 the author's own development tooling, switched on by mistake for everyone. Here it holds {count} files, {size_mb} MB. Nothing reads or writes them any more.\n\n**Submit** deletes the folder. Choose **Ignore** on the issue to keep it instead \u2014 the files are inert either way.\n\nThis is separate from the Report Log switch, whose files live inside the integration folder and are not touched."
+            "description": "Versions before 0.4.1 wrote debug captures to `{path}` on every install \u2014 the author's own development tooling, switched on by mistake for everyone. Here it holds {count} files, {size_mb} MB. Nothing reads or writes them any more. (If an earlier attempt to delete it was interrupted, the files are at `{aside}` instead; Submit clears that too.)\n\n**Submit** deletes the folder. Choose **Ignore** on the issue to keep it instead \u2014 the files are inert either way.\n\nThis is separate from the Report Log switch, whose files live inside the integration folder and are not touched."
           }
         },
         "abort": {
           "not_ours": "`{path}` holds something this integration did not write, so nothing was deleted. Remove the folder by hand if you no longer need it.",
-          "failed": "Deleting `{path}` failed part-way: a file could not be removed. Whatever is left is still there under its original name; remove it by hand. Home Assistant's log says which file."
+          "failed": "Deleting `{path}` did not go through. The folder is back at that path, possibly with fewer of the capture files than before. Home Assistant's log says why. Remove it by hand if you no longer need it.",
+          "stranded": "Something is in the way at `{aside}`: either a folder left by an earlier, interrupted delete that holds files this integration did not write, or this delete stopped part-way and the folder could not be put back. Look at `{path}` and `{aside}` and remove by hand what you no longer need. Home Assistant's log says why."
         }
       }
     }

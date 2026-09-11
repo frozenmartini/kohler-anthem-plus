@@ -277,11 +277,27 @@ class ReportLog:
             self._close_locked()
             # Off and on again inside one second would land on the episode just closed and
             # merge two switch-ons into one attachment; take the next free name instead.
-            # (`resume` reopens an existing file on purpose; only `start` guards.)
+            # The name is *reserved* by creating the file exclusively, not by looking, so
+            # two starts in the same second — the valve's switch and the controller's, or
+            # two config entries sharing this directory — cannot both claim it. (`resume`
+            # reopens an existing file on purpose; only `start` guards.)
             base, nth = stem, 1
-            while os.path.exists(os.path.join(self._directory, f"{stem}.jsonl")):
-                nth += 1
-                stem = f"{base}-{nth}"
+            try:
+                os.makedirs(self._directory, exist_ok=True)
+                while True:
+                    try:
+                        os.close(os.open(os.path.join(self._directory, f"{stem}.jsonl"),
+                                         os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644))
+                        break
+                    except FileExistsError:
+                        nth += 1
+                        stem = f"{base}-{nth}"
+            except OSError:
+                # No reservation possible (read-only disk, a filesystem without O_EXCL):
+                # fall back to looking, and let `_open_locked` below log the real problem.
+                while os.path.exists(os.path.join(self._directory, f"{stem}.jsonl")):
+                    nth += 1
+                    stem = f"{base}-{nth}"
             self._stem = stem
             try:
                 self._open_locked()
