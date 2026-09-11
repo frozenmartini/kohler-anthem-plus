@@ -528,6 +528,14 @@ _USAGE_ATTEMPTS: tuple[tuple[str, str], ...] = (
     ("MONTH iso", "FromDate={from}&ToDate={to}&Interval=MONTH"),
     ("YEAR iso", "FromDate={from}&ToDate={to}&Interval=YEAR"),
     ("WEEK iso", "FromDate={from}&ToDate={to}&Interval=WEEK"),
+    # **DAY, over a short range.** Never tried before 2026-09-11, which is why "MONTH may be
+    # the only interval a GCS valve supports" was only ever a maybe: YEAR and WEEK were
+    # rejected, DAY was simply never asked. A daily figure is the one thing `gcs-usage`
+    # cannot currently give ("Water Used Today"), so this is the call that settles it.
+    #
+    # A short range on purpose: 400 days of daily buckets is a large response for a probe,
+    # and if DAY works at all it works on 14 days.
+    ("DAY iso (14d)", "FromDate={from_recent}&ToDate={to}&Interval=DAY"),
     # Same contract, other date formats from the app's string pool.
     ("MONTH iso8601-Z", "FromDate={from_z}&ToDate={to_z}&Interval=MONTH"),
     ("MONTH us", "FromDate={from_us}&ToDate={to_us}&Interval=MONTH"),
@@ -535,6 +543,27 @@ _USAGE_ATTEMPTS: tuple[tuple[str, str], ...] = (
     # beside a working call is what proves the parameters were the difference.
     ("bare (control)", ""),
 )
+
+
+def usage_probe_substitutions(now: datetime | None = None) -> dict[str, str]:
+    """The placeholder values every `_USAGE_ATTEMPTS` candidate is rendered with.
+
+    Exported so the test that checks every candidate renders uses *these* values rather than
+    its own copy: a placeholder added to a candidate and not here is a `KeyError` against
+    live hardware, and a duplicated dict in the test cannot catch that.
+    """
+    now = now or datetime.now(UTC)
+    start = now - timedelta(days=400)
+    return {
+        "from": start.date().isoformat(),
+        "to": now.date().isoformat(),
+        "from_z": start.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "to_z": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "from_us": start.strftime("%m-%d-%Y"),
+        "to_us": now.strftime("%m-%d-%Y"),
+        # Short window for the DAY attempt — see `_USAGE_ATTEMPTS`.
+        "from_recent": (now - timedelta(days=14)).date().isoformat(),
+    }
 
 
 async def _async_probe_usage(call: ServiceCall) -> ServiceResponse:
@@ -548,15 +577,7 @@ async def _async_probe_usage(call: ServiceCall) -> ServiceResponse:
     """
     valve = _resolve_valve(call.hass, call.data.get(ATTR_DEVICE_ID))
     now = datetime.now(UTC)
-    start = now - timedelta(days=400)
-    substitutions = {
-        "from": start.date().isoformat(),
-        "to": now.date().isoformat(),
-        "from_z": start.strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "to_z": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "from_us": start.strftime("%m-%d-%Y"),
-        "to_us": now.strftime("%m-%d-%Y"),
-    }
+    substitutions = usage_probe_substitutions(now)
     attempts = [
         (label, query.format(**substitutions)) for label, query in _USAGE_ATTEMPTS
     ]

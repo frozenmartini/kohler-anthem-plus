@@ -818,7 +818,15 @@ class OutletMaxRunTimeSensor(ValveDiagnosticSensor):
             return {}
         per_outlet: dict[str, float] = {}
         for outlet, seconds in sorted(run_times.items()):
-            zone, index = self._valve.model.outlet_location(outlet + 1)
+            # ⚠️ **`outlet_run_times` is already 1-based** — it maps the 0-based internal
+            # store up by one. This passed `outlet + 1`, so every outlet was looked up one
+            # place too high and the last one ran off the end: `outlet_location` raises
+            # `ValueError` for an outlet the model does not have, and an exception while
+            # Home Assistant reads attributes fails the whole entity — which is why Max
+            # Shower Duration read `unknown` while `native_value` was returning 30 the
+            # entire time. Fixed 2026-09-11; the test fixture had hidden it by handing
+            # entities 0-based keys no real valve produces.
+            zone, index = self._valve.model.outlet_location(outlet)
             per_outlet[outlet_name(self._valve, zone, index + 1)] = seconds / 60
         return {
             "outlets_agree": len(set(run_times.values())) == 1,

@@ -458,20 +458,15 @@ def test_usage_probe_candidates_all_render():
     The probe makes real network calls, so a `KeyError` here would surface as a failed
     service call against live hardware rather than a test failure.
     """
-    from datetime import UTC, datetime, timedelta
+    from custom_components.kohler_anthem_plus.services import (
+        _USAGE_ATTEMPTS,
+        usage_probe_substitutions,
+    )
 
-    from custom_components.kohler_anthem_plus.services import _USAGE_ATTEMPTS
-
-    now = datetime.now(UTC)
-    start = now - timedelta(days=400)
-    substitutions = {
-        "from": start.date().isoformat(),
-        "to": now.date().isoformat(),
-        "from_z": start.strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "to_z": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "from_us": start.strftime("%m-%d-%Y"),
-        "to_us": now.strftime("%m-%d-%Y"),
-    }
+    # The service's own values, not a copy: a placeholder added to a candidate but not to
+    # the substitutions is a KeyError against live hardware, which a duplicated dict here
+    # would happily miss.
+    substitutions = usage_probe_substitutions()
     assert _USAGE_ATTEMPTS
     # The decompiled contract is PascalCase. camelCase is what made the first fifteen
     # candidates fail, so a regression to it is worth catching here.
@@ -1408,6 +1403,12 @@ def test_cloud_connection_is_visible_and_enabled(valve_model):
 
 
 def _duration_sensor(valve_model, run_times):
+    """`run_times` is keyed the way `Valve.outlet_run_times` is: **1-based**.
+
+    These tests used to pass 0-based keys, which the attribute builder's `outlet + 1`
+    silently absorbed — two mistakes cancelling out, and the reason a `ValueError` on real
+    hardware went uncaught.
+    """
     valve = make_valve(valve_model, [31, 11, 1])
     valve.outlet_run_times = run_times
     coordinator = make_coordinator([valve])
@@ -1426,7 +1427,7 @@ def test_max_shower_duration_reports_the_shortest_outlet(valve_model):
     one outlet holding the old value. The shortest is both the value the setting was moving
     to and the soonest the water can stop.
     """
-    sensor = _duration_sensor(valve_model, {0: 1800, 1: 3600, 2: 1800})
+    sensor = _duration_sensor(valve_model, {1: 1800, 2: 3600, 3: 1800})
     assert sensor.native_value == 30
     assert sensor.extra_state_attributes["outlets_agree"] is False
     assert sensor.extra_state_attributes["per_outlet"] == {
@@ -1438,7 +1439,7 @@ def test_max_shower_duration_reports_the_shortest_outlet(valve_model):
 
 def test_max_shower_duration_says_so_when_outlets_agree(valve_model):
     """Shower Left: all three at 1800 s — the healthy state, and the normal one."""
-    sensor = _duration_sensor(valve_model, {0: 1800, 1: 1800, 2: 1800})
+    sensor = _duration_sensor(valve_model, {1: 1800, 2: 1800, 3: 1800})
     assert sensor.native_value == 30
     assert sensor.extra_state_attributes["outlets_agree"] is True
 
@@ -2305,3 +2306,46 @@ def test_no_device_id_reaches_a_non_debug_log():
         return "_mobile_device_id" in entry and "[-8:]" in entry
 
     assert not [o for o in offenders if not _allowed(o)], offenders
+
+
+def test_max_shower_duration_publishes_attributes_without_raising():
+    """It read `unknown` on real hardware while `native_value` was returning 30 the whole time.
+
+    `outlet_run_times` is 1-based; the attribute builder passed `outlet + 1` on top of that,
+    so every outlet was looked up one place too high and the last ran off the end of the
+    model. `outlet_location` raises `ValueError` there, and an exception while Home Assistant
+    reads a property fails the entity — so the value never reached the state machine.
+
+    Reproduced on the owner's K-28210 (3 outlets, one zone) 2026-09-11, where a diagnostics
+    download taken minutes earlier showed all three run times learned at 1800 s.
+    """
+    from custom_components.kohler_anthem_plus.anthem_plus.models import (
+        model_for_topology,
+    )
+    from custom_components.kohler_anthem_plus.sensor import OutletMaxRunTimeSensor
+
+    for topology in ((3, 0), (2, 0), (3, 3)):
+        model = model_for_topology(*topology)
+        types = [31, 11, 1, 11, None, 21][: model.total_outlets]
+        valve = make_valve(model, types)
+        coordinator = make_coordinator([valve])
+        sensor = OutletMaxRunTimeSensor(coordinator, valve, 1)
+
+        # The value was always right; the attributes are what failed.
+        assert sensor.native_value == 30.0, model.sku
+        attributes = sensor.extra_state_attributes
+        assert attributes["outlets_agree"] is True, model.sku
+        # One entry per outlet, each named for the fixture actually at that position.
+        assert len(attributes["per_outlet"]) == model.total_outlets, model.sku
+        assert all(v == 30.0 for v in attributes["per_outlet"].values()), model.sku
+
+    # The first outlet must map to the first fixture, not the second — the off-by-one was
+    # invisible in the count and only showed in the names.
+    model = model_for_topology(3, 0)
+    valve = make_valve(model, [31, 11, 1])
+    sensor = OutletMaxRunTimeSensor(make_coordinator([valve]), valve, 1)
+    assert list(sensor.extra_state_attributes["per_outlet"]) == [
+        "Rainhead",
+        "Showerhead",
+        "Handshower",
+    ]
