@@ -16,7 +16,7 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Container
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from .const import (
@@ -657,6 +657,23 @@ class GcsState:
                 )
             except (TypeError, ValueError):
                 max_temperature = None
+
+            # 🚨 **The other three fields of the write record must be carried too.**
+            # This builds a whole `OutletLimits` and *replaces* the stored one, so a field
+            # omitted here is not merely absent from this message — it erases what the REST
+            # seed read. That is what happened in 0.18.0-0.18.2: a successful write makes the
+            # valve announce, the announcement landed without these three, and the *next*
+            # write refused because they were suddenly unknown. One write, then never again
+            # until a reload. Reported 2026-09-11.
+            #
+            # MQTT reports all three with the same key spellings as the write body, and
+            # temperatures already in tenths — no conversion, unlike REST's display °C.
+            def _int(key: str, item: dict = attribute) -> int | None:
+                try:
+                    return int(str(item.get(key)))
+                except (TypeError, ValueError):
+                    return None
+
             limits = OutletLimits(
                 outlet_id,
                 low,
@@ -665,8 +682,34 @@ class GcsState:
                 default_flow,
                 outlet_type,
                 max_temperature,
+                _int("minimumOutletTemperature"),
+                _int("defaultOutletTemperature"),
+                _int("outLetFlags"),
             )
-            if self.outlet_limits.get(outlet_id) != limits:
+            # **Merge, do not replace.** A field this message did not carry must keep the
+            # value already learned: `None` means "not learned", and a write refuses on it,
+            # so blanking one here turns a thin announcement into the same
+            # one-write-then-never-again failure the three missing fields caused. Every
+            # capture carries all ten, and the parser must not depend on that.
+            known = self.outlet_limits.get(outlet_id)
+            if known is not None:
+                limits = replace(
+                    limits,
+                    **{
+                        field: getattr(known, field)
+                        for field in (
+                            "maximum_run_time",
+                            "default_flow_byte",
+                            "outlet_type",
+                            "maximum_temperature_tenths",
+                            "minimum_temperature_tenths",
+                            "default_temperature_tenths",
+                            "outlet_flags",
+                        )
+                        if getattr(limits, field) is None
+                    },
+                )
+            if known != limits:
                 self.outlet_limits[outlet_id] = limits
                 changed = True
         return changed

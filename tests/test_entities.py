@@ -3048,3 +3048,109 @@ def test_the_duration_control_kept_the_lost_write_diagnosis(valve_model):
 
     agreeing = _duration_sensor(valve_model, {1: 1800, 2: 1800, 3: 1800})
     assert agreeing.extra_state_attributes["outlets_agree"] is True
+
+
+def test_an_mqtt_announcement_keeps_the_write_fields():
+    """🚨 One successful write, then never again until a reload — 0.18.0 through 0.18.2.
+
+    `_apply_outlet_config` builds a whole `OutletLimits` and **replaces** the stored one, so
+    a field it does not carry is not merely absent from that message: it erases what the REST
+    seed read. Three of the write record's fields were missing there.
+
+    The trigger is a *successful* write. The valve announces its new outlet config
+    afterwards, the announcement landed without those three, and the next write refused
+    because they had become unknown. Reported by the owner 2026-09-11 with exactly this
+    message:
+
+        Refusing to write outlet 0: defaultOutletTemperature, minimumOutletTemperature,
+        outLetFlags has not been read from the valve
+
+    MQTT carries all three, with the write body's key spellings and temperatures already in
+    tenths — they were simply never read.
+    """
+    from types import SimpleNamespace
+
+    from custom_components.kohler_anthem_plus.anthem_plus.models import (
+        model_for_topology,
+    )
+    from custom_components.kohler_anthem_plus.anthem_plus.state import (
+        GcsState,
+        OutletLimits,
+    )
+
+    state = GcsState(model=model_for_topology(3, 0))
+    # As the REST seed leaves it: a complete record, which a write needs.
+    state.outlet_limits[0] = OutletLimits(0, 16, 200, 1800, 200, 31, 477, 150, 388, 1)
+
+    # The announcement that follows a write, verbatim from `docs/gcs/api.md`.
+    state._apply_outlet_config(
+        SimpleNamespace(
+            attributes=[
+                {
+                    "outLetId": "0",
+                    "outLetType": "31",
+                    "outLetFlags": "1",
+                    "minimumOutletTemperature": "150",
+                    "defaultOutletTemperature": "388",
+                    "maximumOutletTemperature": "477",
+                    "minimumFlowRate": "16",
+                    "defaultFlowRate": "200",
+                    "maximumFlowRate": "200",
+                    "maximumRunTime": "2700",
+                }
+            ]
+        )
+    )
+
+    limits = state.outlet_limits[0]
+    # The announcement's own news still lands.
+    assert limits.maximum_run_time == 2700
+    # And the fields a write cannot proceed without survive it.
+    assert limits.minimum_temperature_tenths == 150
+    assert limits.default_temperature_tenths == 388
+    assert limits.outlet_flags == 1
+
+
+def test_a_sparse_announcement_does_not_erase_what_is_known():
+    """An older or partial message must not blank a field it simply does not mention.
+
+    Every capture carries all ten, but the parser must not depend on that: `None` means
+    "not learned", and a write refuses on it — turning a thin message into the same
+    one-write-then-never-again failure.
+    """
+    from types import SimpleNamespace
+
+    from custom_components.kohler_anthem_plus.anthem_plus.models import (
+        model_for_topology,
+    )
+    from custom_components.kohler_anthem_plus.anthem_plus.state import (
+        GcsState,
+        OutletLimits,
+    )
+
+    state = GcsState(model=model_for_topology(3, 0))
+    state.outlet_limits[0] = OutletLimits(0, 16, 200, 1800, 200, 31, 477, 150, 388, 1)
+    before = state.outlet_limits[0]
+
+    state._apply_outlet_config(
+        SimpleNamespace(
+            attributes=[
+                {
+                    "outLetId": "0",
+                    "minimumFlowRate": "16",
+                    "maximumFlowRate": "200",
+                    "maximumRunTime": "2700",
+                }
+            ]
+        )
+    )
+
+    limits = state.outlet_limits[0]
+    assert limits.maximum_run_time == 2700
+    for field in (
+        "minimum_temperature_tenths",
+        "default_temperature_tenths",
+        "outlet_flags",
+        "maximum_temperature_tenths",
+    ):
+        assert getattr(limits, field) == getattr(before, field), field
