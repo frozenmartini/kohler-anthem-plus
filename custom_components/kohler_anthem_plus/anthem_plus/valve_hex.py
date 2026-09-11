@@ -84,7 +84,12 @@ TEMPERATURE_HIGH_BITS = 0x03
 # The Konnect app never sends above 48.8 °C (488 tenths), so writes clamp there rather than
 # at the 51.1 °C the encoding could carry.
 TEMPERATURE_MAX_TENTHS = 488
-# Retained for callers that still reason in the old terms; both are derived, not magic.
+# Kept as documentation of the encoding, not because anything here reads them: the wire
+# format is `base + tenths * step`, and these name the two halves of that so the tenths
+# arithmetic below is checkable against the reference decoder in `docs/gcs/valve_hex.md`
+# (which calls them `VALVE_TEMPERATURE_BASE_C` / `VALVE_TEMPERATURE_STEP_C`). Derived, not
+# magic. The comment here used to claim callers still used them — none have since the codec
+# moved to tenths.
 TEMPERATURE_BASE_C = 25.6
 TEMPERATURE_STEP_C = 0.1
 

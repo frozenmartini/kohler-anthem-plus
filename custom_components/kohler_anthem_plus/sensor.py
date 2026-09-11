@@ -41,6 +41,7 @@ from .coordinator import Controller, KohlerAnthemPlusCoordinator, Valve
 from .entity import (
     KohlerControllerEntity,
     KohlerValveEntity,
+    ZoneWordEntity,
     outlet_name,
     zone_label,
 )
@@ -632,7 +633,7 @@ class ValveRegisteredSensor(ValveDiagnosticSensor):
         return {"reported": self._valve.created_time}
 
 
-class ValveHexSensor(ValveDiagnosticSensor):
+class ValveHexSensor(ZoneWordEntity, ValveDiagnosticSensor):
     """The valve command word for one zone.
 
     The single most useful thing to look at when behaviour is surprising: it shows exactly
@@ -664,19 +665,12 @@ class ValveHexSensor(ValveDiagnosticSensor):
     def __init__(
         self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve, zone: int
     ) -> None:
-        super().__init__(coordinator, valve)
-        self._zone = zone
+        # `_zone` and `_word` come from `ZoneWordEntity`.
+        super().__init__(coordinator, valve, zone)
         # Same rule as the temperature and flow numbers: no prefix where there is only one
         # zone to name. See `entity.zone_label`.
         self._attr_name = zone_label(valve, zone, "Hex")
         self._attr_unique_id = f"{self._device_id}_zone_{zone}_hex"
-
-    @property
-    def _word(self):
-        state = self._state
-        if state is None:
-            return None
-        return state.valve1 if self._zone == 1 else state.valve2
 
     @property
     def native_value(self) -> str | None:

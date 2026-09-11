@@ -2114,3 +2114,34 @@ async def test_cancelling_a_seed_leaves_no_orphaned_reads():
         if t is not asyncio.current_task() and not t.done()
     ]
     assert not pending, f"{len(pending)} seed read(s) outlived the cancelled seed"
+
+
+def test_zone_word_entity_reads_the_right_zone_everywhere():
+    """Zone→word was duplicated in two platforms; reading the wrong zone is silent.
+
+    A two-zone shower would report and command the other half with no error anywhere, so
+    the shared accessor is asserted against both zones on both platforms that use it.
+    """
+    from custom_components.kohler_anthem_plus.anthem_plus.models import (
+        model_for_topology,
+    )
+    from custom_components.kohler_anthem_plus.entity import ZoneWordEntity
+    from custom_components.kohler_anthem_plus.number import ZoneNumberBase
+    from custom_components.kohler_anthem_plus.sensor import ValveHexSensor
+
+    # Both platforms must share the one implementation, not re-declare it.
+    assert issubclass(ValveHexSensor, ZoneWordEntity)
+    assert issubclass(ZoneNumberBase, ZoneWordEntity)
+
+    model = model_for_topology(3, 3)
+    valve = make_valve(model, [31, 11, 1, 11, None, 21])
+    coordinator = make_coordinator([valve])
+
+    assert ValveHexSensor(coordinator, valve, 1)._word is valve.gcs_state.valve1
+    assert ValveHexSensor(coordinator, valve, 2)._word is valve.gcs_state.valve2
+
+    # The diagnostic defaults and the unique id must survive the shared base.
+    hex2 = ValveHexSensor(coordinator, valve, 2)
+    assert hex2.unique_id == "gcs-test0001_zone_2_hex"
+    assert hex2.entity_registry_enabled_default is False
+    assert hex2.entity_category is not None

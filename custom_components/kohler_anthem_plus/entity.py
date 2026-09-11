@@ -170,6 +170,30 @@ class KohlerValveEntity(CoordinatorEntity[KohlerAnthemPlusCoordinator]):
         return super().available
 
 
+class ZoneWordEntity(KohlerValveEntity):
+    """A valve entity scoped to one zone, reading that zone's command word.
+
+    Zone number to word is the same two lines wherever it appears, and getting it wrong is
+    not a visible error — it silently reads the *other* zone, so a two-zone shower would
+    report and command the wrong half. Kept in one place for that reason rather than for
+    the five lines.
+    """
+
+    def __init__(
+        self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve, zone: int
+    ) -> None:
+        super().__init__(coordinator, valve)
+        self._zone = zone
+
+    @property
+    def _word(self):
+        """This zone's command word, or None before any state has arrived."""
+        state = self._state
+        if state is None:
+            return None
+        return state.valve1 if self._zone == 1 else state.valve2
+
+
 class KohlerControllerEntity(CoordinatorEntity[KohlerAnthemPlusCoordinator]):
     """Base for entities belonging to one Anthem Plus system controller.
 

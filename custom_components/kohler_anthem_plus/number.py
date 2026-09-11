@@ -54,7 +54,7 @@ from .const import (
     UI_TEMPERATURE_MIN_F,
 )
 from .coordinator import KohlerAnthemPlusCoordinator, Valve
-from .entity import KohlerValveEntity, zone_label
+from .entity import ZoneWordEntity, zone_label
 
 
 async def async_setup_entry(
@@ -75,25 +75,15 @@ async def async_setup_entry(
     async_add_entities(entities)
 
 
-class ZoneNumberBase(KohlerValveEntity, NumberEntity):
-    """Shared plumbing for the per-zone numbers."""
+class ZoneNumberBase(ZoneWordEntity, NumberEntity):
+    """Shared plumbing for the per-zone numbers.
+
+    `__init__` and `_word` come from `ZoneWordEntity`.
+    """
 
     # SLIDER rather than BOX: the range is now narrow enough (92-118 °F) that dragging is
     # quicker than typing, which was not true of the old 32-119 °F span.
     _attr_mode = NumberMode.SLIDER
-
-    def __init__(
-        self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve, zone: int
-    ) -> None:
-        super().__init__(coordinator, valve)
-        self._zone = zone
-
-    @property
-    def _word(self):
-        state = self._state
-        if state is None:
-            return None
-        return state.valve1 if self._zone == 1 else state.valve2
 
 
 class ZoneTemperatureNumber(ZoneNumberBase):
