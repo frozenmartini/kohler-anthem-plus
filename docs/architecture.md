@@ -603,6 +603,30 @@ GETs, with `hub-configuration` skipped once known. That is for one valve and one
 every further valve or controller on the account adds its own reads (since 2026-09-08 each
 is set up as its own device).
 
+#### How deep those calls are, which is not the same as how many
+
+The count above is unchanged since 2026-08-21; what has changed twice is how much of it is
+spent waiting. Two facts decide the shape:
+
+- **Devices are independent.** Since 2026-09-07 every valve and controller seeds concurrently
+  (`_async_seed_state` gathers them), so an account's device count no longer multiplies the
+  wall-clock. Failures stay isolated — `return_exceptions=True`, and each coroutine already
+  guards its own reads.
+- **Within one valve, only one ordering is real.** `gcs-settings` carries the outlet topology,
+  and `gcs-state` cannot be decoded until that topology has been applied — a single-zone valve
+  on a two-zone entry would otherwise decode a zone 2 it does not have. See `_apply_topology`.
+  `gcs-configuration`, `gcs-usage` and `gcs-preset` depend on neither that nor each other.
+
+So since 2026-09-11 a valve's seed is **two round trips deep, not five**: the three independent
+reads are issued before the ordered pair and collected after it. Measured at 100 ms per round
+trip, 0.506 s → 0.203 s per valve.
+
+⚠️ **The background task is cancelled explicitly, not awaited in a `finally`.** A reload
+mid-seed cancels `async_seed`, and an `await` inside a plain `finally` is cancelled with it —
+which would orphan those reads against an entry that is going away. That is the same class of
+bug 0.15.1 fixed for the reconnect reseed, so `async_seed` cancels the task and reaps it before
+re-raising.
+
 ### Reachability — the one fact neither transport volunteers
 
 **The valve drops off Kohler's cloud on its own and returns only on a power cycle.** While it is

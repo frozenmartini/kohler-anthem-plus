@@ -746,9 +746,20 @@ like on your hardware, or what an endpoint returns on a system unlike the refere
 
 **Credentials are redacted** from the API log before it is written: the mobile-settings call
 returns a short-lived IoT Hub password, and any key whose name looks like a password, token,
-key or secret has its value replaced. Everything else is logged in full — including device
-ids and serial numbers, which the *diagnostics report* redacts but a raw log does not. Skim
-a log before attaching it to an issue.
+key or secret has its value replaced. Since 0.16.0 the *value* is checked as well as the key,
+because a credential can hide in a value under an innocuous name — an Azure connection string
+carries the whole secret inside one string, and the key is just `connectionString`.
+
+Everything else is logged in full — including device ids and serial numbers, which the
+*diagnostics report* redacts but a raw log does not. **Skim a log before attaching it to an
+issue.** A Kohler device id is not merely an identifier: it is the address the cloud uses to
+reach your valve.
+
+That is also why the ordinary `home-assistant.log` is worth a glance. It is meant to be free
+of device ids — they were removed from the startup line and from read errors in 0.9.0, and
+three that had crept back into INFO messages went in 0.16.0 — but the guarantee only covers
+messages at INFO and above. Turning either debug logger on above puts ids and serials in that
+file deliberately, and they stay there until it rotates.
 
 ## Automation examples
 

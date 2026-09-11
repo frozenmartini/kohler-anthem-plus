@@ -24,6 +24,13 @@ tenant id), and device identity (device ids, serial numbers, the mobile registra
 Kohler device serials double as cloud addresses, so they are redacted the same way tokens
 are — presence and SKU are enough for validation. Preset and favourite *names* are the
 owner's own words and stay out too; counts carry the signal.
+
+**Two mechanisms, because they answer different questions.** `TO_REDACT` names the keys whose
+values must never appear, which works for the record shapes this module reproduces
+deliberately. `_version_fields` is the exception: it walks fields no capture has covered, on
+accounts unlike the owner's, so it cannot be driven by a key list — it takes only
+version-shaped keys and then checks the *value* as well, because a device id
+(`gcs-sio32343h7`) is short enough to pass any sane length ceiling.
 """
 
 from __future__ import annotations
