@@ -3225,3 +3225,47 @@ def test_default_temperature_survives_an_announcement_from_another_setting():
     assert default.available is True
     # And the duration the announcement was actually reporting did land.
     assert state.outlet_limits[0].maximum_run_time == 2700
+
+
+def test_a_sparse_zone_message_does_not_blank_the_readings():
+    """The same erasure `_apply_outlet_config` carried until 0.18.3, in the hub's state.
+
+    `_apply_valve` rebuilds a whole `HubZone` and replaces the stored one, so a message
+    without `temperature` or `flowrate` blanked what an earlier one reported — and
+    `ControllerZoneTemperatureSensor` goes unavailable on a None, which is the same
+    disappearing-entity symptom the outlet bug produced.
+
+    Every captured `SHOWER_VALVE_STS` carries all four keys, so this is latent rather than
+    live. It is fixed anyway because that stream is documented as coalescing snapshots and
+    skipping windows, and "every message we have seen carries it" is precisely the
+    assumption that cost 0.18.0 through 0.18.2.
+    """
+    from types import SimpleNamespace
+
+    from custom_components.kohler_anthem_plus.anthem_plus.models import (
+        model_for_topology,
+    )
+    from custom_components.kohler_anthem_plus.anthem_plus.state import HubState, HubZone
+
+    state = HubState(model=model_for_topology(3, 3))
+    state.zones[1] = HubZone(
+        status="ON", outlets=[True, False, False], temperature=104, flowrate=100
+    )
+
+    def _message(attributes):
+        return SimpleNamespace(
+            attributes=[attributes], code="", raw={}, sku="HUB", device_id="hub-x"
+        )
+
+    # Status only: the readings must survive.
+    state._apply_valve(_message({"zone": "1", "status": "OFF"}))
+    assert state.zones[1].status == "OFF"
+    assert state.zones[1].temperature == 104
+    assert state.zones[1].flowrate == 100
+
+    # A full message still updates everything it carries.
+    state._apply_valve(
+        _message({"zone": "1", "status": "ON", "temperature": "106", "flowrate": "80"})
+    )
+    assert state.zones[1].temperature == "106"
+    assert state.zones[1].flowrate == "80"

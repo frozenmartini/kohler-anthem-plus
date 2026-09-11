@@ -1064,7 +1064,23 @@ class HubState:
                 temperature=attribute.get("temperature"),
                 flowrate=attribute.get("flowrate"),
             )
-            if self.zones.get(number) != zone:
+            # **Merge, do not replace** — the same hazard `_apply_outlet_config` carried
+            # until 0.18.3, in the other direction. A message that omits `temperature` or
+            # `flowrate` would blank what an earlier one reported, and
+            # `ControllerZoneTemperatureSensor` goes unavailable on a None. Every captured
+            # `SHOWER_VALVE_STS` carries all four keys, but this stream is documented as
+            # coalescing snapshots and skipping windows (`docs/hub/cloud_api.md` §5.1), so
+            # depending on that shape is the assumption that just cost a release.
+            #
+            # `status` and `outlets` are always rebuilt: they are what the message is *for*,
+            # and `outlet_flags` already returns a full list rather than None.
+            known = self.zones.get(number)
+            if known is not None:
+                if zone.temperature is None:
+                    zone = replace(zone, temperature=known.temperature)
+                if zone.flowrate is None:
+                    zone = replace(zone, flowrate=known.flowrate)
+            if known != zone:
                 self.zones[number] = zone
                 changed = True
         return changed
