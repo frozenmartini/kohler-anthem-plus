@@ -506,6 +506,21 @@ class _TaggedJournal:
                 self._hass.async_add_executor_job(self._report_log.prepare)
 
 
+def _setting_label(
+    maximum_run_time: int | None,
+    maximum_temperature_tenths: int | None,
+    default_temperature_tenths: int | None,
+) -> str:
+    """Name the setting a write changed, for a message someone has to read."""
+    if maximum_run_time is not None:
+        return f"Max Shower Duration ({maximum_run_time // 60} minutes)"
+    if maximum_temperature_tenths is not None:
+        return f"Max Temperature ({maximum_temperature_tenths / 10:.1f} °C)"
+    if default_temperature_tenths is not None:
+        return f"Default Temperature ({default_temperature_tenths / 10:.1f} °C)"
+    return "an outlet setting"
+
+
 class Valve:
     """One Anthem digital valve, with everything the coordinator keeps for it.
 
@@ -1024,13 +1039,22 @@ class Valve:
         That is not hypothetical: it is what produced the `outlets_agree: false` this
         integration already reports (`docs/gcs/api.md`, "one outlet per call").
 
-        So this chains the same way and then **reads back**. A 201 from this endpoint means
-        *accepted for delivery*, never *applied* — the response carries no echo of the value
-        and the Konnect app performs no verification at all.
+        So this chains the same way and then **reads back** — but the read-back does not
+        block the caller. A 201 from this endpoint means *accepted for delivery*, never
+        *applied*: the response carries no echo of the value and the Konnect app performs no
+        verification at all.
 
-        Raises `HomeAssistantError` with what actually happened: which outlets took the new
-        value and which did not. A partial write is reported as a partial write rather than
-        being retried, because retrying a half-applied safety setting without knowing why the
+        ⚠️ **Verification runs in the background, and that is a responsiveness fix, not a
+        weakening** (0.18.2). It has to wait ~30 s for the cloud document to catch up, and
+        awaiting that inside a service call froze the slider for the whole time — Home
+        Assistant logs a warning at 10 s, and the entity looked broken. The POSTs are still
+        awaited, because a rejected write fails immediately and the caller should hear about
+        it; only the waiting is deferred. A verification that fails raises a **repair issue**
+        instead of an exception nobody is left to catch.
+
+        Raises `HomeAssistantError` for a write that is refused or fails part-way — including
+        which outlets took the new value and which did not. A partial write is reported
+        rather than retried: retrying a half-applied safety setting without knowing why the
         first attempt failed is how one bad outlet becomes several.
         """
         limits = self.gcs_state.outlet_limits
@@ -1059,10 +1083,13 @@ class Valve:
                 f"mixed state — re-saving the setting rewrites them all. ({err})"
             ) from err
 
-        await self._async_verify_outlet_write(
-            maximum_run_time=maximum_run_time,
-            maximum_temperature_tenths=maximum_temperature_tenths,
-            default_temperature_tenths=default_temperature_tenths,
+        # **Not awaited.** See the docstring: the wait is what made the entity unresponsive.
+        self._track(
+            self._async_verify_outlet_write(
+                maximum_run_time=maximum_run_time,
+                maximum_temperature_tenths=maximum_temperature_tenths,
+                default_temperature_tenths=default_temperature_tenths,
+            )
         )
 
     async def _async_verify_outlet_write(
@@ -1079,24 +1106,33 @@ class Valve:
         old value in the live sweep of 2026-08-21; the change appeared within 25 s. Reading
         too early is exactly how a working write looks like a device-side limit, so this
         waits first.
+
+        **Runs detached**, so nothing here may raise: there is no caller left to catch it.
+        A failure becomes a repair issue, which is the surface Home Assistant has for
+        "something needs your attention later".
         """
+        setting = _setting_label(
+            maximum_run_time, maximum_temperature_tenths, default_temperature_tenths
+        )
         await asyncio.sleep(OUTLET_WRITE_VERIFY_DELAY_SECONDS)
         try:
             settings = await self.client.async_get_gcs_settings(
                 self.gcs_device.device_id
             )
         except KohlerError as err:
-            raise HomeAssistantError(
-                f"{self.name} accepted the change, but reading it back failed, so whether "
-                f"it applied is unknown. ({err})"
-            ) from err
+            self._raise_write_issue(
+                setting, f"Reading the value back from {self.name} failed: {err}"
+            )
+            return
 
         fresh = outlet_limits_from_settings(settings)
         if not fresh:
-            raise HomeAssistantError(
-                f"{self.name} accepted the change, but the valve reported no outlet "
-                "configuration to verify it against."
+            self._raise_write_issue(
+                setting,
+                f"{self.name} reported no outlet configuration to check the change "
+                "against.",
             )
+            return
         self.gcs_state.outlet_limits.update(fresh)
         self._learn_run_times(self.gcs_state)
 
@@ -1112,11 +1148,36 @@ class Valve:
             if value is not None and getattr(limit, field) != value
         ]
         if stale:
-            raise HomeAssistantError(
-                f"{self.name} did not apply the change on outlet(s) "
-                f"{', '.join(str(o) for o in stale)}. The valve was asked and did not "
-                "report the new value; re-saving rewrites every outlet."
+            self._raise_write_issue(
+                setting,
+                f"{self.name} is still reporting the old value on outlet(s) "
+                f"{', '.join(str(o) for o in stale)}.",
             )
+            return
+        # Verified: clear any warning left by an earlier attempt.
+        self._clear_write_issue()
+
+    @property
+    def _write_issue_id(self) -> str:
+        """One issue per valve, so two valves cannot overwrite each other's warning."""
+        return f"outlet_write_unverified_{self.device_id}"
+
+    def _clear_write_issue(self) -> None:
+        """Drop any standing warning — a verified write means the last one is stale."""
+        ir.async_delete_issue(self.hass, DOMAIN, self._write_issue_id)
+
+    def _raise_write_issue(self, setting: str, detail: str) -> None:
+        """Surface an unverified write where the user will actually see it."""
+        _LOGGER.warning("%s — %s", setting, detail)
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            self._write_issue_id,
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key="outlet_write_unverified",
+            translation_placeholders={"setting": setting, "detail": detail},
+        )
 
     def _seed_independent_reads(self) -> asyncio.Task[None]:
         """Start the seed reads that depend on nothing, so they overlap the ones that do.

@@ -207,7 +207,7 @@ once they were a second, weaker view of the same thing.
 | Entity | Kind | Range |
 |---|---|---|
 | `Max Temperature` | number | 🚨 The **scald limit**, 92-118 °F — the app's own range |
-| `Default Temperature` | number | Where a shower starts, 59 °F up to **whatever the scald limit currently is**. Lower `Max Temperature` and this entity's ceiling follows it down, exactly as the app does |
+| `Default Temperature` | number | Where a shower starts, 59-118 °F. Setting it **above the valve's current `Max Temperature` fails** with a message naming both numbers — a shower cannot start hotter than the scald limit. The limit in force is published as `scald_limit` |
 | `Max Shower Duration` | select | 15 / 20 / 25 / 30 / 45 / 60 minutes — the app's six options, not a free range: its picker skips 35/40/50/55, and whether the valve accepts those is untested |
 
 **Every change is verified.** The valve's endpoint replaces one outlet's whole record and has
@@ -216,8 +216,10 @@ and tells you what actually landed — including the partial case, where some ou
 new value and others did not. A `201` from that endpoint means *accepted for delivery*, never
 *applied*, and the Konnect app never checks.
 
-Expect about **30 seconds** before a change confirms. That is not a hang: the cloud document
-only updates once the valve reports back, and reading sooner returns the old value.
+**The change applies immediately; the check runs behind it.** Verification has to wait ~30 s
+for Kohler's cloud document to catch up, so it happens in the background — the entity responds
+at once. If the check fails, a **repair notice** appears under Settings naming the setting and
+the outlets still holding the old value.
 
 `Max Shower Duration` carries `outlets_agree` — `false` means a write was lost part-way and
 the outlets now hold different durations. Selecting a duration rewrites all of them.

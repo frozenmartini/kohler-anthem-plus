@@ -36,6 +36,7 @@ from homeassistant.components.number import NumberDeviceClass, NumberEntity, Num
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import PERCENTAGE, UnitOfTemperature
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -452,10 +453,18 @@ class OutletMaxTemperatureNumber(_OutletTemperatureNumber):
 class OutletDefaultTemperatureNumber(_OutletTemperatureNumber):
     """Where a shower starts when nothing else says — the app's "Default Temperature".
 
-    **Bounded above by the scald limit, not by a constant.** The app does the same, and it
-    is the only bound that stays correct: lowering Max Temperature below this value would
-    otherwise leave a default the valve cannot honour. The upper bound therefore moves when
-    `Max Temperature` moves.
+    **The slider goes to 118 °F; the scald limit is enforced on the way in.** An earlier
+    version moved `native_max_value` with `Max Temperature`, which was more faithful to the
+    app and worse to use: Home Assistant caches an entity's bounds, so the slider's range
+    changed shape underneath whoever was looking at it and could show stale limits until the
+    next update. Reported by the owner 2026-09-11 as "takes a long time to update and appears
+    unresponsive".
+
+    A fixed range with a clear refusal is the more predictable trade. Setting a default above
+    the current scald limit fails with a message naming both numbers, rather than the slider
+    silently having a different maximum than it had a moment ago. The valve's own guard
+    (`GcsDevice.async_write_outlet_config`) refuses the same combination independently, so
+    the rule holds even if something reaches past this entity.
     """
 
     _attr_name = "Default Temperature"
@@ -464,6 +473,11 @@ class OutletDefaultTemperatureNumber(_OutletTemperatureNumber):
     def __init__(self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve) -> None:
         super().__init__(coordinator, valve)
         self._attr_unique_id = f"{self._device_id}_default_temperature"
+        self._attr_native_max_value = (
+            float(UI_TEMPERATURE_MAX_F)
+            if self._fahrenheit
+            else float(round(unit_to_celsius(UI_TEMPERATURE_MAX_F, "Fahrenheit")))
+        )
         self._attr_native_min_value = (
             float(UI_DEFAULT_TEMPERATURE_MIN_F)
             if self._fahrenheit
@@ -473,30 +487,37 @@ class OutletDefaultTemperatureNumber(_OutletTemperatureNumber):
         )
 
     @property
-    def native_max_value(self) -> float:
-        """The scald limit as it stands right now — see the class docstring."""
-        limits = self._limits
-        ceiling = (
-            None if limits is None else self._display(limits.maximum_temperature_tenths)
-        )
-        if ceiling is None:
-            # No limit read yet: fall back to the app's own maximum rather than to
-            # something unbounded.
-            return (
-                float(UI_TEMPERATURE_MAX_F)
-                if self._fahrenheit
-                else float(round(unit_to_celsius(UI_TEMPERATURE_MAX_F, "Fahrenheit")))
-            )
-        return float(ceiling)
-
-    @property
     def native_value(self) -> float | None:
         limits = self._limits
         return (
             None if limits is None else self._display(limits.default_temperature_tenths)
         )
 
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """The ceiling this entity will actually accept, which the slider cannot show."""
+        limits = self._limits
+        return {
+            "scald_limit": None
+            if limits is None
+            else self._display(limits.maximum_temperature_tenths)
+        }
+
     async def async_set_native_value(self, value: float) -> None:
+        # Checked here as well as in the client so the message names this entity's own
+        # units and the setting the user would have to change — `Max Temperature`, not
+        # `maximumOutletTemperature`.
+        limits = self._limits
+        ceiling = (
+            None if limits is None else self._display(limits.maximum_temperature_tenths)
+        )
+        if ceiling is not None and value > ceiling:
+            unit = self.native_unit_of_measurement
+            raise HomeAssistantError(
+                f"{value:.0f} {unit} is above this valve's Max Temperature of "
+                f"{ceiling:.0f} {unit}. A shower cannot start hotter than the scald "
+                "limit — raise Max Temperature first, or pick a lower default."
+            )
         await self._valve.async_write_outlet_setting(
             default_temperature_tenths=self._tenths(value)
         )

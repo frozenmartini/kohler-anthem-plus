@@ -2706,19 +2706,46 @@ def test_the_three_settings_match_the_konnect_app(valve_model):
         assert entity.entity_category == EntityCategory.CONFIG
 
 
-def test_default_temperature_ceiling_follows_the_scald_limit(valve_model):
-    """Lowering Max Temperature must lower what Default Temperature will accept.
+@pytest.mark.asyncio
+async def test_default_temperature_refuses_to_exceed_the_scald_limit(valve_model):
+    """A fixed 92-118 slider, with the scald limit enforced on the way in.
 
-    The app bounds it the same way, and it is the only bound that stays correct: a fixed
-    ceiling would let someone set a default the valve cannot honour.
+    0.18.2: the ceiling used to move with `Max Temperature`, which was faithful to the app
+    and worse to use — Home Assistant caches an entity's bounds, so the slider's range
+    changed shape underneath the user and could show a stale limit. A fixed range with a
+    clear refusal is the more predictable trade.
     """
-    valve = make_valve(valve_model, [31, 11, 1])
-    _, default, _ = _config_entities(make_coordinator([valve]), valve)
+    from homeassistant.exceptions import HomeAssistantError
 
-    for tenths, expected in ((477, 118.0), (450, 113.0), (400, 104.0)):
-        for limit in valve.gcs_state.outlet_limits.values():
-            limit.maximum_temperature_tenths = tenths
-        assert default.native_max_value == expected
+    valve = make_valve(valve_model, [31, 11, 1])
+    written: list[int] = []
+    valve.async_write_outlet_setting = lambda **kw: written.append(kw) or _done()
+    _, default, _ = _config_entities(make_coordinator([valve]), valve)
+    # Not what this test is about; it needs a live `hass` the fixture has no reason to build.
+    default.async_write_ha_state = lambda: None
+
+    # The slider's range never moves.
+    assert (default.native_min_value, default.native_max_value) == (59.0, 118.0)
+
+    for limit in valve.gcs_state.outlet_limits.values():
+        limit.maximum_temperature_tenths = 450  # 113 °F
+
+    # The ceiling is still visible, just not as the slider's bound.
+    assert default.extra_state_attributes["scald_limit"] == 113
+
+    # Above it: refused, naming both numbers and the setting to change.
+    with pytest.raises(HomeAssistantError, match="Max Temperature"):
+        await default.async_set_native_value(118)
+    assert written == []
+
+    # At or below it: written.
+    await default.async_set_native_value(110)
+    assert len(written) == 1
+
+
+async def _done():
+    """An already-finished awaitable, for stubbing a write."""
+    return None
 
 
 def test_duration_reports_a_value_the_app_cannot_offer_honestly(valve_model):
@@ -2817,7 +2844,7 @@ def test_a_write_refuses_rather_than_inventing_a_field():
         )
 
 
-def _write_valve(monkeypatch, *, fail_after=None, verify_as=None):
+def _write_valve(monkeypatch, *, fail_after=None, verify_as=None, verify_delay=None):
     """A Valve wired for `async_write_outlet_setting`, with the network faked."""
     from custom_components.kohler_anthem_plus import coordinator as module
     from custom_components.kohler_anthem_plus.anthem_plus.client import KohlerError
@@ -2843,15 +2870,30 @@ def _write_valve(monkeypatch, *, fail_after=None, verify_as=None):
     )
     valve._note_local_write = lambda: None
     valve._learn_run_times = lambda state: None
+    # Verification runs detached (0.18.2); capture the task so a test can await it.
+    valve._background_tasks = set()
+    issues: list[tuple[str, str]] = []
+    valve._raise_write_issue = lambda setting, detail: issues.append((setting, detail))
+    valve._clear_write_issue = lambda: None
+    valve.raised_issues = issues
 
     # The verification read returns whatever the caller asked it to.
     async def _read_back(device_id):
         return _settings(verify_as)
 
+    # `hass` and `client` are read-only properties reading through the coordinator.
     valve.coordinator = SimpleNamespace(
-        client=SimpleNamespace(async_get_gcs_settings=_read_back)
+        client=SimpleNamespace(async_get_gcs_settings=_read_back),
+        hass=SimpleNamespace(async_create_task=asyncio.ensure_future),
     )
-    monkeypatch.setattr(module.asyncio, "sleep", _noop_sleep)
+    if verify_delay is None:
+        monkeypatch.setattr(module.asyncio, "sleep", _noop_sleep)
+    else:
+
+        async def _slow_sleep(_seconds):
+            await asyncio.sleep(verify_delay)
+
+        monkeypatch.setattr(module.asyncio, "sleep", _slow_sleep)
     return valve, written
 
 
@@ -2893,16 +2935,51 @@ async def test_a_write_is_verified_against_a_read_back(monkeypatch):
     # One call per outlet, in order — there is no list form.
     assert written == [0, 1, 2]
 
+    await _drain(valve)
+    # It verified, so nothing is raised at the user.
+    assert valve.raised_issues == []
+
 
 @pytest.mark.asyncio
-async def test_a_write_the_valve_ignored_is_reported_not_assumed(monkeypatch):
-    """The valve took the call and kept its old value: that is a failure, not a success."""
-    from homeassistant.exceptions import HomeAssistantError
+async def test_the_write_call_does_not_wait_for_verification(monkeypatch):
+    """0.18.2: awaiting the ~30 s read-back froze the slider for its whole duration.
 
+    Home Assistant warns at 10 s and the entity looked broken. The POSTs are still awaited —
+    a refused write should fail immediately — but the waiting is detached.
+    """
+    valve, _ = _write_valve(monkeypatch, verify_as=2700, verify_delay=5.0)
+
+    # Returns without paying the verification delay, which the fake makes deliberately long.
+    await asyncio.wait_for(valve.async_write_outlet_setting(maximum_run_time=2700), 0.5)
+
+
+@pytest.mark.asyncio
+async def test_a_write_the_valve_ignored_becomes_a_repair_issue(monkeypatch):
+    """The valve took the call and kept its old value: still a failure, surfaced differently.
+
+    Detached verification has no caller to raise at, so it raises a repair issue instead —
+    which is also more useful, because it survives the moment the slider was moved.
+    """
     valve, written = _write_valve(monkeypatch, verify_as=1800)
-    with pytest.raises(HomeAssistantError, match="did not apply"):
-        await valve.async_write_outlet_setting(maximum_run_time=2700)
+    await valve.async_write_outlet_setting(maximum_run_time=2700)
     assert written == [0, 1, 2]
+
+    await _drain(valve)
+    assert len(valve.raised_issues) == 1
+    setting, detail = valve.raised_issues[0]
+    # The message must name the setting and the outlets, or it cannot be acted on.
+    assert "Max Shower Duration" in setting
+    assert "45 minutes" in setting
+    assert "1, 2, 3" in detail
+
+
+async def _drain(valve):
+    """Await whatever `_track` started, so a detached verification finishes.
+
+    Snapshotted first: `_track` registers a done-callback that discards from the same set.
+    """
+    for task in tuple(valve._background_tasks):
+        await asyncio.shield(task)
 
 
 @pytest.mark.asyncio
