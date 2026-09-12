@@ -297,7 +297,7 @@ Probed live 2026-08-12 against a HUB-attached GCS. Base `/devices/api/v1/device-
 | **Live valve state** | `gcs-state/{deviceId}` | ✅ the useful one — see below |
 | **Presets / experiences** | `gcs-preset/{deviceId}` | ✅ `gcsPresetExperienceDetails[]` |
 | Device configuration | `gcs-configuration/{deviceId}` | ⚠️ exists, mostly **null** here — see below |
-| Water usage | `gcs-usage/{deviceId}` | ❓ exists (HTTP 400 bare, so it wants parameters) |
+| Water usage history | `gcs-usage/{deviceId}?FromDate=&ToDate=&Interval=` | ✅ contract recovered 2026-09-10/11 by kedube — see below |
 
 Returning **404**, so they do not exist under these names: `gcs-outlet-config`,
 `gcs-outletconfig`, `gcs-outlet-configuration`, `gcs-valve-config`,
@@ -329,9 +329,74 @@ Every structural field comes back `null`: `zoneone`, `zonetwo`, `parts`, `valve1
 `valve2Settings`, `systemConfiguration`, `systemSettings`. Only `about.firmware` (valve
 firmware, `00.74` here) and `firmwareOTADetails` carry data.
 
-The reason is that a valve wired to an Anthem Plus controller reports its configuration
-**through the controller**. Whether a GCS-only install populates these fields is **unknown
-and untested** — that is exactly the case no one has been able to check.
+The reason was assumed to be that a valve wired to an Anthem Plus controller reports its
+configuration **through the controller**, leaving whether a GCS-only install populates these
+fields unknown.
+
+✅ **Answered 2026-09-11 by Katherine Dubé (kedube), PR #7.** Her account has no controller
+at all — two K-28210 valves speaking straight to the cloud — and its diagnostics report every
+one of the seven structural fields as unpopulated, with the call itself succeeding. So the
+controller is not the reason: these fields are null on every install shape seen so far, and
+outlet topology has to come from `gcsadvancestate`, which is where this integration already
+reads it. Nothing needs to change; the open question is closed.
+
+### `gcs-usage` — per-period water usage, the series behind the app's chart
+
+**Finding by Katherine Dubé (kedube), 2026-09-10/11, submitted in PR #7.** The PR was not
+merged — this integration deliberately does not implement water usage (a chart, not a control)
+— but the protocol finding is hers and is recorded here so nobody has to recover it again. The
+live results below are from her two K-28210 valves, GCS-only, no controller; nothing here has
+been re-verified on the reference (HUB-attached) install.
+
+**The query parameters are PascalCase**, which is why the endpoint sat unsolved: every other
+endpoint in this API is camelCase, and a probe of fifteen camelCase and lowercase candidates
+returned the same generic 400 as a bare call. Recovered from the Konnect APK's Retrofit
+annotations — `getAnthemWaterUsageData` on `com/kohler/hermoth/data/network/DeviceApiCall`:
+
+```
+GET /devices/api/{version}/device-management/gcs-usage/{deviceId}
+    ?FromDate=<date>&ToDate=<date>&Interval=<MONTH|DAY>
+```
+
+Three `@Query` parameters, no headers, no body. `hub-usage` and `numi-usage` declare the same
+three (untested). `Interval` is uppercase.
+
+| `Interval` | Result on her account |
+|---|---|
+| `MONTH` | ✅ 200 — one entry per month, 13 buckets over 400 days |
+| `DAY` | ✅ 200 — one entry per day, 15 buckets over 14 days |
+| `WEEK` | ❌ 400 at 400, 90 **and 28** days (four buckets) — so not a row cap, the interval is simply refused |
+| `YEAR` | ❌ 400 |
+| bare call (control) | ❌ 400 |
+
+All three date formats tried were accepted and returned identical payloads: `yyyy-MM-dd`,
+ISO-8601 with `Z`, `MM-dd-yyyy`.
+
+**A 400 from this endpoint means "something about the request was wrong", never "this
+feature does not exist"** — the same uniform error covers a wrong parameter case, an
+unsupported interval, and no parameters at all.
+
+Response — `AnthemWaterUsageModel`, from its Gson `@SerializedName` annotations: `deviceId`
+and `interval` echoed back; `gcsUsageDataDetailsList[]`, one entry per period with
+`timestamp`, `volume`, `onDuration`, `averageBlendTemperature`,
+`numberOfTimesValveSwitchedOn`, `intervalKey`; plus `min`/`max`/`avg` rollups of each.
+
+Units, from the app's bytecode and her live data:
+
+* **`volume` is litres** whatever the account's `waterUnits`. The app multiplies by
+  `0.264172` (litres → US gallons) only when `waterUnits == "Standard"`.
+* **`onDuration` is seconds.**
+* `averageBlendTemperature` and `numberOfTimesValveSwitchedOn` have **no call sites in the
+  app**; the observed temperatures (~78 against real setpoints near 105 °F) match no
+  plausible unit. Treat both as unexplained.
+* The `avg*` rollups are the range total divided by the inclusive **day** count, whatever the
+  interval — an artifact the app displays uncorrected.
+
+**Cross-check that makes the two series trustworthy:** her `DAY` buckets for 2026-09 summed
+to exactly the 465 L the `MONTH` series reported for that month — same unit, same window.
+
+The app never relates any of this to `totalFlow` / `totalVolume`: both are declared as strings
+on its state models with no getters and no call sites.
 
 ### Outlet topology: read it from the controller
 
