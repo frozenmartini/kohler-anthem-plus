@@ -29,6 +29,7 @@ from typing import Any
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -60,6 +61,38 @@ from .entity import (
 _LOGGER = logging.getLogger(__name__)
 
 
+@callback
+def _async_purge_valve_only_warmup_restore(
+    hass: HomeAssistant, entry: ConfigEntry, valve: Valve
+) -> None:
+    """Drop `Warmup Auto-Restore` from a valve on a controller-free account.
+
+    Matched on **this valve's own device id**, not a bare suffix: an account can pair one
+    valve with a controller and leave another standing alone, and only the second should
+    lose the switch. The condition is the account's controller list, which is not known
+    until the coordinator has read it — after `__init__`'s unconditional purge has run.
+
+    **Cleanup, so it never fails setup.** A stale registry row is cosmetic; the switches
+    this platform exists to create are not. Registry trouble is logged and stepped over,
+    which also keeps the platform constructible against a test double carrying no registry.
+    """
+    stale = f"{valve.device_id}_warmup_auto_restore"
+    try:
+        registry = er.async_get(hass)
+        rows = list(er.async_entries_for_config_entry(registry, entry.entry_id))
+    except Exception:  # Cosmetic cleanup; never worth failing setup over.
+        _LOGGER.debug("Entity registry unavailable; leaving %s alone", stale)
+        return
+    for row in rows:
+        if row.unique_id == stale:
+            registry.async_remove(row.entity_id)
+            _LOGGER.info(
+                "Removed %s: the warmup revert it guards against is caused by an "
+                "Anthem Plus controller, and this account has none",
+                row.entity_id,
+            )
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -76,7 +109,18 @@ async def async_setup_entry(
         model = valve.model
         entities.append(ShowerSwitch(coordinator, valve))
         entities.append(EndlessShowerSwitch(coordinator, valve))
-        entities.append(WarmupAutoRestoreSwitch(coordinator, valve))
+        # ONLY WHERE THE FAULT CAN OCCUR. The single identified cause of a spontaneous
+        # `warmUpDisabled` is the Anthem Plus controller's web UI writing it as a fixed step
+        # of its signed-in routine — hub firmware, with the valve merely the recipient. On a
+        # controller-free account every `warmUpDisabled` in the corpus traces to that routine
+        # or to a post-reboot restatement where the mode did not change, so there is nothing
+        # here to defend against and the switch could only add an unprompted writer to the
+        # valve. `_attr_entity_registry_enabled_default = False` already hid it; not creating
+        # it is the honest version of the same judgement.
+        if coordinator.controllers:
+            entities.append(WarmupAutoRestoreSwitch(coordinator, valve))
+        else:
+            _async_purge_valve_only_warmup_restore(hass, entry, valve)
         entities.append(ValveReportLogSwitch(coordinator, valve))
         entities.extend(
             ZoneOutletSwitch(coordinator, valve, zone, outlet)

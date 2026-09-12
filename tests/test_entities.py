@@ -1632,13 +1632,15 @@ def test_auto_restore_says_whether_the_fault_can_even_occur(valve_model):
     defends against nothing observed, and `hub_present` is what says so.
     """
     valve = make_valve(valve_model, [31, 11, 1])
+
+    # 0.20.0: the switch is no longer created at all where the fault cannot occur. That is
+    # the same judgement `hub_present` used to report, acted on rather than described.
     alone = make_coordinator([valve])
-    switch = next(
+    assert [
         e
         for e in collect("switch", alone)
         if e.unique_id.endswith("_warmup_auto_restore")
-    )
-    assert switch.extra_state_attributes["hub_present"] is False
+    ] == []
 
     with_hub = make_coordinator(
         [valve], controllers=(make_controller(valve_model, device_id="hub-1"),)
