@@ -154,9 +154,18 @@ class ValveStatusSensor(KohlerValveEntity, SensorEntity):
     That asymmetry is intentional and runs one way only. `ControllerStatusSensor` stays
     purely HUB-derived — it exists to show what the controller believes, and folding valve
     state into it would destroy the comparison it is there to provide.
+
+    **Named `System Status` since 0.19.0**, because system-level is exactly what it is:
+    warm-up and pause are properties of the whole valve on this hardware, not of a zone, so
+    there is no per-zone `Status` this could ever be one of. On a multi-zone valve
+    `Shower Active 1` / `Shower Active 2` answer the per-zone question beside it.
+
+    ⚠️ **The unique id stays `_status`.** A rename that moved the id would orphan every
+    automation and all recorded history; the entity id follows the device and name only if
+    the owner has never customised it, which Home Assistant handles on its own.
     """
 
-    _attr_name = "Status"
+    _attr_name = "System Status"
     _attr_icon = "mdi:shower"
     _attr_device_class = SensorDeviceClass.ENUM
     _attr_options = VALVE_STATES
@@ -212,7 +221,7 @@ class ValveStatusSensor(KohlerValveEntity, SensorEntity):
         wall panel and Home Assistant appear to disagree.
         """
         state = self._state
-        return {
+        attributes: dict[str, object] = {
             "valve_warmup": bool(state and state.warmup_in_progress),
             # None — "not asked", not "no" — when the pairing is ambiguous; see
             # `_hub_warmup`. False on a valve-only account, as it always was.
@@ -221,6 +230,39 @@ class ValveStatusSensor(KohlerValveEntity, SensorEntity):
                 if self._paired or not self.coordinator.controllers
                 else None
             ),
+        }
+        attributes.update(self._cutoff_countdown())
+        return attributes
+
+    def _cutoff_countdown(self) -> dict[str, object]:
+        """How long water has been running, and how long before the valve cuts it off.
+
+        **Moved here from `Shower Active` in 0.19.0**, which a single-zone valve no longer
+        has. `seconds_remaining` is the number that matters mid-shower and nothing else
+        publishes it, so it had to outlive that entity rather than go with it.
+
+        System-level, by taking the **soonest** cutoff across zones: with two zones running
+        the first one to stop is the one worth warning about, and a maximum would promise
+        time that one of the showers is not going to get. Multi-zone valves keep the
+        per-zone figures on `Shower Active`, which is where "which zone" gets answered.
+
+        None — never 0 — when the limit is unknown, when nothing is flowing, or after a
+        reconnect: the detector drops its timings across a gap rather than reporting a
+        duration it cannot stand behind, and a zero would read as "cutoff imminent".
+        """
+        flowing: list[float] = []
+        remaining: list[float] = []
+        for zone in self._valve.model.zones:
+            elapsed = self._valve.zone_flowing_for(zone)
+            if elapsed is None:
+                continue
+            flowing.append(elapsed)
+            limits = self._valve.run_time_limits_for_zone(zone)
+            if limits:
+                remaining.append(min(limits) - elapsed)
+        return {
+            "flowing_for_seconds": round(max(flowing), 1) if flowing else None,
+            "seconds_remaining": round(min(remaining), 1) if remaining else None,
         }
 
 
@@ -901,7 +943,7 @@ class ControllerStatusSensor(KohlerControllerEntity, SensorEntity):
     and per-zone ``status`` takes exactly two values, ``ON`` and ``OFF`` — 264 and 256
     observations. Pause is a GCS concept: bit ``0x40`` of the valve command word. A paused
     session therefore surfaces here as ``Idle``, and the only way to distinguish it is
-    ``sensor.anthem_valve_status``, which is on the other device by design.
+    ``sensor.anthem_valve_system_status``, which is on the other device by design.
 
     Sources, all HUB-native — nothing here reads the valve:
 
@@ -912,13 +954,17 @@ class ControllerStatusSensor(KohlerControllerEntity, SensorEntity):
     Warm-up outranks running because warm-up *is* running water: all 9 observed warm-up
     messages also had both zones ON, so testing "running" first would mask every one of them.
 
+    **Named `System Status` since 0.19.0**, matching the valve's own. It sits on a
+    different device, so the two do not collide; the unique id is unchanged, for the reason
+    given on :class:`ValveStatusSensor`.
+
     Seeded from the ``hub-state`` REST read at setup and on each reconnect, then driven by
     MQTT — the same path as every other controller entity. Without that seed it would read
     ``unknown`` from every restart until the controller next said something, which has been
     as long as 11.9 hours.
     """
 
-    _attr_name = "Status"
+    _attr_name = "System Status"
     _attr_icon = "mdi:shower"
     _attr_device_class = SensorDeviceClass.ENUM
     _attr_options = CONTROLLER_STATES

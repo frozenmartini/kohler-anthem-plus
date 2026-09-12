@@ -16,6 +16,7 @@ See ``anthem_plus.models.resolve_outlet_source``.
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 
 from homeassistant.components.binary_sensor import (
@@ -23,7 +24,8 @@ from homeassistant.components.binary_sensor import (
     BinarySensorEntity,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -31,6 +33,45 @@ from .anthem_plus.models import OutletStateSource, resolve_outlet_source
 from .const import DOMAIN, EXPOSE_CONTROLLER_WATER_STATE
 from .coordinator import Controller, KohlerAnthemPlusCoordinator, Valve
 from .entity import KohlerControllerEntity, KohlerValveEntity, zone_label
+
+_LOGGER = logging.getLogger(__name__)
+
+
+@callback
+def _async_purge_single_zone_active(
+    hass: HomeAssistant, entry: ConfigEntry, valve: Valve
+) -> None:
+    """Drop a single-zone valve's retired `Shower Active` row from the entity registry.
+
+    **Why this is not in `__init__._REMOVED_UNIQUE_ID_SUFFIXES`.** That list is
+    unconditional, and `_zone_1_active` must survive on a multi-zone valve, where zone 1's
+    entity is still created. The condition is the valve's zone count, which is only known
+    once the coordinator has read the model — after the blanket purge has already run.
+
+    So it is matched against **this valve's own device id**, not a bare suffix: an account
+    with a single-zone valve and a two-zone valve purges the first and leaves the second
+    alone. Runs on every setup and is a no-op once clean, so a downgrade and re-upgrade
+    cannot strand a row.
+
+    **Cleanup, so it never fails setup.** A stale registry row is cosmetic; the entities
+    this platform is here to create are not. Any registry trouble is logged and stepped
+    over rather than raised, which also keeps the platform constructible against a test
+    double that carries no registry.
+    """
+    stale = f"{valve.device_id}_zone_1_active"
+    try:
+        registry = er.async_get(hass)
+        rows = list(er.async_entries_for_config_entry(registry, entry.entry_id))
+    except Exception:  # Cosmetic cleanup; never worth failing setup over.
+        _LOGGER.debug("Entity registry unavailable; leaving %s alone", stale)
+        return
+    for row in rows:
+        if row.unique_id == stale:
+            registry.async_remove(row.entity_id)
+            _LOGGER.info(
+                "Removed %s: on a single-zone valve Status reports the same state",
+                row.entity_id,
+            )
 
 
 async def async_setup_entry(
@@ -54,12 +95,22 @@ async def async_setup_entry(
             ValveCloudConnectionSensor(coordinator, valve),
             ValvePresetActiveSensor(coordinator, valve),
         ]
-        # One per zone the model actually has. A single-zone valve must not get a "Zone 2"
-        # that is permanently off — `model.zones` is the only correct source for this.
-        entities += [
-            ValveZoneActiveSensor(coordinator, valve, zone)
-            for zone in valve.model.zones
-        ]
+        # One per zone the model actually has — but **only on a multi-zone valve**. With a
+        # single zone "this zone is flowing" and "the system is running" are the same fact,
+        # and `Status` already answers it with warm-up and pause besides, so the second
+        # entity was a strictly worse copy of one already on screen. Its two useful
+        # attributes moved to `Status` in 0.19.0, so nothing is lost by its absence.
+        #
+        # A multi-zone valve keeps them, where `Status` genuinely cannot help: pause and
+        # warm-up are system-level on this hardware, so there is no per-zone `Status` to
+        # split it into, and only these say *which* zone is running.
+        if len(valve.model.zones) > 1:
+            entities += [
+                ValveZoneActiveSensor(coordinator, valve, zone)
+                for zone in valve.model.zones
+            ]
+        else:
+            _async_purge_single_zone_active(hass, entry, valve)
 
     # Everything derived from SHOWER_VALVE_STS is created on a controller-only account,
     # where it is the only water state there is — and, since 2026-08-18, on a both-devices
@@ -382,10 +433,11 @@ class ControllerMqttConnectionSensor(
 class ValveZoneActiveSensor(KohlerValveEntity, BinarySensorEntity):
     """Whether this zone is actually delivering water.
 
-    Named `Shower Active` — on a single-zone valve there is one shower, and `Zone 1` was
-    noise. A two-zone valve keeps the prefix (`Zone 2 Shower Active`), because a bare name
-    would be ambiguous across zones. The unique id still carries `zone_{n}`, so the rename
-    does not disturb history.
+    **Created only on a multi-zone valve**, since 0.19.0. With one zone it answered exactly
+    what `Status` answers, minus warm-up and pause; see `async_setup_entry`.
+
+    Named `Shower Active 2` for zone 2, per :func:`zone_label`. The unique id still carries
+    `zone_{n}`, from when a single-zone valve had one too, so history survives.
 
     **"Active" means flowing, which is not the same as "has outlets assigned".** A paused
     valve keeps its assignment in byte 3 — `0x41` is "paused, outlet 1 still assigned" — but
@@ -393,12 +445,12 @@ class ValveZoneActiveSensor(KohlerValveEntity, BinarySensorEntity):
     a non-empty mask *and* not paused. Anything else would make the two disagree on screen
     about the state one of them is acting on.
 
-    Diagnostic but **enabled by default**, unlike the stream-health sensors: this is the
-    clearest view of what the valve is doing, and its `flowing_for_seconds` attribute is the
-    number that decides whether a run-time cutoff is imminent.
+    **Not diagnostic.** It was, with an `enabled by default` override to undo the half of
+    that categorisation that would have hidden it — which is the shape of a miscategorised
+    entity. On the valve it now exists on, "which of my two showers is running" is primary
+    state, the same kind of fact as `Temperature 2`, not an aid to debugging one.
     """
 
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_device_class = BinarySensorDeviceClass.RUNNING
     _attr_icon = "mdi:water"
 

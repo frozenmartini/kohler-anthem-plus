@@ -178,22 +178,73 @@ def test_two_valves_do_not_share_ids(valve_model):
 # --------------------------------------------------------------------------- #
 # Naming: Shower Active
 # --------------------------------------------------------------------------- #
-def test_zone_active_is_named_shower_active(valve_model):
+def _zone_active(coordinator):
+    return [e for e in collect("binary_sensor", coordinator) if "_zone_" in e.unique_id]
+
+
+def test_zone_active_is_named_shower_active():
     """0.7.2 renamed `Zone 1 Active`, which said nothing a user recognised.
 
     Asserts the name AND that the unique id still carries `zone_1` — a rename that moved the
-    id would silently orphan history and every automation referencing it.
+    id would silently orphan history and every automation referencing it. Multi-zone now,
+    since 0.19.0 is where the entity still exists.
+    """
+    from custom_components.kohler_anthem_plus.anthem_plus.models import get_valve_model
+
+    model = get_valve_model("K-28211")
+    coordinator = make_coordinator([make_valve(model, [31, 11, 1, 11])])
+    active = sorted(_zone_active(coordinator), key=lambda e: e.unique_id)
+    assert [e.unique_id.split("_", 1)[1] for e in active] == [
+        "zone_1_active",
+        "zone_2_active",
+    ]
+    assert [e.name for e in active] == ["Shower Active 1", "Shower Active 2"]
+
+
+def test_single_zone_valve_has_no_shower_active(valve_model):
+    """0.19.0: with one zone it duplicated `Status`, which says more.
+
+    The entity a single-zone owner is left with has to carry the cutoff countdown, or
+    removing this one loses the only number that matters mid-shower — so that is asserted
+    here rather than in a separate test that could pass while this one regressed.
     """
     coordinator = make_coordinator([make_valve(valve_model, [31, 11, 1])])
-    active = [
-        e
-        for e in collect("binary_sensor", coordinator)
-        if e.unique_id.endswith("_zone_1_active")
-    ]
-    assert len(active) == 1, [
-        e.unique_id for e in collect("binary_sensor", coordinator)
-    ]
-    assert active[0].name == "Shower Active"
+    assert _zone_active(coordinator) == []
+
+    status = next(
+        e for e in collect("sensor", coordinator) if e.unique_id.endswith("_status")
+    )
+    assert "seconds_remaining" in status.extra_state_attributes
+    assert "flowing_for_seconds" in status.extra_state_attributes
+
+
+def test_status_is_named_system_status_without_moving_its_id():
+    """0.19.0 renamed it; the unique id must NOT follow.
+
+    Both devices carry one — they do not collide, being on separate devices — and an id that
+    moved with the name would orphan every automation and all recorded history.
+    """
+    from custom_components.kohler_anthem_plus.anthem_plus.models import get_valve_model
+
+    coordinator = make_coordinator(
+        [make_valve(get_valve_model("K-28210"), [31, 11, 1])],
+        controllers=[make_controller(get_valve_model("K-28210"))],
+    )
+    named = [e for e in collect("sensor", coordinator) if e.name == "System Status"]
+    assert len(named) == 2, [e.name for e in collect("sensor", coordinator)]
+    assert all(e.unique_id.endswith("_status") for e in named)
+
+
+def test_shower_active_is_not_diagnostic():
+    """It was diagnostic *with* an enabled-by-default override — a miscategorisation.
+
+    On the multi-zone valve it now exists on, "which shower is running" is primary state.
+    """
+    from custom_components.kohler_anthem_plus.anthem_plus.models import get_valve_model
+
+    model = get_valve_model("K-28211")
+    coordinator = make_coordinator([make_valve(model, [31, 11, 1, 11])])
+    assert [e.entity_category for e in _zone_active(coordinator)] == [None, None]
 
 
 # --------------------------------------------------------------------------- #

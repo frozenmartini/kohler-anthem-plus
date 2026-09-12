@@ -167,7 +167,9 @@ becomes `switch.anthem_plus_master_bath_shower` and `switch.anthem_valve_shower`
 ### How entities are named
 
 **On a single-zone valve — K-28209 and K-28210 — nothing carries a zone number.** There is one
-shower, so `Temperature`, `Flow` and `Shower Active` say everything a number would.
+shower, so `Temperature` and `Flow` say everything a number would. A single-zone valve has
+no `Shower Active` at all — `System Status` already reports whether water is running, and
+says whether it is warming up or paused besides.
 
 **A multi-zone valve numbers each zone as a suffix:** `Temperature 1` and `Temperature 2`,
 `Rainhead 1` and `Rainhead 2`. The number trails rather than leading (`Zone 2 Temperature`)
@@ -193,8 +195,8 @@ An outlet whose type the valve has not reported falls back to its position: `Out
 | `Favourite` | select | Presets **stored on the valve**, added in the Konnect app or at the first-generation touchscreen |
 | `Warmup` | select | Off / All outlets / Selected outlets |
 | `Endless Shower` | switch | Re-open a zone the valve closed on its run-time limit |
-| `Status` | sensor | `Water Running`, `Paused`, `Warming Up`, `Idle` |
-| `System State` | sensor | The valve's own `normalOperation` / `showerInProgress` flag — a second opinion to `Status`, decoded differently, and worth comparing when the two disagree |
+| `System Status` | sensor | `Water Running`, `Paused`, `Warming Up`, `Idle`. Whole-valve: warm-up and pause are system-level, not per-zone. Carries `seconds_remaining` — how long before the valve's run-time limit closes the water |
+| `System State` | sensor | The valve's own `normalOperation` / `showerInProgress` flag — a second opinion to `System Status`, decoded differently, and worth comparing when the two disagree |
 | `At Temperature` | binary sensor | Whether the water has reached its setpoint |
 | `Problem` | binary sensor | Whether the valve reports a fault. **Never yet observed set** on any captured system — see `fault_detection_verified` on the entity |
 
@@ -265,7 +267,7 @@ the valve's own byte is authoritative, including a change made at the panel mid-
 | `Shower` | switch | Starts or stops the shower via the controller, opening **the controller's own default outlets** — a separate setting from the valve's |
 | `System` | switch | The controller's overall system state |
 | `Favourite` | select | Favourites **stored on the controller**, added in the Konnect app or at the Anthem+ touchscreen. A different list from the valve's |
-| `Status` | sensor | `Water Running`, `Warming Up`, `Idle` |
+| `System Status` | sensor | `Water Running`, `Warming Up`, `Idle` |
 | `Zone N Temperature` | sensor | Read-only; the controller offers no live temperature control |
 | `Zone N Outlet M` | binary sensor | Read-only outlet state as the controller sees it |
 | `Music` / `Light` / `Steam` | binary sensor | Read-only accessory state |
@@ -285,7 +287,7 @@ the valve's own byte is authoritative, including a change made at the panel mid-
 | `Hex` | valve | The current command word for that zone — copy it into `send_valve_hex`. `Zone N Hex` on a two-zone valve |
 | `Water Used Today` | valve | Water used since local midnight, from Kohler's own per-day usage series — the same data behind the app's chart. Refreshed about 90 seconds after a shower ends, not on a clock: usage only moves while water runs, so a day with no shower costs no cloud calls. Enabled by default |
 | `Water Used This Week` | valve | The last seven days including today, as a rolling window. **Not a calendar week**: `gcs-usage` refuses `Interval=WEEK` outright (verified at three ranges — see [`gcs/api.md`](gcs/api.md)), so a week is summed from seven daily buckets. `per_day` carries the breakdown. Enabled by default |
-| `Zone N Active` | valve | Whether that zone is currently running water |
+| `Shower Active N` | valve | Whether that zone is currently running water. **Multi-zone valves only** — with one zone `System Status` answers the same question and more, so no such entity is created |
 | `Preset Active` | valve | Whether a stored preset is driving the valve |
 | `Interface Firmware` | valve | The touchscreen's own version — what the Konnect app calls the interface firmware. Reads `unknown` where the record carries no interface version |
 | `Valve Firmware` | valve | The valve's own version. **Two valves on one account can differ** — the reference system reads 10 and 11 while the app shows 10 for both |
@@ -382,7 +384,7 @@ twice, once per device:
 |---|---|---|
 | `Shower on` / `Shower` | switch — opens **the valve's own default outlets** | switch — opens **the controller's own default outlets**, a separate setting |
 | `Favourite` | select — presets **stored on the valve** | select — favourites **stored on the controller**; a different list |
-| `Status` | sensor — `Water Running` / `Paused` / `Warming Up` / `Idle` | sensor — `Water Running` / `Warming Up` / `Idle` |
+| `System Status` | sensor — `Water Running` / `Paused` / `Warming Up` / `Idle` | sensor — `Water Running` / `Warming Up` / `Idle` |
 | `Zone N Temperature` | **number** — the setpoint, writable | **sensor** — read-only |
 | `Zone N Outlet M` | **switch** — writable | **binary sensor** — read-only |
 
@@ -407,7 +409,7 @@ music or lighting. That split is the whole reason both devices exist.
 
 ### So which do I trigger automations on?
 
-**Use the valve for anything about water.** `Status`, `Zone N Active` and `At Temperature` on
+**Use the valve for anything about water.** `System Status`, `Shower Active` and `At Temperature` on
 the Anthem Valve device are true whenever water is running, regardless of how the shower was
 started.
 
