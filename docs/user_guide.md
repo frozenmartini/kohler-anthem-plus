@@ -294,7 +294,7 @@ the valve's own byte is authoritative, including a change made at the panel mid-
 | `Second Valve Firmware` | valve | The second valve's version, on two-valve systems only |
 | `Gateway Firmware` | valve | The gateway's version. Per-account rather than per-valve, but published on each valve's device, which is where a reader looking at one shower will look for it |
 | `Registered` | valve | When Kohler's cloud created this device's record. **A registration date, not an installation date** — a valve replaced under warranty reads as newer than the plumbing |
-| `Warmup Auto-Restore` | valve | Switch; puts warmup back when something silently disables it |
+| `Warmup Auto-Restore` | valve | Switch; puts warmup back when something silently disables it. **Only on accounts that also have an Anthem Plus controller** — the one identified cause of a spontaneous disable is the controller's own web UI, so a valve-only system has nothing for it to defend against. Off by default |
 
 </details>
 
@@ -740,7 +740,8 @@ Temperature and water units are read from your Konnect account, not chosen here 
 the Konnect app and they follow.
 
 There is no Configure dialog — every setting that can change after setup is an entity on the
-device page (`Endless Shower`, `Warmup`, `Warmup Auto-Restore`), where automations and
+device page (`Endless Shower`, `Warmup`, and — where an Anthem Plus controller is present
+— `Warmup Auto-Restore`), where automations and
 dashboards can reach it too.
 
 ### Diagnostics
