@@ -125,7 +125,7 @@ GCS_CREATE_PRESET = f"{COMMANDS}/gcs/createpreset"
 GCS_WARMUP = f"{COMMANDS}/gcs/warmup"
 GCS_VALVE_RESET = f"{COMMANDS}/gcs/valvereset"
 
-# HUB: favourite-centric. There is no direct "set outlet/temp/flow now" command.
+# HUB: favorite-centric. There is no direct "set outlet/temp/flow now" command.
 HUB_VALVE_CONTROL = f"{COMMANDS}/hub/valvecontrol"
 HUB_STEAM_CONTROL = f"{COMMANDS}/hub/steamcontrol"
 HUB_FAVORITE_CONTROL = f"{COMMANDS}/hub/favorite/control"
@@ -149,7 +149,7 @@ EXPERIENCE_ENDPOINTS = {
 # ---------------------------------------------------------------------------
 # Kohler returns these inside the response body, not only as HTTP status.
 STATUS_DEVICE_OFFLINE = 900
-# Editing a favourite while the system is running is rejected. Activating one is not.
+# Editing a favorite while the system is running is rejected. Activating one is not.
 STATUS_DEVICE_RUNNING = 902
 
 # ---------------------------------------------------------------------------
@@ -232,8 +232,8 @@ MSG_HUB_MUSIC = "MUSIC_STS"
 MSG_HUB_LIGHT = "LIGHT_STS"
 MSG_HUB_FAVORITE = "FAVORITE_STS"
 MSG_HUB_SYSTEM = "SYSTEM_STS"
-# Carries the whole favourites list rather than a delta. Pushed after **every** create,
-# edit, and delete (9 of 9 in the captures) as well as on reboot, so it is the favourite
+# Carries the whole favorites list rather than a delta. Pushed after **every** create,
+# edit, and delete (9 of 9 in the captures) as well as on reboot, so it is the favorite
 # refresh mechanism and no polling is needed.
 #
 # The CREATE_FAVORITE_STS / UPDATE_FAVORITE_STS / DELETE_FAVORITE_STS acknowledgements are

@@ -95,7 +95,7 @@ OUTLET_WRITE_VERIFY_DELAY_SECONDS = 30
 #
 # Preset ids are positional and the app hides preset 1 from its own list, so the id shown in
 # the app is not this id. Adding a preset appends (a new one became id 3, leaving 1 and 2
-# alone), but a deletion is expected to renumber, exactly as HUB favourites do. If a start
+# alone), but a deletion is expected to renumber, exactly as HUB favorites do. If a start
 # ever runs the wrong scene, re-read the preset list before assuming the valve misbehaved.
 SHOWER_ON_PRESET_ID = 1
 
@@ -534,7 +534,7 @@ UI_DEFAULT_TEMPERATURE_MIN_F = 59
 # a shower from Home Assistant would have produced a trickle, with nothing in the UI to
 # explain why or to fix it.
 #
-# 100% is the only defensible default: it is what the Konnect app pins favourites to, and it
+# 100% is the only defensible default: it is what the Konnect app pins favorites to, and it
 # is the one value a user who has no flow control cannot be surprised by.
 DEFAULT_FLOW_PERCENT = 100.0
 

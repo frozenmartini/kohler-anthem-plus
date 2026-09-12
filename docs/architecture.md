@@ -57,7 +57,7 @@ Outlet 3 is therefore valve2's *first* outlet on a K-28211 but valve1's *third* 
 K-28212. Code that hardcodes "valve1 carries outlets 1-3" commands the wrong outlet on a
 4-outlet system. Each valve always exposes three outlet bits; a model simply uses fewer.
 
-On the HUB side the same model governs how many outlets appear in a favourite's
+On the HUB side the same model governs how many outlets appear in a favorite's
 `water.zone1`.
 
 > **Unverified:** that a 2-outlet valve uses mask bits 0 and 1, the same low bits a
@@ -472,7 +472,7 @@ An integration cannot assume both devices are present:
 | Account has | Means |
 |---|---|
 | GCS only | First-gen screen. Full valve control; no music, light, or steam. |
-| HUB only | Anthem Plus screen alone. Favourites and experiences; **no direct outlet/temperature/flow control**. |
+| HUB only | Anthem Plus screen alone. Favorites and experiences; **no direct outlet/temperature/flow control**. |
 | Both | Both screens on one valve. Full control plus the HUB's accessories. |
 | Several of either | One unit per bathroom on one account. Supported since 0.4.0 (beta): one device per unit, the single account-level MQTT stream routed by `deviceid`. Which controller fronts which valve is not something the cloud says, so the two are paired only when there is exactly one of each. Distinct from two bodies under one controller, which is still not read. |
 
@@ -499,7 +499,7 @@ actuates the system** on firmware 2.88.
 - `water_test_start` runs a **fixed** plumbing self-test (zone 1, outlet 1, ~5 seconds) and
   ignores any temperature, flow, or outlet fields you send.
 - `update_*_settings` writes **stored presets and configuration**, not live state.
-- The local favourite and experience commands edit the *list*; the "run this now" trigger
+- The local favorite and experience commands edit the *list*; the "run this now" trigger
   goes through the **cloud**.
 
 So the local API is genuinely useful for reading crude state and for reading and writing
@@ -515,30 +515,30 @@ The two products are close to opposites in how you drive them.
 
 | | **GCS** | **HUB** |
 |---|---|---|
-| Unit of control | A **valve command word** (hex) | A **favourite** (a named scene) |
+| Unit of control | A **valve command word** (hex) | A **favorite** (a named scene) |
 | Direct "set temp/flow/outlets now" | ✅ `solowritesystem` | ❌ does not exist |
-| To change settings | Send a new word | Edit a favourite, then activate it |
+| To change settings | Send a new word | Edit a favorite, then activate it |
 | Bare on/off | ❌ | ✅ `valvecontrol` |
 | Scope | Water only | Water, steam, music, lighting |
 
-On the HUB, "set outlet 1 to 104 °F" is not a command — you create a favourite holding that
-configuration and activate it. And **editing a favourite is blocked while the system is
+On the HUB, "set outlet 1 to 104 °F" is not a command — you create a favorite holding that
+configuration and activate it. And **editing a favorite is blocked while the system is
 running** (HTTP 400, `statusCode 902`), so the practical pattern is to pre-create one
-favourite per state you want and switch between them by activation.
+favorite per state you want and switch between them by activation.
 
-### Favourite ids are reassigned, not stable
+### Favorite ids are reassigned, not stable
 
-Deleting a favourite shifts the ids of the others. Confirmed by a deletion between the
+Deleting a favorite shifts the ids of the others. Confirmed by a deletion between the
 2026-08-10 and 2026-08-11 reads: `AllOff-omit` moved from id 6 to id 5. **Never hardcode a
-favourite id** — read the favourites list and resolve by title.
+favorite id** — read the favorites list and resolve by title.
 
-### Which favourite fields exist depends on the accessories
+### Which favorite fields exist depends on the accessories
 
-A favourite bundles `water`, `steam`, `music`, and `light`, but only components whose
+A favorite bundles `water`, `steam`, `music`, and `light`, but only components whose
 hardware is attached are meaningful. Read `hub-configuration.parts`, where each component
 reports `Connected` / `NotConnected` / `null`:
 
-| Favourite field | Requires |
+| Favorite field | Requires |
 |---|---|
 | `water` | `valve1` / `valve2` connected |
 | `music` | `amplifier` connected |
@@ -548,16 +548,16 @@ reports `Connected` / `NotConnected` / `null`:
 The test system has an amplifier only, so `music` is the sole accessory field exercised
 live; `light` and `steam` are mapped from the decompile but untested.
 
-None of this affects **activating** a favourite — that is always just an id and a name,
-whatever the favourite contains. So accessory support is a question of what you can
+None of this affects **activating** a favorite — that is always just an id and a name,
+whatever the favorite contains. So accessory support is a question of what you can
 *build*, not what you can *run*.
 
 ⚠️ **It does affect what you can *read*, and this is a trap.** Because the components are
 optional, `MUSIC_STS` / `STEAM_STS` / `LIGHT_STS` and their `favoriteid` are attribution for
-one component — "the music playing now was started by favourite 2" — and **not** an answer to
-"is favourite 2 running". Four of this account's six favourites carry no music at all, so
+one component — "the music playing now was started by favorite 2" — and **not** an answer to
+"is favorite 2 running". Four of this account's six favorites carry no music at all, so
 activating one of those produces no music-side evidence whatever. `FAVORITE_STS` is the only
-message that speaks for the favourite. Full reasoning, the component table and the three
+message that speaks for the favorite. Full reasoning, the component table and the three
 different ways an absent component is spelled: [`hub/cloud_api.md`](hub/cloud_api.md) §5.5.
 
 Note `parts.valve1` / `valve2` count valve **bodies** wired to the controller, not the two
@@ -589,13 +589,13 @@ At most one read per thirty minutes either way. See §"Reachability" below.
 
 | Call | Taken from it |
 |---|---|
-| `GET /customer-device/{tenant}` | Device list (nested under `customerHome[].devices[]` — singular key), `temperatureUnit`, `waterUnits`. The unit is load-bearing: **HUB favourite temperatures are written in it** |
+| `GET /customer-device/{tenant}` | Device list (nested under `customerHome[].devices[]` — singular key), `temperatureUnit`, `waterUnits`. The unit is load-bearing: **HUB favorite temperatures are written in it** |
 | `GET /gcs-state/{id}` | Both valve words — temperature, flow, outlet mask, pause flag; `warmUpState.warmUp` → mode and `warmUpState.state` → in-progress; `totalVolume`; `presetOrExperienceId`. **Also `connectionState`** — a sibling of `state`, not inside it, so `apply_rest_state` does not see it; `cloud_watch.py` takes it off every one of these reads |
 | `GET /gcs-state/gcsadvancestate/{id}` | Per-outlet `minimumFlowrate` / `maximumFlowrate` / `maximumRuntime` → `OutletLimits`. This is what arms Endless Shower |
 | `GET /gcs-preset/{id}` | Preset id, title, `isExperience`. The raw payload is also handed to the preset-1 timer sync, which needs fields `apply_preset_list` discards |
 | `GET /hub-state/{id}` | Per-zone status/outlets/temperature/flowRate, `musicStateModel.status`, `hubSteamState.status`, `light[].status`, top-level `showerWarmUp` |
 | `GET /hub-configuration/{id}` | `parts` → which accessories are connected. **First seed only** — `hub_capabilities.known` latches it |
-| `GET /hub-experience/{id}/favorites` | The controller's favourite list — ids and titles |
+| `GET /hub-experience/{id}/favorites` | The controller's favorite list — ids and titles |
 | `POST /platform/api/v1/mobile/settings` | IoT Hub host, device id and SAS credentials. Not state: this is what brings the stream up, and it runs on **every connect attempt** because the password is short-lived |
 
 **A cold start is 14 calls; a reconnect is 6** — the mobile-settings POST plus the five reseed
@@ -651,8 +651,8 @@ from `connectionState`, which is ground truth. Two push events ask:
 | Controller reports a zone `ON`, valve silent 60 s | a HUB | 435 of 437 zone-`ON` `SHOWER_VALVE_STS` had a valve message within 60 s; **the only 2 that did not are the outage** |
 | Valve silent for 3 h | nothing | Covers valve-only accounts, and the 64 % of silence the controller sleeps through |
 
-⚠️ **Zone `ON` only.** An all-`OFF` card is republished with no valve action during favourite
-activity — every `SHOWER_VALVE_STS` in the captured favourite bursts reads `z1:OFF z2:OFF` — so
+⚠️ **Zone `ON` only.** An all-`OFF` card is republished with no valve action during favorite
+activity — every `SHOWER_VALVE_STS` in the captured favorite bursts reads `z1:OFF z2:OFF` — so
 a missing valve message there means nothing.
 
 Surfaced as `binary_sensor.anthem_valve_cloud_connection`. A **failed** read is never a verdict:
@@ -847,7 +847,7 @@ That fixes the state-source policy:
 |---|---|---|
 | GCS + HUB | **GCS valve word** | The HUB is silent during GCS-driven sessions |
 | GCS only | **GCS valve word** | The only source |
-| HUB only | **HUB `SHOWER_VALVE_STS`** | No valve word available; driven by favourites, which the HUB does report |
+| HUB only | **HUB `SHOWER_VALVE_STS`** | No valve word available; driven by favorites, which the HUB does report |
 
 Implemented as `resolve_outlet_source()` in `anthem_plus/models.py`, so it is a single
 decision rather than a convention each entity has to remember.
@@ -894,12 +894,12 @@ A GCS and a HUB on one account are usually the same physical shower reached thro
 touchscreens — but they are presented as **separate Home Assistant devices**. They behave
 differently, their state arrives on different schedules, and merging them would imply a
 consistency that does not exist. The GCS device owns outlets, temperature, and flow; the
-HUB device owns favourites, experiences, music, and its accessories.
+HUB device owns favorites, experiences, music, and its accessories.
 
 ## Why most integrations only support GCS
 
 The upstream `yon/kohler-anthem` library reverse-engineered the GCS valve only, so the
-Home Assistant integrations built on it inherit that limit. The HUB's favourite-centric
+Home Assistant integrations built on it inherit that limit. The HUB's favorite-centric
 command surface, its local API, and its music/light/steam models are documented here for the
 first time — that is what makes this project **Anthem Plus** rather than Anthem.
 

@@ -9,7 +9,7 @@ Covers both products:
 * **Anthem** (SKU ``GCS``) — the digital valve body with built-in Wi-Fi, addressed
   directly. Every start specifies the full valve state as a hex command word.
 * **Anthem Plus** (SKU ``HUB``) — the Linux system controller that drives the valves and
-  integrates music, lighting, and steam. Control is organised around favourites.
+  integrates music, lighting, and steam. Control is organised around favorites.
 
 Written against the protocol documentation in ``docs/``, which is capture-derived. The
 ``kohler-anthem`` library reads three of these behaviours differently; it was decompiled from

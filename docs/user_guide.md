@@ -71,8 +71,8 @@ the broker replays nothing when you connect, so the state has to come from somew
 * **Push-based.** No polling loop. Changes made at the touchscreen, in the Konnect app, or by
   the hardware itself show up in Home Assistant within seconds.
 * **Per-outlet control.** Every outlet is a switch; every zone has a temperature number.
-* **Presets and favourites.** The valve's stored presets and the controller's named
-  favourites are both exposed as dropdowns.
+* **Presets and favorites.** The valve's stored presets and the controller's named
+  favorites are both exposed as dropdowns.
 * **Warmup.** Kohler's pre-heat feature as a three-option dropdown, with an optional watchdog
   that puts it back when something silently turns it off.
 * **Endless Shower.** Optionally re-open a zone the valve closed on its own run-time limit.
@@ -94,7 +94,7 @@ assuming there is one device when there are two.
 |---|---|---|
 | What it is | The digital valve itself, Wi-Fi built in | A Linux controller sitting in front of the valve |
 | Adds | — | Music (needs a K-30319 amplifier), lighting, steam, a second valve body |
-| Controlled by | A raw hex command word — temperature, flow, outlet mask | Activating named favourites |
+| Controlled by | A raw hex command word — temperature, flow, outlet mask | Activating named favorites |
 | Granularity | Any outlet, any temperature, any time | Whole scenes only |
 | In the code and docs | `GCS` | `HUB` |
 
@@ -130,7 +130,7 @@ into four bytes. Temperature is a 10-bit value spanning two bytes — `°C = ((b
 (16) to `0xC8` (200), where `0xC8` (200) is 100 %. The full breakdown, including the outlet
 mask and the pause bit, is in [`gcs/valve_hex.md`](gcs/valve_hex.md).
 
-**The controller is not commanded that way.** It only activates named favourites — whole
+**The controller is not commanded that way.** It only activates named favorites — whole
 scenes configured in the Konnect app, combining outlets, temperature, lighting, music and
 steam. You cannot ask it for "outlet 2 at 39 °C"; that goes to the valve.
 
@@ -145,7 +145,7 @@ the account, and an **Anthem Plus** for each controller.
 
 **Several of either.** An account with more than one valve or controller — one per
 bathroom, say — gets one device per unit, each with the full set of entities, its own
-favourites and settings (Endless Shower, Warmup Auto-Restore and the learned run-time
+favorites and settings (Endless Shower, Warmup Auto-Restore and the learned run-time
 limits are per valve), and each decoding outlets with the layout its own hardware reports,
 so a 6-outlet valve and a 3-outlet valve on one account each get the right rows. To keep
 their entity IDs apart, the devices are named after the unit's name in the Konnect app:
@@ -192,7 +192,7 @@ An outlet whose type the valve has not reported falls back to its position: `Out
 | `Rainhead`, `Showerhead`, `Handshower`, `Tub Filler` | switch | One per outlet, named after the fixture the valve reports. See **Outlet names** below |
 | `Temperature` | number | Setpoint for that zone, in your account's unit. `Temperature 1` / `Temperature 2` on a two-zone valve |
 | `Flow` | number | Flow as a percentage, bounded by the limits the valve itself reports. `Flow 1` / `Flow 2` on a two-zone valve. See **Flow** below |
-| `Favourite` | select | Presets **stored on the valve**, added in the Konnect app or at the first-generation touchscreen |
+| `Favorite` | select | Presets **stored on the valve**, added in the Konnect app or at the first-generation touchscreen |
 | `Warmup` | select | Off / All outlets / Selected outlets |
 | `Endless Shower` | switch | Re-open a zone the valve closed on its run-time limit |
 | `System Status` | sensor | `Water Running`, `Paused`, `Warming Up`, `Idle`. Whole-valve: warm-up and pause are system-level, not per-zone. Carries `seconds_remaining` — how long before the valve's run-time limit closes the water |
@@ -266,7 +266,7 @@ the valve's own byte is authoritative, including a change made at the panel mid-
 |---|---|---|
 | `Shower` | switch | Starts or stops the shower via the controller, opening **the controller's own default outlets** — a separate setting from the valve's |
 | `System` | switch | The controller's overall system state |
-| `Favourite` | select | Favourites **stored on the controller**, added in the Konnect app or at the Anthem+ touchscreen. A different list from the valve's |
+| `Favorite` | select | Favorites **stored on the controller**, added in the Konnect app or at the Anthem+ touchscreen. A different list from the valve's |
 | `System Status` | sensor | `Water Running`, `Warming Up`, `Idle` |
 | `Zone N Temperature` | sensor | Read-only; the controller offers no live temperature control |
 | `Zone N Outlet M` | binary sensor | Read-only outlet state as the controller sees it |
@@ -298,7 +298,7 @@ the valve's own byte is authoritative, including a change made at the panel mid-
 
 </details>
 
-### Each device has its own defaults and its own favourites
+### Each device has its own defaults and its own favorites
 
 On a system with both products this catches people out: the valve and the controller are not
 two views of one set of settings. Each stores its own, and they can differ.
@@ -309,10 +309,10 @@ open. These are separate settings, so the same gesture on two screens in the sam
 start two different showers. The `Shower on` switch on the valve, and `Shower` on
 the controller, each do exactly what that device's dial does.
 
-**Favourites.** Both lists can be built either in the Konnect app or at the matching
-touchscreen, but they are stored in different places — valve favourites live on the valve,
-controller favourites live on the controller. So the two screens show **different lists**,
-and so do the two `Favourite` dropdowns in Home Assistant. Only the controller's can carry
+**Favorites.** Both lists can be built either in the Konnect app or at the matching
+touchscreen, but they are stored in different places — valve favorites live on the valve,
+controller favorites live on the controller. So the two screens show **different lists**,
+and so do the two `Favorite` dropdowns in Home Assistant. Only the controller's can carry
 lighting, music or steam, because only the controller knows those exist.
 
 ## Using both together
@@ -383,7 +383,7 @@ twice, once per device:
 | Name | On the valve | On the controller |
 |---|---|---|
 | `Shower on` / `Shower` | switch — opens **the valve's own default outlets** | switch — opens **the controller's own default outlets**, a separate setting |
-| `Favourite` | select — presets **stored on the valve** | select — favourites **stored on the controller**; a different list |
+| `Favorite` | select — presets **stored on the valve** | select — favorites **stored on the controller**; a different list |
 | `System Status` | sensor — `Water Running` / `Paused` / `Warming Up` / `Idle` | sensor — `Water Running` / `Warming Up` / `Idle` |
 | `Zone N Temperature` | **number** — the setpoint, writable | **sensor** — read-only |
 | `Zone N Outlet M` | **switch** — writable | **binary sensor** — read-only |
@@ -392,8 +392,8 @@ The device prefix is what separates them — `switch.anthem_valve_shower` agains
 `switch.anthem_plus_shower`. Note the last two rows differ in *type*, not just in device: if
 an entity you expected to set turns out to be read-only, you have the controller's copy.
 
-> The valve's `Favourite` and the controller's `Favourite` are **different lists**. Valve
-> presets are stored on the valve; controller favourites are scenes configured in the Konnect
+> The valve's `Favorite` and the controller's `Favorite` are **different lists**. Valve
+> presets are stored on the valve; controller favorites are scenes configured in the Konnect
 > app, and only the latter can carry lighting, music or steam.
 
 ### Which device to reach for
@@ -401,7 +401,7 @@ an entity you expected to set turns out to be read-only, you have the controller
 | You want | Use | Why |
 |---|---|---|
 | A specific outlet, temperature or flow | **valve** | It takes a raw command word — any outlet, any temperature, any time |
-| A whole scene, with lights/music/steam | **controller** | It activates named favourites only; whole scenes or nothing |
+| A whole scene, with lights/music/steam | **controller** | It activates named favorites only; whole scenes or nothing |
 | To know whether water is actually running | **valve** | Authoritative, always |
 
 You cannot ask the controller for "outlet 2 at 39 °C", and the valve knows nothing about
@@ -414,7 +414,7 @@ the Anthem Valve device are true whenever water is running, regardless of how th
 started.
 
 Use the controller's entities when you specifically mean *"the controller is driving this"* —
-for example, only running an automation for showers started from a favourite, or acting on
+for example, only running an automation for showers started from a favorite, or acting on
 `Music` / `Light` / `Steam`, which have no valve equivalent.
 
 A useful rule: if the automation would still make sense with the controller unplugged, it
@@ -601,9 +601,9 @@ from the UI form automatically.
 
 ## Features in detail
 
-### Favourites and presets
+### Favorites and presets
 
-The valve stores presets; the controller stores named favourites. Both are exposed as
+The valve stores presets; the controller stores named favorites. Both are exposed as
 `select` entities, and both are configured in the Konnect app rather than here — this
 integration activates them, it doesn't create them.
 
@@ -811,7 +811,7 @@ automation:
           message: Shower is at temperature.
 ```
 
-**Start a favourite from anywhere**
+**Start a favorite from anywhere**
 
 ```yaml
 automation:
@@ -822,7 +822,7 @@ automation:
     actions:
       - action: select.select_option
         target:
-          entity_id: select.anthem_plus_favourite
+          entity_id: select.anthem_plus_favorite
         data:
           option: Morning
 ```
@@ -1006,7 +1006,7 @@ Konnect app.
   Home Assistant can change on its own; disable the entity if yours behaves that way. The
   protocol layer is unaffected either way.
 * **Music, lighting and steam are read-only.** The controller exposes them as state; driving
-  them means activating a favourite that includes them. This is the limit of what **Konnect**
+  them means activating a favorite that includes them. This is the limit of what **Konnect**
   exposes, not what the hardware can do.
 * **Which controller fronts which valve is not knowable.** Nothing on the cloud side says
   it, so on an account with more than one valve or more than one controller the valve's
@@ -1026,7 +1026,7 @@ Konnect app.
   accepting it, and the next command is built from that report. Two valve commands inside that
   second undo each other — the second one closes what the first opened. With the valve's warm-up
   off, a `delay:` of about 3 s between valve actions (outlet switches, temperature, the Shower
-  switch, favourites) is enough. With warm-up on, no delay makes a two-step automation work — a
+  switch, favorites) is enough. With warm-up on, no delay makes a two-step automation work — a
   command during the warm-up hijacks it onto the outlets you wrote, and one after the warm-up's
   pause ends the session — so send everything in one command: the `custom_shower` action, or a
   single `send_valve_hex` word. The failure mode is water off, never water on.

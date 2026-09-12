@@ -975,8 +975,8 @@ class HubState:
     steam_on: bool | None = None
     light_on: bool | None = None
     active_favorite_id: str | None = None
-    # The running favourite's name, as `FAVORITE_STS` reports it. Kept beside the id because
-    # the message carries both, and the name is usable before the favourites list has been
+    # The running favorite's name, as `FAVORITE_STS` reports it. Kept beside the id because
+    # the message carries both, and the name is usable before the favorites list has been
     # seeded — see `_apply_favorite`.
     active_favorite_name: str | None = None
     favorites: list[dict[str, Any]] = field(default_factory=list)
@@ -1098,7 +1098,7 @@ class HubState:
 
     def _apply_music(self, envelope: Envelope) -> bool:
         # Music telemetry is on/off only. Source, volume, and track are not reported on
-        # either channel unless a favourite is driving it.
+        # either channel unless a favorite is driving it.
         value = self._status_flag(envelope, "amplifier")
         changed = value is not None and value != self.music_on
         if value is not None:
@@ -1120,31 +1120,31 @@ class HubState:
         return changed
 
     def _apply_favorite(self, envelope: Envelope) -> bool:
-        """Track which favourite is running, from `FAVORITE_STS`.
+        """Track which favorite is running, from `FAVORITE_STS`.
 
         ⚠️ **This message carries `id` / `name` / `status` inside its attributes, and never
         `favoriteid`.** That key is real, but it belongs to the *accessory* messages —
         `MUSIC_STS`, `LIGHT_STS` and `STEAM_STS` each carry top-level `favoriteid` and
         `experienceid`. An earlier version of this method read `favoriteid` here, so it
         resolved to `None` on every message, `active_favorite_id` was permanently unset, and
-        the controller's Favourite dropdown snapped back to `Off` the moment any other
+        the controller's Favorite dropdown snapped back to `Off` the moment any other
         message arrived. Corrected 2026-08-21 against a live activation.
 
         ⚠️ **Nor are those a substitute — they answer a different question.** An accessory's
         `favoriteid` is attribution for *that component*: "the music playing right now was
-        started by favourite 2". Whether favourite 2 is still running is not the same thing,
-        because **a favourite is a composite and its components are optional** — it bundles
+        started by favorite 2". Whether favorite 2 is still running is not the same thing,
+        because **a favorite is a composite and its components are optional** — it bundles
         `water`, `steam`, `music` and `light`, and carries only what the owner put in it and
         what the hub is wired to. So:
 
-        * A favourite with no music never appears in `MUSIC_STS` at all. Four of this
-          account's six favourites carry no music; watching `favoriteid` would report nothing
+        * A favorite with no music never appears in `MUSIC_STS` at all. Four of this
+          account's six favorites carry no music; watching `favoriteid` would report nothing
           running while the shower is on.
-        * Attribution drops before the favourite does. Measured 2026-08-21, `MUSIC_STS` went
+        * Attribution drops before the favorite does. Measured 2026-08-21, `MUSIC_STS` went
           to `favoriteid: "0"` at 07:23:59.150Z, **0.6 s before** `FAVORITE_STS` reported the
-          favourite itself `OFF` at 07:23:59.766Z.
+          favorite itself `OFF` at 07:23:59.766Z.
 
-        `FAVORITE_STS` is the one message that speaks for the favourite. See
+        `FAVORITE_STS` is the one message that speaks for the favorite. See
         `docs/hub/cloud_api.md` §5.5 for the component table and the three different ways an
         absent component is spelled.
 
@@ -1155,10 +1155,10 @@ class HubState:
             {"id": "1", "name": "Hair Wash", "status": "OFF"}   <- stopped, 96 s later
 
         A missing `status` is treated as ON, the same direction of error as `_name_of` and
-        the `isExperience` filter in `select.py`: prefer showing a favourite over hiding one.
+        the `isExperience` filter in `select.py`: prefer showing a favorite over hiding one.
 
         The name travels with the message, which is why it is kept — it lets the dropdown
-        show a running favourite before the favourites list has been seeded.
+        show a running favorite before the favorites list has been seeded.
         """
         favorite_id: str | None = None
         name: str | None = None
@@ -1172,7 +1172,7 @@ class HubState:
                 continue
             if str(attribute.get("status") or "").strip().upper() == "OFF":
                 # An explicit stop. Break rather than continue, so a trailing attribute
-                # cannot resurrect the favourite the controller just turned off.
+                # cannot resurrect the favorite the controller just turned off.
                 favorite_id = name = None
                 break
             favorite_id = str(identifier)

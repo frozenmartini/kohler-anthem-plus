@@ -1,18 +1,18 @@
 """Commands for the Anthem Plus system controller (SKU ``HUB``).
 
-The HUB is favourite-centric. There is **no direct "set outlet/temperature/flow now"**
-command: to run a specific configuration you create or edit a *favourite* and activate it.
+The HUB is favorite-centric. There is **no direct "set outlet/temperature/flow now"**
+command: to run a specific configuration you create or edit a *favorite* and activate it.
 The only direct commands are bare on/off for the controller's own stored default
 (``valvecontrol`` / ``steamcontrol``) and ``stopall``.
 
 Two constraints shape every caller:
 
-* **Editing a favourite is rejected while the system runs** (``statusCode 902``), surfaced
+* **Editing a favorite is rejected while the system runs** (``statusCode 902``), surfaced
   as :class:`~.client.DeviceRunning`. Activating one is allowed at any time — so the
-  practical pattern is to pre-create a favourite per state you want and switch between
+  practical pattern is to pre-create a favorite per state you want and switch between
   them by activation, never editing at runtime.
-* **An all-off favourite is not the same as ``stopall``.** Activating an empty favourite
-  stops the outputs but leaves the system reporting that favourite as running; only
+* **An all-off favorite is not the same as ``stopall``.** Activating an empty favorite
+  stops the outputs but leaves the system reporting that favorite as running; only
   ``stopall`` fully idles it.
 """
 
@@ -86,7 +86,7 @@ def zone_outlet_flags(
 
 
 # The HUB uses "zone" and "valve" interchangeably, and not consistently within one payload:
-# hub-state's shower entries carry `zone: "1"`, favourites nest under `water.zone1`,
+# hub-state's shower entries carry `zone: "1"`, favorites nest under `water.zone1`,
 # hub-configuration's parts are `valve1`/`valve2`, and MQTT SHOWER_VALVE_STS attributes may
 # carry either a `zone` number or a `component` of "valve1"/"valve2". They all mean the same
 # thing. Anything reading a HUB payload should go through zone_number() rather than picking
@@ -122,14 +122,14 @@ CONNECTED = "Connected"
 
 @dataclass(frozen=True)
 class HubCapabilities:
-    """Which accessories are attached, and therefore which favourite fields exist.
+    """Which accessories are attached, and therefore which favorite fields exist.
 
-    A favourite bundles ``water``, ``steam``, ``music``, and ``light`` components, but only
+    A favorite bundles ``water``, ``steam``, ``music``, and ``light`` components, but only
     those whose hardware is present are meaningful. An account with no amplifier has no
     music field to set.
 
-    None of this affects **activating** a favourite — that is always just an id and a
-    name, whatever the favourite contains.
+    None of this affects **activating** a favorite — that is always just an id and a
+    name, whatever the favorite contains.
     """
 
     water: bool = False
@@ -185,7 +185,7 @@ class HubDevice:
     ) -> None:
         self._client = client
         self.device_id = device_id
-        # Unlike the GCS valve byte, HUB favourite temperatures are integers in the
+        # Unlike the GCS valve byte, HUB favorite temperatures are integers in the
         # ACCOUNT's unit — the app sends °F as-is and only converts when the account is
         # set to Celsius. So no conversion happens here.
         self.temperature_unit = temperature_unit
@@ -223,12 +223,12 @@ class HubDevice:
         )
 
     # ------------------------------------------------------------------ #
-    # Favourites
+    # Favorites
     # ------------------------------------------------------------------ #
     async def async_activate_favorite(
         self, favorite_id: Any, name: str, on: bool = True
     ) -> Any:
-        """Start or stop a favourite. Allowed even while something else runs."""
+        """Start or stop a favorite. Allowed even while something else runs."""
         return await self._client.async_request(
             "POST",
             HUB_FAVORITE_CONTROL,
@@ -251,7 +251,7 @@ class HubDevice:
         music: dict[str, Any] | None = None,
         light: list[dict[str, Any]] | None = None,
     ) -> Any:
-        """Create a favourite. Omit ``id`` — that is what makes it a create."""
+        """Create a favorite. Omit ``id`` — that is what makes it a create."""
         return await self._client.async_request(
             "POST",
             HUB_FAVORITE,
@@ -271,7 +271,7 @@ class HubDevice:
         music: dict[str, Any] | None = None,
         light: list[dict[str, Any]] | None = None,
     ) -> Any:
-        """Edit a favourite.
+        """Edit a favorite.
 
         Raises :class:`~.client.DeviceRunning` if the system is active — stop it first.
         """
@@ -282,7 +282,7 @@ class HubDevice:
         return await self._client.async_request("PATCH", HUB_FAVORITE, json_body=body)
 
     async def async_delete_favorite(self, favorite_id: int, name: str) -> Any:
-        """Delete a favourite."""
+        """Delete a favorite."""
         return await self._client.async_request(
             "DELETE",
             HUB_FAVORITE,
@@ -299,7 +299,7 @@ class HubDevice:
         music: dict[str, Any] | None,
         light: list[dict[str, Any]] | None,
     ) -> dict[str, Any]:
-        """Assemble a favourite body.
+        """Assemble a favorite body.
 
         ``music`` is omitted entirely when unset: sending an all-null music object makes
         the whole request fail with HTTP 400, whereas leaving the key out is accepted.
@@ -320,7 +320,7 @@ class HubDevice:
     def zone(
         temperature: int, outlets: list[bool], flowrate: int = 100
     ) -> dict[str, Any]:
-        """Build a water zone for a favourite body.
+        """Build a water zone for a favorite body.
 
         ``temperature`` is an integer in the account's unit. ``outlets`` are per-outlet
         flags, converted here to the 0-based position list the API expects.
@@ -387,7 +387,7 @@ class HubDevice:
         ``title`` is the experience's TITLE string, not its numeric id.
 
         Experiences carry no outlet or curve data in the API — the program is internal to
-        the firmware and always runs on the default zone1/outlet1. Use a favourite when
+        the firmware and always runs on the default zone1/outlet1. Use a favorite when
         you need a specific outlet.
         """
         endpoint = EXPERIENCE_ENDPOINTS.get(category)

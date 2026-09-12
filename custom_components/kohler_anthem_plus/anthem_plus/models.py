@@ -178,7 +178,7 @@ def resolve_outlet_source(has_gcs: bool, has_hub: bool) -> OutletStateSource | N
     source must not be.
 
     A HUB-only account has no valve word available, so it uses the HUB stream. That works
-    because such a system is driven through favourites and the touchscreen, and the outlet
+    because such a system is driven through favorites and the touchscreen, and the outlet
     array does populate for those.
 
     Returns ``None`` when neither device is present.

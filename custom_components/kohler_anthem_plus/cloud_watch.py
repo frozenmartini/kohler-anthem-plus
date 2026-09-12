@@ -49,8 +49,8 @@ samples. It fires within a minute rather than hours, and costs no network traffi
 
 ⚠️ **Zone `ON` only.** An all-`OFF` card gets republished with no valve action at all: the
 controller emits its whole card set (`MUSIC_STS` + `SHOWER_VALVE_STS` + `STEAM_STS` +
-`FAVORITE_STS` + `LIGHT_STS`) in one second during favourite activity, and every
-`SHOWER_VALVE_STS` in the captured favourite bursts reads `z1:OFF z2:OFF`. The valve owes no
+`FAVORITE_STS` + `LIGHT_STS`) in one second during favorite activity, and every
+`SHOWER_VALVE_STS` in the captured favorite bursts reads `z1:OFF z2:OFF`. The valve owes no
 reply to an unchanged OFF card, so a missing valve message there means nothing. The `OFF`
 variant is not merely noisier — it is evidentially empty.
 

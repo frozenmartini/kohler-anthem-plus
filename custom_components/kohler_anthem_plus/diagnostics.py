@@ -22,7 +22,7 @@ that model's row can be marked verified.
 What deliberately stays out: credentials (refresh token), account identity (username,
 tenant id), and device identity (device ids, serial numbers, the mobile registration id).
 Kohler device serials double as cloud addresses, so they are redacted the same way tokens
-are — presence and SKU are enough for validation. Preset and favourite *names* are the
+are — presence and SKU are enough for validation. Preset and favorite *names* are the
 owner's own words and stay out too; counts carry the signal.
 
 **Two mechanisms, because they answer different questions.** `TO_REDACT` names the keys whose
@@ -316,9 +316,9 @@ def _valve_report(valve: Valve) -> dict[str, Any]:
             "slots_seen": len(gcs.presets),
             # **`selectable` counts before the hidden ids are removed; `offered` counts
             # after.** They differ by the default-shower slot (`PRESET_HIDDEN_IDS`), which
-            # is startable but never listed, so a valve with no user favourites reports
+            # is startable but never listed, so a valve with no user favorites reports
             # `selectable: 1` and `offered: 0`. Reading the first as "one usable
-            # favourite" and expecting the picker to show it is a mistake this pair of
+            # favorite" and expecting the picker to show it is a mistake this pair of
             # numbers exists to prevent — `offered` is what the dropdown actually holds.
             "selectable": sum(1 for p in gcs.presets.values() if p.is_selectable),
             "offered": len(gcs.selectable_presets(hidden=PRESET_HIDDEN_IDS)),

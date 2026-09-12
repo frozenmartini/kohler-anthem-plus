@@ -67,7 +67,7 @@ async def async_setup_entry(
 ) -> None:
     """Set up a temperature and a flow number for each zone the valve has."""
     coordinator: KohlerAnthemPlusCoordinator = hass.data[DOMAIN][entry.entry_id]
-    # The controller offers no live temperature or flow control — only favourites — so a
+    # The controller offers no live temperature or flow control — only favorites — so a
     # controller-only account gets nothing here. One set per valve otherwise, each with
     # the zones its own layout has.
     entities: list[NumberEntity] = []

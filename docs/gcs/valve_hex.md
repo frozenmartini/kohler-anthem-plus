@@ -346,7 +346,7 @@ maps to a fourth in the real world. The first three are the most likely source o
 |---|---|---|---|
 | Byte | `0x00`–`0xC8` | — | the wire format, here and in MQTT |
 | `flowSetpoint` | 0–50 | byte ÷ 4 | GCS `gcs-state` — the device's native unit |
-| Percent | 0–100 | byte ÷ **maximumFlowRate** × 100 | HUB favourite `flowrate`, Home Assistant entities |
+| Percent | 0–100 | byte ÷ **maximumFlowRate** × 100 | HUB favorite `flowrate`, Home Assistant entities |
 | **US gallons per minute** | 0–~13 | **byte ÷ 200 × 13.03** | the physical system — fitted, never transmitted |
 
 > ⚠️ **Percent is a ratio against the configured ceiling — confirmed by decompile 2026-08-17.**
@@ -637,8 +637,8 @@ There is no valve-index nibble in a preset; the valve is identified by field pos
 |---|---|---|---|---|---|
 | Default shower | Valve1 | `018448` | `01` | none, 38.8 °C | `[0,0,0]` ✅ |
 | Default shower | Valve2 | `05849c` | `05` | outlet 1, 38.8 °C | `[1,0,0]` ✅ |
-| Test favourite | Valve1 | `1190c8` | `11` | outlet 3, 40.0 °C | `[0,0,1]` ✅ |
-| Test favourite | Valve2 | `0589c8` | `05` | outlet 1, 39.3 °C | `[1,0,0]` ✅ |
+| Test favorite | Valve1 | `1190c8` | `11` | outlet 3, 40.0 °C | `[0,0,1]` ✅ |
+| Test favorite | Valve2 | `0589c8` | `05` | outlet 1, 39.3 °C | `[1,0,0]` ✅ |
 
 All four match, and all four re-encode byte-exact.
 
@@ -653,8 +653,8 @@ The superseded table, kept so the mistake is not repeated:
 |---|---|---|---|---|---|
 | Default shower | Valve1 | `018448` | `01` | `[0,0,0]` | `00` |
 | Default shower | Valve2 | `05849c` | `05` | `[1,0,0]` | `01` |
-| Test favourite | Valve1 | `1190c8` | `11` | `[0,0,1]` | `04` |
-| Test favourite | Valve2 | `0589c8` | `05` | `[1,0,0]` | `01` |
+| Test favorite | Valve1 | `1190c8` | `11` | `[0,0,1]` | `04` |
+| Test favorite | Valve2 | `0589c8` | `05` | `[1,0,0]` | `01` |
 
 **Outlets live in the separate `outlets` array**, which also carries plain, unpacked values
 for temperature (Celsius) and flow (the native 0–50 scale):
@@ -704,7 +704,7 @@ Each entry carries `presetId`, `title`, `isExperience`, `state`, `time`, `pauseF
 
 ### A preset's stored flow may not be the flow it runs at
 
-The Konnect app states that a favourite created in the app **runs at maximum flow (50)**,
+The Konnect app states that a favorite created in the app **runs at maximum flow (50)**,
 regardless of what its `valveDetails` store. The "Default shower" preset is app-configured
 and stores flow `39` (`0x9C`, 78%), yet runs at 50.
 

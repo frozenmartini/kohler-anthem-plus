@@ -29,7 +29,7 @@ HTML means "not a real route" (e.g. `get_command` does this).
 >   music through it. `water_test_start` runs a **fixed plumbing self-test**
 >   (zone1 / outlet 1, ~5 s, no parameters honoured) — it is *not* usable shower
 >   control. `update_*_settings` writes **presets/config**, not live state.
-> - **Favourites & experiences are launched CLOUD-SIDE.** The local
+> - **Favorites & experiences are launched CLOUD-SIDE.** The local
 >   `add_experience` / `update_experiences` / `trigger_load_exp_click` commands
 >   edit the *list/config*; the actual "run this scene now" trigger goes through
 >   the **cloud Konnect API**, not this local API.
@@ -414,12 +414,12 @@ regardless):
 ```
 
 (The per-outlet temperature/flow/outlet-mask still *exists* as data — it lives
-**inside favourite/experience objects**, keyed `water.zone1{temperature,flowRate,
+**inside favorite/experience objects**, keyed `water.zone1{temperature,flowRate,
 outlets,outletState}` / `zone2` — but running those is cloud-side, below.)
 
-### Favourites & experiences are launched CLOUD-SIDE
+### Favorites & experiences are launched CLOUD-SIDE
 
-The local commands below only **edit the list/config** of favourites/experiences.
+The local commands below only **edit the list/config** of favorites/experiences.
 They do **not** start a scene running — the actual "run now" trigger goes through
 the **cloud Konnect API** (`HUB_API_REFERENCE.md`). `trigger_load_exp_click` is a
 LumiWave UI helper (arms/loads an exp for display), not a shower-start.
@@ -429,11 +429,11 @@ LumiWave UI helper (arms/loads an exp for display), not a shower-start.
 | `add_experience` | `{"req_command":"add_experience","id":<id>}` | Add experience to the active set |
 | `remove_experience` | `{"req_command":"remove_experience","id":<id>}` | Remove experience |
 | `update_experiences` | `{"req_command":"update_experiences","data":<obj>}` | Reorder/edit experiences |
-| `update_favorite` | `{"req_command":"update_favorite", ...}` | Edit a favourite's stored state |
-| `delete_favorite` | `{"req_command":"delete_favorite","id":<id>}` | Delete a favourite |
+| `update_favorite` | `{"req_command":"update_favorite", ...}` | Edit a favorite's stored state |
+| `delete_favorite` | `{"req_command":"delete_favorite","id":<id>}` | Delete a favorite |
 | `trigger_load_exp_click` | `{"req_command":"trigger_load_exp_click"}` | LumiWave: arm/load an exp for display (not a shower-start) |
 
-Reference ids seen on this hub — favourites: `Soap Pause(1) Flush Cold(2)
+Reference ids seen on this hub — favorites: `Soap Pause(1) Flush Cold(2)
 Music Only(3) SD music(4) V1Z1O1(5) AllOff-omit(6)`; water experiences:
 `Warm Up(17) Cool Down(18) Sleep Simple(19) Wake Up(20) Shine(21)`;
 ice-shower: `Beginner Ice Shower(22) Advanced Ice Shower(23)`.
@@ -468,7 +468,7 @@ Organised into three groups **A / B / C**, max **12 bulbs** total.
 > live per-bulb control — it saves the default brightness/colour/dimming a group
 > uses when a scene/experience runs. There is **no direct "bulb on/off/dim now"
 > command** in this local API on 2.88; live lighting happens by triggering
-> favourites/experiences (or from the touchscreen).
+> favorites/experiences (or from the touchscreen).
 
 ### 5.1 Supported bulbs (the real blocker)
 
@@ -641,7 +641,7 @@ exposes:
 - `stereo.active` / `mono.active`: which speaker mode is engaged
 - SD library state is read via `get_sdcard_state` → `{sdcardfound,songs}`.
 - These are **amp configuration only** — no local play/pause/on-off. Audio is
-  actually started by running a "Music Only(3)" / "SD music(4)" **favourite**,
+  actually started by running a "Music Only(3)" / "SD music(4)" **favorite**,
   which is a **cloud-side** trigger (§4), not a local command.
 
 ---
@@ -722,7 +722,7 @@ Reads/settings-config omitted per focus, but listed for completeness.
 - **Water/valve:** `water_test_start`, `water_test_stop`, `find_outlet`,
   `valve_calibration_start`, `valve_calibration_stop`, `valve_settings_calibration`,
   `update_valve`, `update_valve_settings`
-- **Experiences/favourites:** `trigger_load_exp_click`, `add_experience`,
+- **Experiences/favorites:** `trigger_load_exp_click`, `add_experience`,
   `remove_experience`, `update_experiences`, `update_favorite`, `delete_favorite`,
   `remove_experience`
 - **Lighting:** `update_lighting_settings`, `update_light`, `save_light_settings`,

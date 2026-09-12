@@ -8,7 +8,7 @@ Target use: **Home Assistant** via `rest_command` / `shell_command` (curl).
 > SKU note: the Hub is a Linux **system controller** ("Anthem+") that drives the valves,
 > steam, amplifier (music) and lights. It is a **different product from GCS** (the Wi‑Fi
 > digital valve). GCS uses `/commands/gcs/*` with raw valve hex; the Hub uses
-> `/commands/hub/*` and is controlled almost entirely through **favourites**.
+> `/commands/hub/*` and is controlled almost entirely through **favorites**.
 
 ---
 
@@ -75,7 +75,7 @@ Legend: **[LIVE]** = exercised live this session; **[STATIC]** = derived from th
 |---|---|---|
 | Customer + devices | `/devices/api/v1/device-management/customer-device/{tenantId}` | **[LIVE]** homes[].devices[] with `sku`,`deviceId`,`logicalName` |
 | **Hub live state** | `/devices/api/v1/device-management/hub-state/{deviceId}` | **[LIVE]** see §5.1 |
-| **Hub favourites** | `/devices/api/v1/device-management/hub-experience/{deviceId}/favorites` | **[LIVE]** see §5.2 |
+| **Hub favorites** | `/devices/api/v1/device-management/hub-experience/{deviceId}/favorites` | **[LIVE]** see §5.2 |
 | Hub experiences | `/devices/api/v1/device-management/hub-experience/{deviceId}/experiences` | [STATIC] `ExperienceModel` |
 | **Hub configuration** | `/devices/api/v1/device-management/hub-configuration/{deviceId}` | **[LIVE]** zones/outlets/parts, see §5.3 (also `…/{version}/…`) |
 | Hub diagnostics | `/devices/api/{version}/device-management/hub-diagnostics/{deviceId}` | [STATIC] |
@@ -89,10 +89,10 @@ Legend: **[LIVE]** = exercised live this session; **[STATIC]** = derived from th
 |---|---|---|---|
 | **Simple start** (default shower on/off) | `POST …/valvecontrol` | `ValveControl` (`valveOnOff`) | [STATIC] |
 | **Default steam** on/off | `POST …/steamcontrol` | `ValveControl` (`steamOnOff`) | [STATIC] |
-| **Favourite start/stop** | `POST …/favorite/control` | `FavouriteControl` | **[LIVE] 200** |
-| **Create favourite** | `POST …/favorite` | `Favourite` (no `id`) | **[LIVE] 201** |
-| **Edit favourite** | `PATCH …/favorite` | `Favourite` (with `id`) | **[LIVE] 200** (⚠ 902 if running) |
-| **Delete favourite** | `DELETE …/favorite` | `RemoveFavourite` | **[LIVE] 202** |
+| **Favorite start/stop** | `POST …/favorite/control` | `FavoriteControl` | **[LIVE] 200** |
+| **Create favorite** | `POST …/favorite` | `Favorite` (no `id`) | **[LIVE] 201** |
+| **Edit favorite** | `PATCH …/favorite` | `Favorite` (with `id`) | **[LIVE] 200** (⚠ 902 if running) |
+| **Delete favorite** | `DELETE …/favorite` | `RemoveFavorite` | **[LIVE] 202** |
 | **Stop all** (full idle) | `POST …/stopall` | `StopAll` | **[LIVE] 201** |
 | Shower experience start/stop | `POST …/shower/experience/control` | `Experience` | [STATIC] |
 | Steam experience start/stop | `POST …/steam/experience/control` | `Experience` | [STATIC] |
@@ -119,17 +119,17 @@ its own stored **default** zone config.
 ```
 - `valveOnOff` / `steamOnOff`: **`"ON"` | `"OFF"`** (Gson omits the other/null field).
 
-### 3.2 `FavouriteControl` — start/stop a favourite  **[LIVE]**
-`POST …/favorite/control`. Model: `AnthemHubFavouriteRequestModel`.
+### 3.2 `FavoriteControl` — start/stop a favorite  **[LIVE]**
+`POST …/favorite/control`. Model: `AnthemHubFavoriteRequestModel`.
 ```json
 { "deviceId":"gcs-sious0103D", "tenantId":"<oid>", "sku":"HUB",
   "id":"3", "name":"Music Only", "state":"ON" }
 ```
-- `id`: favourite id **as string**; `name`: favourite title; `state`: **`"ON"` | `"OFF"`**.
+- `id`: favorite id **as string**; `name`: favorite title; `state`: **`"ON"` | `"OFF"`**.
 - Response `200` `{correlationId, timestamp}`.
 
-### 3.3 `Favourite` — create (`POST`) / edit (`PATCH`) a favourite  **[LIVE]**
-Model: `AnthemHubUpdateFavoriteRequestModel`. A favourite bundles **independent** components:
+### 3.3 `Favorite` — create (`POST`) / edit (`PATCH`) a favorite  **[LIVE]**
+Model: `AnthemHubUpdateFavoriteRequestModel`. A favorite bundles **independent** components:
 `water`, `steam`, `music`, `light`. **Omit `id` to create; include `id` to edit.**
 
 ```json
@@ -138,7 +138,7 @@ Model: `AnthemHubUpdateFavoriteRequestModel`. A favourite bundles **independent*
   "tenantId": "<oid>",
   "sku": "HUB",
   "id": 3,                       // EDIT only (integer). OMIT for create.
-  "name": "My Favourite",
+  "name": "My Favorite",
   "water": {
     "zone1": { "temperature": 104, "flowrate": 100, "outlets": [0] },
     "zone2": null
@@ -160,7 +160,7 @@ Model: `AnthemHubUpdateFavoriteRequestModel`. A favourite bundles **independent*
     `[0]` = outlet1, `[1]` = outlet2, `[2]` = outlet3 (each valve has 3 outlets).
     `[]` = no water for that zone. `[0,1]` opens outlets 1 & 2.
   - **Unused zone:** set `zone2` to `null` (what the app sends) — or a zone with `outlets: []`.
-    A favourite for a **NotConnected** valve is accepted (201) but **silently not persisted**.
+    A favorite for a **NotConnected** valve is accepted (201) but **silently not persisted**.
 - **steam** = `{ temperature, time }` integers. `{ "temperature":0, "time":0 }` = no steam.
 - **music** = `AnthemHubAmplifierRequestModel` `{ source, songID, musicRepeat, volume }`:
   - `source`: **`"Aux"`** (line-in) | **`"SdCard"`** (SD card). (Stored/returned lower-cased:
@@ -170,7 +170,7 @@ Model: `AnthemHubUpdateFavoriteRequestModel`. A favourite bundles **independent*
   - **To include NO music: OMIT the `music` key entirely.** Sending an all-`null` music object
     (`{"source":null,...}`) makes the **whole request fail with HTTP 400**.
 - **light** = array of `AnthemHubLightRequestModel` `{ name, color, hue, brightness }` (strings).
-  `[]` = no light. **Like music, lighting is favourite-only (no dedicated light command).** Details
+  `[]` = no light. **Like music, lighting is favorite-only (no dedicated light command).** Details
   (decompile-complete; NOT live-verified — this Hub has `light: NotConnected`):
   - `name` = light group/module — Hub exposes up to 3 (`hub-configuration.lightModuleType` = `light1`/`light2`/`light3`).
   - `color` = one of **11** (`hub_light_color` array): `warmwhite, neutralwhite, coolwhite, red, orange,
@@ -180,7 +180,7 @@ Model: `AnthemHubUpdateFavoriteRequestModel`. A favourite bundles **independent*
   - **State:** `hub-state.state.light[]` = `{status:"ON"/"OFF", name, state:{colorInfo, brightness, colorTemperature}}`;
     MQTT `LIGHT_STS` (`MqttHubLightStatus`) carries the same `LightState{colorInfo, brightness, colorTemperature}`
     — light state **does** report color/brightness/temperature (unlike music = on/off only).
-  - Read favourite `light` = `List<LightGroupModel>` (rich: `colorGroupList[]` of `ColorItem` w/ per-color hue range + 5 hex steps).
+  - Read favorite `light` = `List<LightGroupModel>` (rich: `colorGroupList[]` of `ColorItem` w/ per-color hue range + 5 hex steps).
 
 > **Outlet type sets the flow envelope on this device.** The controller computes each
 > outlet's min/max flow from its **outlet type × the flow calibration figure** — multiple
@@ -195,10 +195,10 @@ Model: `AnthemHubUpdateFavoriteRequestModel`. A favourite bundles **independent*
 `zone1 = [62, 52, 1]`, `zone2 = [11, 38, 21]`. (Type codes resemble GCS: `1`=handshower,
 `11`=showerhead, `21`=tub filler; others are install-specific.) **Always read config to map.**
 
-### 3.4 `RemoveFavourite` — delete a favourite  **[LIVE]**
+### 3.4 `RemoveFavorite` — delete a favorite  **[LIVE]**
 `DELETE …/favorite`. Model: `AnthemHubRemoveFavoriteRequestModel`.
 ```json
-{ "deviceId":"gcs-sious0103D", "tenantId":"<oid>", "sku":"HUB", "name":"My Favourite", "id":5 }
+{ "deviceId":"gcs-sious0103D", "tenantId":"<oid>", "sku":"HUB", "name":"My Favorite", "id":5 }
 ```
 - `id`: **integer**. Response `202`.
 
@@ -207,7 +207,7 @@ Model: `AnthemHubUpdateFavoriteRequestModel`. A favourite bundles **independent*
 ```json
 { "deviceId":"gcs-sious0103D", "sku":"HUB", "tenantId":"<oid>" }
 ```
-- Response `201`. **Fully idles** the system (see §4 vs an all-off favourite).
+- Response `201`. **Fully idles** the system (see §4 vs an all-off favorite).
 
 ### 3.6 `Experience` — start/stop an experience  **[control STATIC; read + limits LIVE]**
 `POST …/shower|steam|iceshower/experience/control`. Model: `AnthemHubExperienceRequestModel`.
@@ -246,26 +246,26 @@ experience's **category**. Verified from the builder `p645tj\g.J()` + router (sw
   the control command. The curve + outlet are **internal to the Hub firmware.**
 - **Consequence (live-observed):** every experience runs the curve on the Hub's **default outlet
   (zone1/outlet1)** and **cannot be redirected to another outlet via the API**. For specific-outlet
-  control, use a **favourite** (picks outlets/temp/flow) — but favourites hold a *static* temp, not a curve.
+  control, use a **favorite** (picks outlets/temp/flow) — but favorites hold a *static* temp, not a curve.
 
 ---
 
 ## 4. Behavioural findings (live-verified)
 
-1. **Music/valve/steam/favourites are all favourite- or on/off-driven.** There is **no direct
+1. **Music/valve/steam/favorites are all favorite- or on/off-driven.** There is **no direct
    "set outlet/temp/flow now" command** on the Hub. To control specific outlets/temperature/flow
-   you **create/edit a favourite** with the `water.zone` config, then activate it.
-2. **The app UI forces valve selection when creating favourites, but the API does not** — a
-   **music-only** favourite (water `outlets: []`, `music` set) is accepted and works.
-3. **Editing a favourite is BLOCKED while the device is running** →
+   you **create/edit a favorite** with the `water.zone` config, then activate it.
+2. **The app UI forces valve selection when creating favorites, but the API does not** — a
+   **music-only** favorite (water `outlets: []`, `music` set) is accepted and works.
+3. **Editing a favorite is BLOCKED while the device is running** →
    `HTTP 400`, **`statusCode 902`, `"… is running."`**. You must **stop first**, then edit.
-   (Activating a favourite is allowed anytime.)
-4. **All-off favourite vs `stopall`:** activating a favourite whose components are all empty
-   (music omitted) **stops water + music BUT the system reports that favourite as ON/running**
-   (favourite session stays active, nothing flowing). **`stopall` fully idles** the system
-   (`state.shower[].status = OFF`, no active favourite).
-5. **A favourite for a NotConnected valve doesn't persist:** create returns `201` but the
-   favourite silently does not appear (this Hub: `valve2 = NotConnected`).
+   (Activating a favorite is allowed anytime.)
+4. **All-off favorite vs `stopall`:** activating a favorite whose components are all empty
+   (music omitted) **stops water + music BUT the system reports that favorite as ON/running**
+   (favorite session stays active, nothing flowing). **`stopall` fully idles** the system
+   (`state.shower[].status = OFF`, no active favorite).
+5. **A favorite for a NotConnected valve doesn't persist:** create returns `201` but the
+   favorite silently does not appear (this Hub: `valve2 = NotConnected`).
 6. **Outlet encoding:** WRITE `outlets` = list of **0-based positions**; READ `outletState` =
    6-slot bitmask (first 3 slots used = the valve's 3 outlets); READ `outlets` = active count.
 7. **`music` all-null object → 400**; omit the key instead.
@@ -275,7 +275,7 @@ experience's **category**. Verified from the builder `p645tj\g.J()` + router (sw
    (`present`/`notpresent`), identical whether music is playing or not.
 
 ### Status codes seen
-`200` favourite-control/edit OK · `201` create / stopall (and warmup) · `202` delete ·
+`200` favorite-control/edit OK · `201` create / stopall (and warmup) · `202` delete ·
 `400` bad data/format · `400 + statusCode 902` device is running · `900` device offline
 (from the HA integration) · `403` wrong-policy token on `/commands/*`.
 
@@ -370,16 +370,16 @@ is this" without pretending to know whether old means broken.
 > READ `music` uses `trackId`/`repeatMode`; WRITE uses `songID`/`musicRepeat`. READ `water.zone.outlets`
 > is a **count** + `outletState` bitmask; WRITE `water.zone.outlets` is the **position list**.
 
-#### ⚠️ REST says `title`; MQTT says `name` — same field, same favourites
+#### ⚠️ REST says `title`; MQTT says `name` — same field, same favorites
 
-The favourites list arrives from two sources and they **disagree on the name key**:
+The favorites list arrives from two sources and they **disagree on the name key**:
 
 ```text
 REST  …/favorites          title="Soap Pause"   name absent
 MQTT  FAVORITES_SNAPSHOT   name="Soap Pause"    title absent
 ```
 
-Same ids, same favourites. Because a client seeds from REST and then has that list
+Same ids, same favorites. Because a client seeds from REST and then has that list
 **replaced wholesale** by the first snapshot, reading only one key works at startup and then
 silently empties. Always accept both:
 
@@ -388,14 +388,14 @@ name = favorite.get("name") or favorite.get("title") or ""
 ```
 
 `isExperience` is likewise **REST-only** — the snapshot omits it, so a filter that requires
-it will drop every favourite once a snapshot lands. Treat a missing flag as "not an
+it will drop every favorite once a snapshot lands. Treat a missing flag as "not an
 experience".
 
 #### `FAVORITES_SNAPSHOT` is the refresh mechanism — do not poll
 
 Measured over 33 occurrences:
 
-* **Every** favourite create / edit / delete is followed by a full snapshot within 1-3 s —
+* **Every** favorite create / edit / delete is followed by a full snapshot within 1-3 s —
   9 of 9, no exceptions. This is why the `CREATE_FAVORITE_STS` / `UPDATE_FAVORITE_STS` /
   `DELETE_FAVORITE_STS` acknowledgements can be ignored: the complete list is right behind
   them.
@@ -466,13 +466,13 @@ Music telemetry is **thin** across every read. Verified live while SD-card music
 | **On / Off** | ✅ live & reliable | `hub-state.state.musicStateModel.status` (`ON`/`OFF`); MQTT `MUSIC_STS` `attributes[].status` |
 | Amp present / SD present / amp error | ✅ capability flags (static) | `hub-configuration.amplifierSettings.music` / `.sdCard` (`present`/`notpresent`), `.isAmplifierError` |
 | **Volume** | ⚠️ **NOT live** | `hub-configuration.amplifierSettings.monoVolume` — a **stored** value; did **not** follow a live touchscreen change |
-| **Current source** (`aux`/`sdcard`) | ❌ only if started via a favourite | active favourite's `music.source` (favourite with `state:"ON"`) — **empty when music is started on the Hub touchscreen** (no favourite active) |
-| Now-playing track / song / artist | ❌ never exposed | — (`songID`/`trackId` exist only in the **write/favourite** models, for selecting a Kohler-Playlist track) |
+| **Current source** (`aux`/`sdcard`) | ❌ only if started via a favorite | active favorite's `music.source` (favorite with `state:"ON"`) — **empty when music is started on the Hub touchscreen** (no favorite active) |
+| Now-playing track / song / artist | ❌ never exposed | — (`songID`/`trackId` exist only in the **write/favorite** models, for selecting a Kohler-Playlist track) |
 
 **Gotchas confirmed live:**
 - `amplifierSettings` read **identically** (`{"monoVolume":50,"stereoVolume":null,"music":"present","sdCard":"present"}`)
   with music OFF and with SD music ON — so `music`/`sdCard` are **presence flags only**, and `monoVolume` did not change.
-- When music is played **from the device touchscreen** (not a Konnect favourite), **no favourite is
+- When music is played **from the device touchscreen** (not a Konnect favorite), **no favorite is
   `state:"ON"`**, so there is **no readable current source**. Net: for device-initiated playback the
   API gives you **on/off only**.
 
@@ -481,23 +481,23 @@ Music telemetry is **thin** across every read. Verified live while SD-card music
 { "type": "", "code": "MUSIC_STS", "favoriteid": "0", "experienceid": "0",
   "attributes": [ { "status": "ON", "code": "…", "errorcode": "…", "errorstate": "…", "component": "…" } ] }
 ```
-- `favoriteid` / `experienceid` = which favourite/experience is driving **this accessory**
-  (`"0"` = none / direct device control). ⚠️ **Not the same as "favourite N is active"** — see
+- `favoriteid` / `experienceid` = which favorite/experience is driving **this accessory**
+  (`"0"` = none / direct device control). ⚠️ **Not the same as "favorite N is active"** — see
   §5.5.
 - `attributes[].status` = `ON`/`OFF`; **no source/volume/track** here either.
 
-### 5.5 ⚠️ The accessory messages cannot tell you whether a favourite is running
+### 5.5 ⚠️ The accessory messages cannot tell you whether a favorite is running
 
 `MUSIC_STS`, `STEAM_STS` and `LIGHT_STS` each carry a top-level `favoriteid`, and it is tempting
-to read favourite state off them. **Do not.** They answer *"is this accessory running, and if so
-what put it there"* — attribution for one component. Whether a favourite is active is a different
+to read favorite state off them. **Do not.** They answer *"is this accessory running, and if so
+what put it there"* — attribution for one component. Whether a favorite is active is a different
 question, and only `FAVORITE_STS` answers it.
 
-**Because a favourite is a composite, and its components are optional.** A favourite bundles
+**Because a favorite is a composite, and its components are optional.** A favorite bundles
 `water`, `steam`, `music` and `light` (§3.3), and which of them it carries depends on what the
 owner put in it and what the hub is actually wired to — this controller can drive a steam
 generator and an amplifier, and an install may have neither. From a live read of this account's
-six favourites:
+six favorites:
 
 | id | title | water | steam | music | light |
 |---|---|---|---|---|---|
@@ -510,13 +510,13 @@ six favourites:
 
 Two consequences:
 
-* **A favourite with no music emits no music-side evidence at all.** Activate "Soap Pause" and
+* **A favorite with no music emits no music-side evidence at all.** Activate "Soap Pause" and
   `MUSIC_STS` never mentions it — a client watching `favoriteid` concludes nothing is running.
-* **Attribution can drop while the favourite is still running.** Turn the amplifier off by hand
-  during a music favourite and that message's `favoriteid` goes to `"0"`, but the favourite is
+* **Attribution can drop while the favorite is still running.** Turn the amplifier off by hand
+  during a music favorite and that message's `favoriteid` goes to `"0"`, but the favorite is
   still driving water. Measured 2026-08-21: `MUSIC_STS` reported `favoriteid: "0"` at
-  07:23:59.150Z, **0.6 s before** `FAVORITE_STS` reported the favourite itself OFF at
-  07:23:59.766Z. The accessory leads the favourite, so the two disagree during the gap.
+  07:23:59.150Z, **0.6 s before** `FAVORITE_STS` reported the favorite itself OFF at
+  07:23:59.766Z. The accessory leads the favorite, so the two disagree during the gap.
 
 ⚠️ **"Absent" is spelled three different ways**, so do not test for it with one rule:
 
@@ -527,18 +527,18 @@ Two consequences:
 | `steam` | `{"temperature": 0, "time": 0}` — **the key is always there** | non-zero temperature/time |
 | `water.zone2` | literal `null` | `{"temperature": …, "flowrate": …, "outlets": […]}` |
 
-`steam` is the trap: the key is present on all six favourites above and none of them drive steam.
-Testing `if "steam" in favourite` finds steam everywhere.
+`steam` is the trap: the key is present on all six favorites above and none of them drive steam.
+Testing `if "steam" in favorite` finds steam everywhere.
 
-**So: `FAVORITE_STS` is the source of truth for favourite state**, and it carries the `status`
+**So: `FAVORITE_STS` is the source of truth for favorite state**, and it carries the `status`
 `ON`/`OFF` needed to tell activation from deactivation. That is what
 `HubState._apply_favorite` reads, and reading `favoriteid` there instead was the bug fixed on
 2026-08-21.
 
 > **Recommended (per user's setup):** treat **MQTT as the primary event-driven state source** and use
 > REST reads for config/capabilities and on-demand snapshots. Music, over both channels, is
-> effectively **on/off**, plus *which favourite drove this accessory* via MQTT `favoriteid` —
-> which is per-accessory attribution and **not** a reading of whether that favourite is still
+> effectively **on/off**, plus *which favorite drove this accessory* via MQTT `favoriteid` —
+> which is per-accessory attribution and **not** a reading of whether that favorite is still
 > running. §5.5.
 
 ---
@@ -551,7 +551,7 @@ that read it. Example `rest_command`s (assuming `!secret kohler_token` holds a c
 
 ```yaml
 rest_command:
-  hub_favourite_on:
+  hub_favorite_on:
     url: "https://api-kohler-us.kohler.io/platform/api/v1/commands/hub/favorite/control"
     method: POST
     headers:
@@ -604,7 +604,7 @@ rest_command:
 
 `shell_command` + curl equivalents (bash):
 ```bash
-# music ON = start a music-only favourite
+# music ON = start a music-only favorite
 curl -s -X POST "https://api-kohler-us.kohler.io/platform/api/v1/commands/hub/favorite/control" \
   -H "Authorization: Bearer $KOHLER_TOKEN" -H "Ocp-Apim-Subscription-Key: 429ecb1d0b5e4258aa0a2bfadd82a493" \
   -H "Content-Type: application/json" \
@@ -630,15 +630,15 @@ curl -s -X POST "https://api-kohler-us.kohler.io/platform/api/v1/commands/hub/va
 ```
 
 **Recommended HA control model** (given the 902 running-guard):
-- Pre-create one favourite **per state** you want (music-only, shower-preset-A, etc.), then
+- Pre-create one favorite **per state** you want (music-only, shower-preset-A, etc.), then
   switch by **activating** (`favorite/control ON`) — no editing at runtime.
-- Use **`stopall`** for a true off. Use an **all-off favourite** only if you want "outputs off
+- Use **`stopall`** for a true off. Use an **all-off favorite** only if you want "outputs off
   but session still shown as active".
-- To reconfigure a favourite (temp/outlets), **`stopall` first**, then `PATCH`, then activate.
+- To reconfigure a favorite (temp/outlets), **`stopall` first**, then `PATCH`, then activate.
 
 ---
 
-## 7. This device's current favourites (reference)
+## 7. This device's current favorites (reference)
 
 Re-read live 2026-08-11:
 
@@ -651,5 +651,5 @@ Re-read live 2026-08-11:
 | 5 | AllOff-omit | none | — |
 
 The 2026-08-10 session recorded six, with `V1Z1O1` at id 5 and `AllOff-omit` at id 6.
-`V1Z1O1` has since been deleted and `AllOff-omit` now occupies id 5 — so **favourite ids
+`V1Z1O1` has since been deleted and `AllOff-omit` now occupies id 5 — so **favorite ids
 are reassigned rather than stable**. Never hardcode one; resolve it by title at runtime.

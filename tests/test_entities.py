@@ -1623,6 +1623,24 @@ def test_the_slider_does_not_follow_the_scald_limit(valve_model):
     assert number.native_max_value == 118, "the slider follows the app, not the valve"
 
 
+def test_favorite_is_us_spelled_but_its_id_is_not(valve_model):
+    """0.21.0 renamed the entity to `Favorite`, matching the Konnect app.
+
+    The unique id and the attribute keys deliberately keep `favourite`: they are
+    identifiers, and moving them would orphan history and break anything reading them.
+    """
+    coordinator = make_coordinator(
+        [make_valve(valve_model, [31, 11, 1])],
+        controllers=(make_controller(valve_model, device_id="hub-1"),),
+    )
+    selects = [e for e in collect("select", coordinator) if "favourite" in e.unique_id]
+    assert len(selects) == 2, [e.unique_id for e in collect("select", coordinator)]
+    for entity in selects:
+        assert entity.name == "Favorite"
+        assert entity.unique_id.endswith("_favourite")
+        assert "favourite_count" in entity.extra_state_attributes
+
+
 def test_auto_restore_says_whether_the_fault_can_even_occur(valve_model):
     """The only identified cause of a spontaneous warm-up disable lives in the HUB.
 

@@ -341,7 +341,7 @@ class Controller:
         self, device: Device, hub: HubDevice, state: HubState, name: str
     ) -> None:
         self.device = device
-        #: Command surface — favourites, `valvecontrol`, `stopall`.
+        #: Command surface — favorites, `valvecontrol`, `stopall`.
         self.hub = hub
         #: Live state, fed by the REST seed and then by MQTT.
         self.state = state
@@ -351,7 +351,7 @@ class Controller:
         #: Which accessories are attached. Latched by the first successful configuration
         #: read; `known` is what says whether that read has happened.
         self.capabilities = HubCapabilities()
-        #: This controller's favourites — seeded over REST, then replaced wholesale by every
+        #: This controller's favorites — seeded over REST, then replaced wholesale by every
         #: `FAVORITES_SNAPSHOT`. Ids are reassigned on delete, so always resolve by name.
         self.favorites: list[dict[str, Any]] = []
 
@@ -2957,24 +2957,22 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             payload = await self.client.async_get_hub_favorites(device_id)
             favorites = payload.get("favorites")
             if isinstance(favorites, list):
-                # Favourite ids are reassigned when one is deleted, so this list is the
-                # only safe way to resolve a favourite — never hardcode an id.
+                # Favorite ids are reassigned when one is deleted, so this list is the
+                # only safe way to resolve a favorite — never hardcode an id.
                 controller.favorites = favorites
         except KohlerError as err:
             if getattr(err, "status", None) == 404:
                 # Not a failure: this endpoint 404s when the controller has **no** saved
-                # favourites, rather than returning an empty list. Confirmed 2026-08-17 —
+                # favorites, rather than returning an empty list. Confirmed 2026-08-17 —
                 # the route is handled (it answers with the application's own error
                 # envelope, unlike a genuine bad path), MQTT `FAVORITES_SNAPSHOT` agrees
                 # with `attributes: []`, and `docs/hub/cloud_api.md` §5.2 has a captured
                 # 200 from when this account still had one. Logging it as an error made
                 # three misleading lines per startup.
                 controller.favorites = []
-                _LOGGER.debug("No HUB favourites are saved on %s", device_id)
+                _LOGGER.debug("No HUB favorites are saved on %s", device_id)
             else:
-                _LOGGER.debug(
-                    "Could not read HUB favourites for %s: %s", device_id, err
-                )
+                _LOGGER.debug("Could not read HUB favorites for %s: %s", device_id, err)
 
     @callback
     def _apply_controller_topology(
@@ -3043,7 +3041,7 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Count a controller command against every valve's custom-shower watcher.
 
         A valve command bumps only its own serial (`Valve._note_local_write`). A
-        controller command — a favourite, the controller's own shower on/off, stop-all —
+        controller command — a favorite, the controller's own shower on/off, stop-all —
         cannot be attributed to one valve from the cloud, so it counts against all of
         them: a watcher that then declines to resume is the safe direction of error.
         """
@@ -3137,10 +3135,10 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def async_activate_favorite(
         self, controller: Controller, favorite_id: Any, name: str
     ) -> None:
-        """Start a controller favourite. **This runs water.**
+        """Start a controller favorite. **This runs water.**
 
         The controller's only way to set water state: it has no direct temperature/outlet
-        command, so a favourite is created holding that configuration and then activated.
+        command, so a favorite is created holding that configuration and then activated.
         Activation is allowed even while something else is running.
         """
         self._note_local_write()
@@ -3173,8 +3171,8 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def async_stop_hub(self, controller: Controller) -> None:
         """Stop everything the controller is running — water, steam, music, lighting.
 
-        Uses ``stopall`` rather than deactivating the active favourite, because the
-        favourite may already have been replaced by whatever is running now, and a stop
+        Uses ``stopall`` rather than deactivating the active favorite, because the
+        favorite may already have been replaced by whatever is running now, and a stop
         should not depend on correctly identifying what to stop.
         """
         self._note_local_write()

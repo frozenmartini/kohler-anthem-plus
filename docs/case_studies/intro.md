@@ -123,10 +123,10 @@ of 80 — yet in case study 1 it registered nothing for 86 minutes. Presets are 
 answer (**0 of 15** preset-driven opens ever seen), but case study 1 had no preset. **Treat
 "the controller knows" as something to verify per session, never to assume.**
 
-The controller's entire water surface in the Konnect app is **`valveOnOff` and favourites** —
+The controller's entire water surface in the Konnect app is **`valveOnOff` and favorites** —
 read-rich, write-poor. `SHOWER_VALVE_STS` carries per-zone status, outlets, temperature and
 flow for the card to *display*, but the only things that can be *pressed* are one on/off
-toggle and a stored favourite. `valveOnOff` takes no parameters: it runs whatever
+toggle and a stored favorite. `valveOnOff` takes no parameters: it runs whatever
 `get_valve_settings` holds as the default.
 
 ⚠️ **Updated 2026-08-20: `maxshowerduration` is not read-only and its range is not the UI's.**

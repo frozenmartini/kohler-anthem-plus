@@ -14,7 +14,7 @@ control path uses:
 
 **Only registered when the account has an Anthem valve.** ``solowritesystem`` is a GCS
 endpoint — an Anthem Plus controller on its own has no valve to write to, and control there
-goes through favourites instead. So on a HUB-only account neither service appears at all,
+goes through favorites instead. So on a HUB-only account neither service appears at all,
 rather than appearing and failing.
 
 The **device field is optional**. With one Anthem valve on the account — every install
@@ -433,7 +433,7 @@ def _resolve_valve(hass: HomeAssistant, device_id: str | None) -> Valve:
     if not valves:
         raise HomeAssistantError(
             "No Anthem valve on this account — solowritesystem is a valve endpoint, and an "
-            "Anthem Plus controller is driven through favourites instead"
+            "Anthem Plus controller is driven through favorites instead"
         )
     if device_id:
         device = dr.async_get(hass).async_get(device_id)

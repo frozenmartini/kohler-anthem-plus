@@ -6,7 +6,7 @@ any number of each, every valve and every controller as its own device:
 * **Anthem** (SKU ``GCS``) — the digital valve with built-in Wi-Fi. Full outlet,
   temperature, and flow control.
 * **Anthem Plus** (SKU ``HUB``) — the Linux system controller that adds music, lighting,
-  and steam. Controlled through favourites.
+  and steam. Controlled through favorites.
 
 State is push-only over Azure IoT Hub MQTT — there is no polling interval. REST is read on
 events: once at setup and again on every MQTT (re)connect, because the broker replays

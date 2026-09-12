@@ -355,6 +355,6 @@ warning — and remember `toggle_zigbee` is a *toggle*, not a set.
 
 Per [`local_api.md`](local_api.md) §5: on fw 2.88 `update_lighting_settings` is **scene/preset
 config**, not live per-bulb control. There is no "bulb on/off/dim now" command in the local
-API. A paired bulb becomes part of group A/B/C and only lights when a favourite or experience
+API. A paired bulb becomes part of group A/B/C and only lights when a favorite or experience
 runs — and those are triggered **cloud-side**. Pairing a bulb locally would not yield locally
 controllable lights.

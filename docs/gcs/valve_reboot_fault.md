@@ -1129,7 +1129,7 @@ this integration stores.
 | Preset 1 `Default shower` | `018445` / `0584A5` = 34.5% / 82.5% | `018447` / `05849E` = **35.5% / 79.0%** |
 | Preset 1 `time` | 3600 s | 3600 s (**not** the 1800 s in the 2026-07-30 backup) |
 | Presets 2-5 | Test twozone, Twotwentysix/seven/three | **gone** — only slot 1 populated |
-| HUB favourites | "Soap Pause" etc. | **gone** — `hub-experience/…/favorites` returns HTTP 404 |
+| HUB favorites | "Soap Pause" etc. | **gone** — `hub-experience/…/favorites` returns HTTP 404 |
 | Outlet config | 3600 s / flow 16-200 | identical |
 | `outlet_run_times` (HA) | all six at 3600 s | cleared, re-learned at 09:57 |
 | `mobile_device_id` (HA) | `eebb04c65e54441b` | regenerated — one-off MQTT provisioning delay |

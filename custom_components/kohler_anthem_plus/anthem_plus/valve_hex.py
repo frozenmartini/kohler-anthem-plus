@@ -197,13 +197,13 @@ TEMPERATURE_BYTE_MAX = 0xE8
 #
 #   byte            0x00-0xC8   the wire format, here and in MQTT
 #   flowSetpoint    0-50        the GCS device's own native unit (gcs-state), byte / 4
-#   percent         0-100       HUB favourite `flowrate` and HA entities, byte / 2
+#   percent         0-100       HUB favorite `flowrate` and HA entities, byte / 2
 #
 # Verified live: with the shower idle, gcs-state reports flowSetpoint "50" on both valves,
 # and 50 * 4 = 0xC8 = the maximum flow byte. The outlet configuration's documented
 # "flow 16-200" range is in BYTE units (0x10-0xC8), not either of the other two.
 #
-# The HUB has no independent flow of its own — its favourite `flowrate` is just read and
+# The HUB has no independent flow of its own — its favorite `flowrate` is just read and
 # written through to the GCS valve, so the valve is always the real source.
 # **Confirmed 2026-09-10 against the owner's two valves**: every one of their six outlets
 # reports `maximumFlowRate: 200`, so `byte / 2` is exactly right on this hardware, and the
@@ -310,8 +310,8 @@ VALVE_WORD = re.compile(r"^[0-9A-Fa-f]{8}$")
 #
 #     018448  byte0 0x01 -> no outlets, 38.8 C      (Default shower Valve1)
 #     05849C  byte0 0x05 -> outlet1,    38.8 C      (Default shower Valve2)
-#     1190C8  byte0 0x11 -> outlet3,    40.0 C      (Test favourite Valve1)
-#     0589C8  byte0 0x05 -> outlet1,    39.3 C      (Test favourite Valve2)
+#     1190C8  byte0 0x11 -> outlet3,    40.0 C      (Test favorite Valve1)
+#     0589C8  byte0 0x05 -> outlet1,    39.3 C      (Test favorite Valve2)
 #
 # An earlier revision concluded presets carried no outlet mask at all. That was wrong: it
 # tested the command word's bit positions (0x01/0x02/0x04) against preset bytes.

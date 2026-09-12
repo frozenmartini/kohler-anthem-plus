@@ -6,7 +6,7 @@ state arrives on different schedules:
 * **Anthem Valve** — a digital valve. Authoritative for outlets, temperature, and flow.
   An account can have several, each its own device bound to its own
   :class:`~.coordinator.Valve`.
-* **Anthem Plus** — a system controller. Owns favourites, music, steam, and lighting. An
+* **Anthem Plus** — a system controller. Owns favorites, music, steam, and lighting. An
   account can have several — one per bathroom — and each is its own device, bound to its
   own :class:`~.coordinator.Controller`.
 

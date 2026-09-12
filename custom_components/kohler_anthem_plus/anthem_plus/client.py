@@ -81,8 +81,8 @@ class DeviceOffline(KohlerError):
 class DeviceRunning(KohlerError):
     """The device is running and refuses the change (statusCode 902).
 
-    Editing a HUB favourite requires the system to be stopped first. Activating one is
-    allowed at any time, which is why the practical pattern is to pre-create a favourite
+    Editing a HUB favorite requires the system to be stopped first. Activating one is
+    allowed at any time, which is why the practical pattern is to pre-create a favorite
     per state and switch by activation rather than editing at runtime.
     """
 
@@ -112,7 +112,7 @@ class Customer:
         self.raw = raw
         # "Fahrenheit" or "Celsius". Kohler's REST API and the GCS valve byte both report
         # Celsius regardless; this is the account's *display* preference, which the mobile
-        # app converts to locally. The HUB's favourite temperatures, however, ARE in this
+        # app converts to locally. The HUB's favorite temperatures, however, ARE in this
         # unit — so it decides how HUB writes are encoded.
         self.temperature_unit: str = raw.get("temperatureUnit") or "Fahrenheit"
         self.water_units: str = raw.get("waterUnits") or "Standard"
@@ -538,7 +538,7 @@ class KohlerClient:
         return await self.async_request("GET", GCS_PRESETS.format(device_id=device_id))
 
     async def async_get_hub_favorites(self, device_id: str) -> dict[str, Any]:
-        """The HUB's saved favourites — the unit of control for this device."""
+        """The HUB's saved favorites — the unit of control for this device."""
         return await self.async_request(
             "GET", HUB_FAVORITES.format(device_id=device_id)
         )

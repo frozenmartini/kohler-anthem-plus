@@ -175,8 +175,8 @@ Measured across three live experiments on 2026-08-13:
 
 **Neither panel's "Default shower" activates a GCS preset**, despite the name. Both drive the
 valve directly, leaving the preset id at `0`. The controller in particular tells the valve
-*which outlets to open*, not *which preset to run* — the two products keep separate favourite
-sets, so a HUB favourite has no GCS preset id to name. `presetOrExperienceId` therefore marks
+*which outlets to open*, not *which preset to run* — the two products keep separate favorite
+sets, so a HUB favorite has no GCS preset id to name. `presetOrExperienceId` therefore marks
 only a preset the **valve itself** was told to run, which in practice means one activated
 through the cloud API.
 
@@ -1555,7 +1555,7 @@ command word. Unused valves are empty strings.
 **Verified live 2026-08-12** on both presets, judged by read-back:
 
 ```text
-preset 2 "Test favourite"   1190c8 / 0589c8  ->  0185c8 / 0585c8   APPLIED
+preset 2 "Test favorite"   1190c8 / 0589c8  ->  0185c8 / 0585c8   APPLIED
 preset 1 "Default shower"   018448 / 05849c  ->  0185c8 / 0585c8   APPLIED
 ```
 
@@ -1669,9 +1669,9 @@ Two things settled:
 - **Ids of other presets do not move.** `Twotwentythree` stayed id 5 across the deletion of
   id 4.
 
-This is the **opposite of HUB favourites**, where deleting genuinely does shift the others
-([`../architecture.md`](../architecture.md#favourite-ids-are-reassigned-not-stable)). Do not
-carry that intuition across: GCS presets are slots, HUB favourites are a list.
+This is the **opposite of HUB favorites**, where deleting genuinely does shift the others
+([`../architecture.md`](../architecture.md#favorite-ids-are-reassigned-not-stable)). Do not
+carry that intuition across: GCS presets are slots, HUB favorites are a list.
 
 A cached id is therefore safe against *other* presets changing, but not against **its own**
 slot being deleted and refilled — the id stays valid while pointing at a different scene.
@@ -1690,7 +1690,7 @@ observed:
 The message carries the whole record, so nothing needs re-reading:
 
 ```json
-{"code": "GCS_PRESET_STS", "presetId": "2", "name": "Test favourite",
+{"code": "GCS_PRESET_STS", "presetId": "2", "name": "Test favorite",
  "time": "3600", "volume": "0", "Valve1": "017cc8", "Valve2": "057cc8", …}
 ```
 
@@ -1731,7 +1731,7 @@ There are three actors, not two:
 
 | Actor | Flow control | Behaviour |
 |---|---|---|
-| **Konnect app** | **removed** | pins app-created favourites to 100 % |
+| **Konnect app** | **removed** | pins app-created favorites to 100 % |
 | **Anthem Plus touchscreen** | present | linked zones, varying ceiling, recomputes on outlet change |
 | **Valve firmware** | executes | honours whatever word it receives |
 
@@ -1959,7 +1959,7 @@ would become worthwhile if Kohler fixes the 2.88 flow calculation or if the touc
 ceiling rule is ever recovered from its firmware.
 
 Context: this system has flow control disabled system-wide (the **2.88** workaround) and the
-Konnect app has removed flow control altogether — every app-created favourite stores flow
+Konnect app has removed flow control altogether — every app-created favorite stores flow
 `50` (100 %), while the factory "Default shower" still holds real per-zone values (18 / 39).
 
 #### …and why every Home Assistant write now forces 100 %

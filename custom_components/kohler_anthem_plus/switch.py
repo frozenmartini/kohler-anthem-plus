@@ -103,7 +103,7 @@ async def async_setup_entry(
     entities: list[SwitchEntity] = []
 
     # One set per valve. An Anthem Plus controller has no per-outlet command: outlets are
-    # chosen by activating a favourite, so a controller-only account gets no outlet
+    # chosen by activating a favorite, so a controller-only account gets no outlet
     # switches.
     for valve in coordinator.valves:
         model = valve.model

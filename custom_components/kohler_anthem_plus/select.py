@@ -1,15 +1,21 @@
-"""Favourite selection for the Anthem valve.
+"""Favorite selection for the Anthem valve.
 
 One dropdown that both **starts** a stored scene and **shows which one is running**, because
 the valve reports the active scene itself (``presetOrExperienceId``) rather than leaving Home
 Assistant to remember what it last sent. A scene started from the Konnect app or the
 touchscreen therefore shows up here too.
 
-**"Favourite" is the user-facing word; "preset" is the protocol word.** The Konnect app calls
-these favourites, so that is what the entity is called. Everything below the entity layer
+**"Favorite" is the user-facing word; "preset" is the protocol word.** The Konnect app calls
+these favorites, so that is what the entity is called. Everything below the entity layer
 keeps Kohler's own vocabulary, because that is what the wire format and the documentation
-use. Note the Anthem Plus *controller* has its own, unrelated favourites — those belong to
+use. Note the Anthem Plus *controller* has its own, unrelated favorites — those belong to
 the "Anthem Plus" device, not this one.
+
+⚠️ **The unique id and the state attributes keep the `favourite` spelling**, which the
+entity name carried until 0.21.0. They are identifiers, not display text: moving the id
+would orphan every automation and all recorded history, and renaming `favourite_count` or
+`no_favourites_reason` would break whatever reads them. The name is what the owner sees,
+and it is the only thing that changed.
 """
 
 from __future__ import annotations
@@ -35,7 +41,7 @@ from .const import (
 from .coordinator import Controller, KohlerAnthemPlusCoordinator, Valve
 from .entity import KohlerControllerEntity, KohlerValveEntity, outlet_name
 
-# Shown when no favourite is driving the valve. A `select` must always have its current
+# Shown when no favorite is driving the valve. A `select` must always have its current
 # option present in the option list or Home Assistant logs an error on every update, and
 # "nothing is running" is a real state that needs a name.
 OPTION_OFF = "Off"
@@ -43,7 +49,7 @@ OPTION_OFF = "Off"
 # How long a just-chosen option is shown before the device's own answer takes over, if the
 # device never agrees. Sized off the two confirmations measured live on 2026-08-21: a warmup
 # write confirmed 2.2 s later with its MQTT echo 0.8 s after that, and a controller
-# favourite's `FAVORITE_STS` arrived 1.5 s after activation. `async_set_warmup` already
+# favorite's `FAVORITE_STS` arrived 1.5 s after activation. `async_set_warmup` already
 # awaits its own readback chain (`WARMUP_READBACK_DELAYS`, up to ~6 s) before this even
 # starts, so this is the margin on top, not the whole budget.
 #
@@ -64,7 +70,7 @@ class OptimisticOptionMixin:
     * **Warmup.** Selected at 00:21:53, confirmed by the REST readback at 00:21:55.586, MQTT
       echo at 00:21:56.399. Three coordinator updates inside that window, each one a
       snap-back.
-    * **Controller favourite.** `FAVORITE_STS` for "Play Music" landed at 07:23:51.575, with
+    * **Controller favorite.** `FAVORITE_STS` for "Play Music" landed at 07:23:51.575, with
       `STEAM_STS` at 07:23:50.804 and `MUSIC_STS` at 07:23:51.054 arriving first — two clears
       before the one message that actually carried the answer.
 
@@ -140,27 +146,27 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up the favourite selector when the account has a valve."""
+    """Set up the favorite selector when the account has a valve."""
     coordinator: KohlerAnthemPlusCoordinator = hass.data[DOMAIN][entry.entry_id]
     entities: list[SelectEntity] = []
     for valve in coordinator.valves:
-        entities.append(FavouriteSelect(coordinator, valve))
+        entities.append(FavoriteSelect(coordinator, valve))
         entities.append(ValveWarmupSelect(coordinator, valve))
         entities.append(OutletRunTimeSelect(coordinator, valve))
-    # Each controller keeps its own favourites on a different command surface from the
+    # Each controller keeps its own favorites on a different command surface from the
     # valve's. Both can exist on one account, on their own devices, which is why they are
     # separate entities rather than one merged list — and why a second controller gets
     # its own dropdown rather than a longer one.
     for controller in coordinator.controllers:
-        entities.append(HubFavouriteSelect(coordinator, controller))
+        entities.append(HubFavoriteSelect(coordinator, controller))
     async_add_entities(entities)
 
 
-class FavouriteSelect(OptimisticOptionMixin, KohlerValveEntity, SelectEntity):
-    """Start a stored favourite, and show which one is running."""
+class FavoriteSelect(OptimisticOptionMixin, KohlerValveEntity, SelectEntity):
+    """Start a stored favorite, and show which one is running."""
 
     _attr_icon = "mdi:playlist-play"
-    _attr_name = "Favourite"
+    _attr_name = "Favorite"
 
     def __init__(self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve) -> None:
         super().__init__(coordinator, valve)
@@ -177,9 +183,9 @@ class FavouriteSelect(OptimisticOptionMixin, KohlerValveEntity, SelectEntity):
 
     @property
     def options(self) -> list[str]:
-        """``Off`` plus every selectable favourite, lowest slot first.
+        """``Off`` plus every selectable favorite, lowest slot first.
 
-        Rebuilt from current state on every read, so a favourite added, renamed, or deleted
+        Rebuilt from current state on every read, so a favorite added, renamed, or deleted
         in the Konnect app appears here without a reload — the valve pushes those changes
         over MQTT.
         """
@@ -187,7 +193,7 @@ class FavouriteSelect(OptimisticOptionMixin, KohlerValveEntity, SelectEntity):
 
     @property
     def _device_option(self) -> str | None:
-        """The running favourite, or ``Off``.
+        """The running favorite, or ``Off``.
 
         ``presetOrExperienceId`` is cleared by **both** pause and stop, so a paused session
         reads as ``Off`` here while the outlet switches still show their assignment. It is
@@ -202,7 +208,7 @@ class FavouriteSelect(OptimisticOptionMixin, KohlerValveEntity, SelectEntity):
         if active is None:
             return OPTION_OFF
         preset = state.presets.get(active)
-        # An id we cannot name — a hidden favourite (preset 1, driven by the shower switch),
+        # An id we cannot name — a hidden favorite (preset 1, driven by the shower switch),
         # an experience, or one that arrived before the list did. Reporting an option that
         # is not in `options` makes Home Assistant log an error on every update, so fall
         # back rather than inventing an entry.
@@ -216,7 +222,7 @@ class FavouriteSelect(OptimisticOptionMixin, KohlerValveEntity, SelectEntity):
     def _experiences(self) -> list[str]:
         """Names of the stored experiences, which cannot be offered as options.
 
-        Experiences share the id space with favourites via ``presetOrExperienceId`` but
+        Experiences share the id space with favorites via ``presetOrExperienceId`` but
         carry no valve settings, so activating one does nothing — the shower ignores the
         command. They are therefore kept out of `options`, and named here instead.
         """
@@ -253,7 +259,7 @@ class FavouriteSelect(OptimisticOptionMixin, KohlerValveEntity, SelectEntity):
             )
         # **Why the dropdown is empty, when it is.** An `Off`-only picker is
         # indistinguishable from one that failed to load, and the difference matters:
-        # usually nothing is wrong and no favourite has been created yet.
+        # usually nothing is wrong and no favorite has been created yet.
         reason = self._empty_reason
         if reason is not None:
             attributes["no_favourites_reason"] = reason
@@ -261,12 +267,12 @@ class FavouriteSelect(OptimisticOptionMixin, KohlerValveEntity, SelectEntity):
 
     @property
     def _empty_reason(self) -> str | None:
-        """Why `options` holds nothing but `Off`, or None when it holds a favourite.
+        """Why `options` holds nothing but `Off`, or None when it holds a favorite.
 
         A GCS valve has **ten preset slots**, of which slot 1 is the mandatory default
         shower — hidden here because the Konnect app hides it too, and because it is the
         Shower switch's business rather than a scene to pick (`PRESET_HIDDEN_IDS`). So a
-        valve on which nobody has created a favourite has every offerable slot empty, and
+        valve on which nobody has created a favorite has every offerable slot empty, and
         this entity correctly offers nothing. That is the ordinary case, not a fault.
 
         Written after mistaking exactly this for a bug: diagnostics reported
@@ -281,19 +287,19 @@ class FavouriteSelect(OptimisticOptionMixin, KohlerValveEntity, SelectEntity):
             return None
         if self._experiences:
             return (
-                "No favourites to start. This valve's stored slots are experiences, "
+                "No favorites to start. This valve's stored slots are experiences, "
                 "which carry no valve settings and cannot be started from Home "
                 "Assistant, plus the default-shower slot, which the Shower switch runs. "
-                "Create a favourite in the Kohler Konnect app and it appears here."
+                "Create a favorite in the Kohler Konnect app and it appears here."
             )
         return (
-            "No favourites have been created on this valve. The default-shower slot is "
-            "run by the Shower switch rather than listed here. Create a favourite in the "
+            "No favorites have been created on this valve. The default-shower slot is "
+            "run by the Shower switch rather than listed here. Create a favorite in the "
             "Kohler Konnect app and it appears here — no reload needed."
         )
 
     async def async_select_option(self, option: str) -> None:
-        """Start the named favourite, or stop the shower.
+        """Start the named favorite, or stop the shower.
 
         Resolved **by name at call time**, never by a remembered id: preset ids are slots
         that get reused, so a stale id stays valid while pointing at a different scene.
@@ -308,16 +314,16 @@ class FavouriteSelect(OptimisticOptionMixin, KohlerValveEntity, SelectEntity):
         )
         if preset is None:
             # An experience named by an automation reaches here, because `preset_by_name`
-            # only resolves selectable slots. Saying so beats "no such favourite", which
+            # only resolves selectable slots. Saying so beats "no such favorite", which
             # is misleading when the thing plainly exists in the app.
             if option in self._experiences:
                 raise HomeAssistantError(
-                    f"{option!r} is an Anthem experience, not a favourite. Experiences "
+                    f"{option!r} is an Anthem experience, not a favorite. Experiences "
                     "carry no valve settings, so the shower ignores the command — start "
                     "it from the Konnect app or the touchscreen instead."
                 )
             raise HomeAssistantError(
-                f"No Anthem favourite called {option!r}. It may have been renamed or "
+                f"No Anthem favorite called {option!r}. It may have been renamed or "
                 "deleted in the Konnect app."
             )
         await self._async_command(
@@ -333,7 +339,7 @@ class FavouriteSelect(OptimisticOptionMixin, KohlerValveEntity, SelectEntity):
             self._clear_optimistic()
             raise
         # The command was accepted. The device's own confirmation is still in flight — 1.5 s
-        # for a controller favourite, measured — so hold the guess until it lands rather than
+        # for a controller favorite, measured — so hold the guess until it lands rather than
         # dropping it on the next unrelated message.
         self._arm_optimistic_expiry()
 
@@ -438,7 +444,7 @@ class ValveWarmupSelect(OptimisticOptionMixin, KohlerValveEntity, SelectEntity):
     async def async_select_option(self, option: str) -> None:
         """Write the mode behind the chosen label.
 
-        Optimistic like the favourite selector: the valve echoes the new mode back as a
+        Optimistic like the favorite selector: the valve echoes the new mode back as a
         `GCS_WARM_STS` message, and that echo is the only real confirmation there is — a 200
         from the cloud means the command was accepted, never that the valve applied it.
         """
@@ -465,30 +471,30 @@ class ValveWarmupSelect(OptimisticOptionMixin, KohlerValveEntity, SelectEntity):
         self._arm_optimistic_expiry()
 
 
-class HubFavouriteSelect(OptimisticOptionMixin, KohlerControllerEntity, SelectEntity):
-    """Start a stored controller favourite, and show which one is running.
+class HubFavoriteSelect(OptimisticOptionMixin, KohlerControllerEntity, SelectEntity):
+    """Start a stored controller favorite, and show which one is running.
 
     The controller's equivalent of the valve's preset picker, and its **only** unit of
     control: there is no "set temperature and outlets now" command on this device — you
-    create a favourite holding that configuration and activate it.
+    create a favorite holding that configuration and activate it.
 
     Two differences from the valve side worth knowing:
 
-    * **Favourite ids are genuinely reassigned.** Deleting one shifts the others, confirmed
+    * **Favorite ids are genuinely reassigned.** Deleting one shifts the others, confirmed
       by an `AllOff-omit` moving from id 6 to id 5 between two reads. GCS presets are fixed
       slots; these are a list. So resolving by name at call time is not a nicety here, it is
       the only correct approach.
     * **Editing is blocked while the system runs** (HTTP 400, `statusCode 902`), though
       *activating* is allowed at any time. That is why the practical pattern is one
-      favourite per state, switched by activation.
+      favorite per state, switched by activation.
 
-    Options come from the favourites list, which is seeded over REST and then kept current
+    Options come from the favorites list, which is seeded over REST and then kept current
     by ``FAVORITES_SNAPSHOT`` — the controller pushes a full list after every create, edit,
     and delete, so the dropdown follows the app without a reload.
     """
 
     _attr_icon = "mdi:playlist-star"
-    _attr_name = "Favourite"
+    _attr_name = "Favorite"
 
     def __init__(
         self, coordinator: KohlerAnthemPlusCoordinator, controller: Controller
@@ -498,24 +504,24 @@ class HubFavouriteSelect(OptimisticOptionMixin, KohlerControllerEntity, SelectEn
 
     @staticmethod
     def _name_of(favorite: dict) -> str:
-        """The favourite's name, from whichever key this source happens to use.
+        """The favorite's name, from whichever key this source happens to use.
 
         **The two sources disagree, and the list is fed by both.** REST ``hub-favorites``
         returns ``title`` with no ``name``; MQTT ``FAVORITES_SNAPSHOT`` returns ``name`` with
-        no ``title`` — same ids, same favourites, different key. Since the REST seed is later
+        no ``title`` — same ids, same favorites, different key. Since the REST seed is later
         replaced wholesale by snapshots, reading only one key works until the first snapshot
         arrives and then silently empties the dropdown.
         """
         return str(favorite.get("name") or favorite.get("title") or "").strip()
 
     @property
-    def _favourites(self) -> list[dict]:
-        """Named favourites only, excluding experiences.
+    def _favorites(self) -> list[dict]:
+        """Named favorites only, excluding experiences.
 
         ``isExperience`` appears in the REST list and marks a firmware program rather than a
         user scene. It is absent from the MQTT snapshot, so this filters what it can see and
         treats a missing flag as "not an experience" — the same direction of error as the
-        name fallback above, preferring to show a favourite over hiding one.
+        name fallback above, preferring to show a favorite over hiding one.
         """
         return [
             f
@@ -526,8 +532,8 @@ class HubFavouriteSelect(OptimisticOptionMixin, KohlerControllerEntity, SelectEn
 
     @property
     def options(self) -> list[str]:
-        names = [self._name_of(f) for f in self._favourites]
-        # `FAVORITE_STS` can name a favourite the list has not caught up with — one created
+        names = [self._name_of(f) for f in self._favorites]
+        # `FAVORITE_STS` can name a favorite the list has not caught up with — one created
         # moments ago, or a cold start before the first snapshot lands. Home Assistant logs
         # an error on every update when `current_option` is missing from `options`, so carry
         # it while it is in force, the same way `ValveWarmupSelect` carries a legacy mode.
@@ -539,11 +545,11 @@ class HubFavouriteSelect(OptimisticOptionMixin, KohlerControllerEntity, SelectEn
 
     @property
     def _device_option(self) -> str | None:
-        """The running favourite, or ``Off``.
+        """The running favorite, or ``Off``.
 
-        ``FAVORITE_STS`` reports the active favourite's **name** alongside its id, and the
-        name is preferred: it is right even before the favourites list has been seeded, and
-        it cannot be thrown off by ids being reassigned when a favourite is deleted. The id
+        ``FAVORITE_STS`` reports the active favorite's **name** alongside its id, and the
+        name is preferred: it is right even before the favorites list has been seeded, and
+        it cannot be thrown off by ids being reassigned when a favorite is deleted. The id
         lookup stays as a fallback for a message that somehow carried no name.
 
         ``active_favorite_id`` of ``None`` means nothing is driving the system — either a
@@ -556,11 +562,11 @@ class HubFavouriteSelect(OptimisticOptionMixin, KohlerControllerEntity, SelectEn
         active = state.active_favorite_id
         if active is None:
             return OPTION_OFF
-        # Safe to return directly: `options` carries this name whether or not the favourites
+        # Safe to return directly: `options` carries this name whether or not the favorites
         # list knows it yet.
         if state.active_favorite_name:
             return state.active_favorite_name
-        for favorite in self._favourites:
+        for favorite in self._favorites:
             if str(favorite.get("id")) == str(active):
                 return self._name_of(favorite)
         return OPTION_OFF
@@ -573,13 +579,13 @@ class HubFavouriteSelect(OptimisticOptionMixin, KohlerControllerEntity, SelectEn
             "active_favorite_name": (
                 None if state is None else state.active_favorite_name
             ),
-            "favourite_count": len(self._favourites),
+            "favourite_count": len(self._favorites),
         }
 
     async def async_select_option(self, option: str) -> None:
-        """Activate the named favourite, or stop everything.
+        """Activate the named favorite, or stop everything.
 
-        Resolved by name at call time. Ids shift when a favourite is deleted, so a
+        Resolved by name at call time. Ids shift when a favorite is deleted, so a
         remembered one would eventually start the wrong scene.
         """
         if option == OPTION_OFF:
@@ -593,11 +599,11 @@ class HubFavouriteSelect(OptimisticOptionMixin, KohlerControllerEntity, SelectEn
             return
         wanted = option.strip().lower()
         favorite = next(
-            (f for f in self._favourites if self._name_of(f).lower() == wanted), None
+            (f for f in self._favorites if self._name_of(f).lower() == wanted), None
         )
         if favorite is None:
             raise HomeAssistantError(
-                f"No Anthem Plus favourite called {option!r}. It may have been renamed or "
+                f"No Anthem Plus favorite called {option!r}. It may have been renamed or "
                 "deleted in the Konnect app."
             )
         await self._async_command(
@@ -615,7 +621,7 @@ class HubFavouriteSelect(OptimisticOptionMixin, KohlerControllerEntity, SelectEn
             self._clear_optimistic()
             raise
         # The command was accepted. The device's own confirmation is still in flight — 1.5 s
-        # for a controller favourite, measured — so hold the guess until it lands rather than
+        # for a controller favorite, measured — so hold the guess until it lands rather than
         # dropping it on the next unrelated message.
         self._arm_optimistic_expiry()
 
