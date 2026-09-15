@@ -221,7 +221,7 @@ agree, say so — that is what makes a finding durable.
   without correcting for it.
 * Each case study ends with an appendix holding **every raw record verbatim**, with the real
   `tenantid` replaced by `<TENANT_ID>` per the placeholder policy in
-  [`../README.md`](../README.md). Device ids are left in place.
+  [`../INDEX.md`](../INDEX.md). Device ids are left in place.
 * Attribution is explicit: what came from a capture, what was computed, and **what the owner
   reported**. The capture can corroborate the shape of a command but never names a commander.
 

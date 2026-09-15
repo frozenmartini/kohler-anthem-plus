@@ -334,7 +334,7 @@ publishes only on change, and nothing changed.
 ### A.1 — raw MQTT, verbatim (61 records)
 
 Lines exactly as written by `RawLog.write()`, with **one substitution**: the real `tenantid`
-is replaced by `<TENANT_ID>` per the placeholder policy in [`../README.md`](../README.md).
+is replaced by `<TENANT_ID>` per the placeholder policy in [`../INDEX.md`](../INDEX.md).
 Device ids are left in place. Nothing else is altered.
 
 Source file for all of them: `mqtt_raw_20260818T201525Z_72_d536f3df.jsonl`.

@@ -344,7 +344,7 @@ nothing is excluded.
 ### A.1 — raw MQTT, verbatim (62 records)
 
 Lines exactly as written by `RawLog.write()`, with **one substitution**: the real `tenantid`
-is replaced by `<TENANT_ID>` per the placeholder policy in [`../README.md`](../README.md).
+is replaced by `<TENANT_ID>` per the placeholder policy in [`../INDEX.md`](../INDEX.md).
 Device ids are left in place. Nothing else is altered.
 
 **15:51:00.260 local** — line 1 — VALVE — v1=0184C80000000001 v2=1184C80100000001 cfgW=1

@@ -8,9 +8,8 @@ __pycache__/
 # User data, never repository content.
 reports/
 
-# Editor / workspace files (personal preference, not project content)
+# Editor files
 .vscode/
-*.code-workspace
 
 # OS
 .DS_Store
@@ -23,48 +22,6 @@ reports/
 *credential*
 *secret*
 
-# Session handoffs — deliberately NOT published.
-#
-# These are working notes for continuing the project, not documentation anyone else can use,
-# and they carry the owner's email and the hub's LAN address. They live here rather than
-# outside the repo so every doc pointer and every session's habits keep working; they are
-# simply never committed. Purged from history 2026-08-20, before the first push.
-#
-# ⚠️ They are the project's memory. Back them up separately — git is not doing it.
-docs/handoff/
-
-# Agent/owner working layer — deliberately NOT published, purged from history 2026-08-20.
-#
-# `CLAUDE.md` is Claude Code's project-instructions file and `intro.md` is the orientation
-# document it points at. Both describe *this machine* — the Home Assistant add-on container,
-# the venv at /homeassistant/scripts/kohler-work, which restart does what — and would mislead
-# anyone who cloned the repo, since none of those paths exist for them. They also name the
-# owner. Nothing published links to either; the protocol content they summarise lives in
-# docs/ where it belongs.
-#
-# ⚠️ Like docs/handoff/, git is not backing these up.
-CLAUDE.md
-intro.md
-
-# Agent working layer — deliberately NOT published, same category as CLAUDE.md / intro.md.
-#
-# `.claude/agents/` holds the subagent definitions this project delegates to. They describe
-# *this machine* — /homeassistant/kohler_anthem_plus_raw, the kohler-work venv,
-# `tests/run_offline.sh` — none of which exist for anyone who clones this repo, so shipping
-# them would mislead rather than help.
-#
-# ⚠️ Like docs/handoff/, git is not backing these up.
-.claude/
-
-# Developer-only capture — deliberately NOT published.
-#
-# `_dev/` is the author's own always-on diagnostic capture: raw MQTT, the cutoff journal and
-# the warmup journal, one file each in /homeassistant/kohler_anthem_plus_raw/ on this machine,
-# built on the shipped Report Log's formatters so the file formats every analysis script under
-# scripts/kohler-work/ reads stay unchanged. It shipped inside `anthem_plus/` until 0.4.1,
-# pinned on — a capture running, unasked, on every install — which is exactly why it is out
-# of the repository now. `coordinator.py` imports it inside `except ModuleNotFoundError`, so
-# a release never notices it is missing.
-#
-# ⚠️ Like docs/handoff/, git is not backing this up.
-_dev/
+# Private workbench files are kept outside this checkout rather than hidden here. If one is
+# copied into the public tree accidentally, leave it visible in `git status` so it cannot be
+# mistaken for publishable repository content.

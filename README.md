@@ -1,7 +1,7 @@
 <center>
 
 <p align="center">
-<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/banner-mark.png" width="150" alt="Kohler Anthem Plus">
+<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/protected-assets/project/banner-mark.png" width="150" alt="Kohler Anthem Plus">
 </p>
 
 <h1 align="center">Kohler Anthem Plus</h1>
@@ -13,7 +13,7 @@
 <p align="center">
   <a href="#install"><img src="https://img.shields.io/badge/HACS-custom-41BDF5" alt="HACS: custom repository"></a>
   <img src="https://img.shields.io/badge/Home%20Assistant-2024.2%2B-41BDF5" alt="Home Assistant 2024.2 or later">
-  <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT licence">
+  <img src="https://img.shields.io/badge/source%20code-MIT-green" alt="Source code: MIT">
 </p>
 
 <p align="center">
@@ -32,21 +32,21 @@
 
 <tr>
 <td align="center" width="49%"><sub>IN THE KONNECT APP</sub><br><br>
-<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/konnect-anthem.png" width="300" alt="The Konnect app's Anthem screen">
+<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/protected-assets/screenshots/konnect-anthem.png" width="300" alt="The Konnect app's Anthem screen">
 </td>
 <td width="2%" align="center"><img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/vline-grey-465.svg" width="1" height="465" alt=""></td>
 <td align="center" width="49%"><sub>IN THE KONNECT APP</sub><br><br>
-<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/konnect-anthem-plus.png" width="300" alt="The Konnect app's Anthem Plus screen">
+<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/protected-assets/screenshots/konnect-anthem-plus.png" width="300" alt="The Konnect app's Anthem Plus screen">
 </td>
 </tr>
 
 <tr>
 <td align="center" width="49%"><sub>IN HOME ASSISTANT</sub><br><br>
-<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/ha-anthem-valve-dark.png" width="300" alt="The Anthem valve card in Home Assistant">
+<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/protected-assets/screenshots/ha-anthem-valve-dark.png" width="300" alt="The Anthem valve card in Home Assistant">
 </td>
 <td width="2%" align="center"><img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/vline-grey-428.svg" width="1" height="428" alt=""></td>
 <td align="center" width="49%"><sub>IN HOME ASSISTANT</sub><br><br>
-<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/ha-anthem-plus-dark.png" width="300" alt="The Anthem Plus card in Home Assistant">
+<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/protected-assets/screenshots/ha-anthem-plus-dark.png" width="300" alt="The Anthem Plus card in Home Assistant">
 </td>
 </tr>
 
@@ -81,21 +81,21 @@ K-30319 amplifier; it is not built into the controller.
 
 <tr>
 <td align="center" width="49%"><b>HARDWARE</b><br><br>
-<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-valve.svg" width="84" alt="Digital valve"><br>
+<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/protected-assets/project/hw-valve.svg" width="84" alt="Digital valve"><br>
 <sub><b>Digital Valve</b></sub><br>
 +<br>
-<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-interface.svg" width="135" alt="Anthem interface"><br>
+<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/protected-assets/project/hw-interface.svg" width="135" alt="Anthem interface"><br>
 <sub><b>Anthem Interface</b><br>K-28214</sub>
 </td>
 <td width="2%" align="center"><img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/vline-grey-324.svg" width="1" height="324" alt=""></td>
 <td align="center" width="49%"><b>HARDWARE</b><br><br>
-<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-valve.svg" width="84" alt="Digital valve"><br>
+<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/protected-assets/project/hw-valve.svg" width="84" alt="Digital valve"><br>
 <sub><b>Digital Valve</b></sub><br>
 +<br>
-<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-controller.svg" width="123" alt="Anthem Plus system controller"><br>
+<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/protected-assets/project/hw-controller.svg" width="123" alt="Anthem Plus system controller"><br>
 <sub><b>System Controller</b><br>K-27756</sub><br>
 +<br>
-<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-interface-plus.svg" width="123" alt="Anthem Plus interface"><br>
+<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/protected-assets/project/hw-interface-plus.svg" width="123" alt="Anthem Plus interface"><br>
 <sub><b>Anthem Plus Interface</b><br>K-28214-ASC</sub>
 </td>
 </tr>
@@ -107,7 +107,7 @@ K-30319 amplifier; it is not built into the controller.
 <center><p align="center">
 <b>BOTH AT ONCE, 2 SYSTEMS COMBINED</b>
 <br><br>
-<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/hw-combo.svg" width="483" alt="Anthem Plus interface plus system controller plus Anthem interface">
+<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/protected-assets/project/hw-combo.svg" width="483" alt="Anthem Plus interface plus system controller plus Anthem interface">
 <br>
 <sub><b>Anthem Plus System</b>&emsp;+&emsp;<b>Anthem Interface</b></sub>
 <br><br>
@@ -159,11 +159,11 @@ Your shower will no longer pause and wait for you to resume.</p>
 <table cellpadding="6" align="center">
 <tr>
 <td align="center" width="49%" valign="top"><sub>ADD THE ACTION</sub><br><br>
-<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/ha-custom-shower-picker-dark.png" width="300" alt="The Custom shower action in Home Assistant's Add action picker">
+<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/protected-assets/screenshots/ha-custom-shower-picker-dark.png" width="300" alt="The Custom shower action in Home Assistant's Add action picker">
 </td>
 <td width="2%" align="center"><img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/vline-grey-465.svg" width="1" height="465" alt=""></td>
 <td align="center" width="49%" valign="top"><sub>CHOOSE OUTLETS AND TEMPERATURE</sub><br><br>
-<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/docs/images/ha-custom-shower-form-dark.png" width="300" alt="The Custom shower form, with a temperature slider and one toggle per outlet">
+<img src="https://raw.githubusercontent.com/frozenmartini/kohler-anthem-plus/main/protected-assets/screenshots/ha-custom-shower-form-dark.png" width="300" alt="The Custom shower form, with a temperature slider and one toggle per outlet">
 </td>
 </tr>
 </table>
@@ -221,10 +221,9 @@ set up in your browser. Otherwise, add it by hand:</p>
 <p>HACS installs from <b>releases</b>, not from the latest commit.</p>
 
 <b>Manually</b>
-<p>This repository <b>is</b> the integration — <code>manifest.json</code> sits at its root. Copy
-its contents into <code>custom_components/kohler_anthem_plus/</code> in your Home Assistant
-configuration directory (the folder name must be exactly <code>kohler_anthem_plus</code>) and
-restart.</p>
+<p>Copy the repository's <code>custom_components/kohler_anthem_plus/</code> directory into the
+same path in your Home Assistant configuration directory, then restart Home Assistant. The
+folder name must remain exactly <code>kohler_anthem_plus</code>.</p>
 
 <hr>
 
@@ -328,9 +327,16 @@ readings differ from what the wire actually does.</p>
 
 <hr>
 
-<h3 id="licence-and-trademarks">Licence and trademarks</h3>
+<h3 id="licence-and-trademarks">License and trademarks</h3>
 
-<p>MIT — see <a href="https://github.com/frozenmartini/kohler-anthem-plus/blob/main/LICENSE">LICENSE</a>.</p>
+<p>The <a href="LICENSE">source code for this project is licensed under the MIT License</a>.</p>
+
+<p>This repository-root README, the original integration logo and branding, and everything in
+<a href="protected-assets/"><code>protected-assets/</code></a> are not licensed under the MIT
+License. They may be displayed and copied as necessary for normal use, installation, development,
+and contribution to this project, but may not be reused as the documentation or branding of a
+derivative or independently distributed project without permission. See
+<a href="NOTICE.md">NOTICE.md</a> for details.</p>
 
 <p>Kohler, Anthem, Anthem+ and Konnect are trademarks of Kohler Co. This project is not affiliated
 with, authorised by, or endorsed by Kohler Co., and is not a supported product.</p>

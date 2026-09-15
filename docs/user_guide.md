@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="images/banner-mark.png" width="150" alt="Kohler Anthem Plus">
+  <img src="../protected-assets/project/banner-mark.png" width="150" alt="Kohler Anthem Plus">
 </p>
 
 <h1 align="center">Kohler Anthem Plus</h1>
@@ -11,7 +11,7 @@
 <p align="center">
   <a href="#install"><img src="https://img.shields.io/badge/HACS-custom-41BDF5" alt="HACS: custom repository"></a>
   <img src="https://img.shields.io/badge/Home%20Assistant-2024.2%2B-41BDF5" alt="Home Assistant 2024.2 or later">
-  <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT licence">
+  <img src="https://img.shields.io/badge/source%20code-MIT-green" alt="Source code: MIT">
 </p>
 
 <p align="center">
@@ -627,9 +627,9 @@ This integration is **not in HACS's default store.** Add it as a custom reposito
 
 ### Manually
 
-This repository **is** the integration — `manifest.json` sits at its root. Copy its contents
-into `config/custom_components/kohler_anthem_plus/` in your Home Assistant configuration
-directory (the folder name must be exactly `kohler_anthem_plus`) and restart.
+Copy the repository's `custom_components/kohler_anthem_plus/` directory into the same path in
+your Home Assistant configuration directory, then restart Home Assistant. The folder name must
+remain exactly `kohler_anthem_plus`.
 
 ## Setup
 
@@ -910,7 +910,7 @@ of it.
 
 | Document | What's in it |
 |---|---|
-| [`README.md`](README.md) | Index, and how to read the rest |
+| [`INDEX.md`](INDEX.md) | Index, and how to read the rest |
 | [`architecture.md`](architecture.md) | **Start here.** The two-device model, topology, and why most confusion comes from conflating them |
 | [`gcs/valve_hex.md`](gcs/valve_hex.md) | The valve command word, byte by byte |
 | [`gcs/api.md`](gcs/api.md) | The valve's REST API |
@@ -947,9 +947,14 @@ before reproducing it and attach the file it writes — the raw traffic and the 
 own decisions, together, are what make a report diagnosable. Check it for anything you'd
 rather not share before attaching it; it contains your device identifiers.
 
-## Licence and trademarks
+## License and trademarks
 
-MIT — see [LICENSE](../LICENSE).
+The [source code for this project is licensed under the MIT License](../LICENSE).
+
+The root README, original integration logo and branding, and everything in
+[`protected-assets/`](../protected-assets/) are not licensed under the MIT License. See
+[NOTICE.md](../NOTICE.md) for the permissions that cover normal use, installation, development,
+and contribution to the original project.
 
 Kohler, Anthem, Anthem+ and Konnect are trademarks of Kohler Co. This project is not
 affiliated with, authorised by, or endorsed by Kohler Co., and is not a supported product.

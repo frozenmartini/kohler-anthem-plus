@@ -444,7 +444,7 @@ just the two files this session wrote.
 
 Lines exactly as written by `RawLog.write()`, with **one substitution**: the real
 `tenantid` is replaced by `<TENANT_ID>`, per the placeholder policy in
-[`../README.md`](../README.md). Device ids are left in place — they identify hardware on one
+[`../INDEX.md`](../INDEX.md). Device ids are left in place — they identify hardware on one
 account but are not credentials. Nothing else is altered, including the per-message
 `messageid` and `correlationid` GUIDs.
 
