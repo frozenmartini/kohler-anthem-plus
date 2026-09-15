@@ -355,6 +355,23 @@ RELOAD_IGNORED_DATA_KEYS = frozenset(
 # valve reports for every outlet (450 tenths °C), so the top of the slider matches the
 # hardware's own ceiling.
 #
+# **80 °F is a deliberate floor, not the device's.** The valve reports
+# `minimumOutletTemperature` 150 tenths °C (59 °F) and the encoder goes to 0 °C ("full cold").
+# Ice Shower does not need any of that range from here — it runs as a HUB *experience*
+# (`ICE_SHOWER_EXP_SNAPSHOT`), not as a zone setpoint — so 80 °F costs nothing real while
+# keeping the useful part of the slider legible.
+#
+# **113 °F is also a ceiling we will not raise**, even on a system that reports a higher
+# `maximumOutletTemperature`. Owner's decision, 2026-09-15: nothing ships that offers above
+# 113 °F. Tracking the device *downwards* was considered and dropped — see below.
+#
+# ✅ **The valve enforces its own limit, so this is presentation, not protection** — verified
+# 2026-09-15 by sending 115 °F on both zones and watching the valve echo 113 °F on both
+# (`docs/gcs/api.md` §1c). An owner who sets a limit below 113 cannot be made to exceed it by
+# anything this integration sends; their slider simply snaps back to what the valve allowed,
+# because the entity reads the echoed word. That is why the slider is NOT bounded by
+# `maximumOutletTemperature`: it would be polish, not safety.
+#
 # Stated in Fahrenheit and converted for a Celsius account — the reverse would make these
 # unrecognisable to anyone checking them against the shower.
 #
@@ -551,6 +568,27 @@ WARMUP_CONTEXT_MAX_MESSAGES = 400
 # immediate single read therefore reports a false mismatch every time. Three attempts spanning
 # 6 s clears that with margin while keeping the service call short enough for a UI action.
 WARMUP_READBACK_DELAYS = (0.0, 2.0, 4.0)
+
+# How long to wait before asking `gcs-state` again when the seed's read came back with no
+# `warmUpState.warmUp` at all, and therefore how many extra reads that costs. Walked only on
+# a seed that did not answer, so a normal start pays none of it.
+#
+# Owner's values, 2026-09-15: **+60 s and +300 s**, a six-minute window rather than the
+# seconds a readback uses. The distinction matters — `WARMUP_READBACK_DELAYS` above chases an
+# echo of *our own* write and knows one is coming, while this waits on a cloud that answered
+# nothing and may be mid-outage. The one observation (§3j) sat unknown for 20 minutes and only
+# ended by hand, so a retry that gives up in seconds would likely have missed it too.
+#
+# ⚠️ **These delays are why the re-read is a background task.** At this length it cannot run
+# inside `async_seed`: `async_setup_entry` would not return for six minutes and the entry
+# would sit in "setting up". See `Valve._schedule_warmup_reread`.
+WARMUP_SEED_RETRY_DELAYS = (60.0, 300.0)
+
+WARMUP_MODE_STILL_UNKNOWN = (
+    "The Anthem valve did not report a warmup mode on any read at startup. The Warmup Mode "
+    "control will stay unknown until the valve announces one. Auto-restore cannot act until "
+    "then, because it has no mode to restore."
+)
 
 # ---------------------------------------------------------------------------
 # CLOUD CONNECTION WATCH — is the valve still reachable by Kohler's cloud?

@@ -152,8 +152,54 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     _async_purge_removed_diagnostics(hass, entry)
     await _async_offer_old_capture_cleanup(hass)
     coordinator = KohlerAnthemPlusCoordinator(hass, entry)
-    await coordinator.async_setup()
-    await coordinator.async_config_entry_first_refresh()
+    try:
+        await coordinator.async_setup()
+        await coordinator.async_config_entry_first_refresh()
+    except Exception:
+        # ⚠️ **A failed setup never reaches `async_unload_entry`.** Home Assistant calls that
+        # only for an entry that reached LOADED. A `ConfigEntryNotReady` is retried — 5 s
+        # doubling to a 600 s cap — with a *brand-new* coordinator, and the failed one is
+        # dropped with no teardown call at all. So everything `async_shutdown_stream` exists
+        # to release has to be released from here instead.
+        #
+        # Home Assistant does clean up one category on that path by itself: the `finally` in
+        # its own `config_entries.py` runs `_async_process_on_unload` even when the retry
+        # handler returns, which fires `entry.async_on_unload` callbacks and cancels
+        # `entry.async_create_background_task` tasks. Of ours that covers `_warmup_seed_task`,
+        # and nothing else.
+        #
+        # **What it does not cover, and why this block exists:** `_warmup_restore_task` spawns
+        # through `hass.async_create_task`, which binds to Home Assistant's lifetime rather
+        # than the entry's. `Valve.async_seed()` can schedule one and then have a later read
+        # in the same pass raise `AuthError` — not a `KohlerError`, so not swallowed by the
+        # per-section handlers — which `async_setup` turns into `ConfigEntryAuthFailed`.
+        # Without this the task wakes `WARMUP_AUTO_RESTORE_DELAY_SECONDS` later and writes a
+        # warmup mode to the valve on behalf of an entry sitting in SETUP_RETRY. It is the
+        # same defect `Valve.stop()` was taught to prevent on unload (session 31 §2) — on the
+        # one path that never reaches `Valve.stop()`.
+        #
+        # **Why it catches everything rather than `ConfigEntryNotReady`.** The stream, the
+        # journals and the cloud watch are all built *after* the last statement in
+        # `async_setup` that can raise, so as the code stands today they cannot leak here.
+        # That is a property of the current ordering, not a guarantee: a statement added
+        # after `stream.async_start()` would leave a live MQTT client and an open Report Log
+        # handle behind on a `SETUP_ERROR`, which has no retry to clean up after it. Catching
+        # broadly covers that the day it is written. `CancelledError` is deliberately not
+        # caught — it is a `BaseException`, and awaiting teardown inside a cancellation is
+        # worse than the leak.
+        #
+        # Safe on a half-built coordinator: `async_shutdown_stream` null-checks `stream` and
+        # `journals`, and every `_cancel_*` in `Valve.stop()` null-checks its own task.
+        #
+        # Guarded, because teardown must never *replace* the failure that got us here:
+        # `ConfigEntryNotReady` retries, an arbitrary exception out of `stream.async_stop()`
+        # or a sink's `close()` would be a `SETUP_ERROR` that never retries at all. A leak is
+        # the smaller loss.
+        try:
+            await coordinator.async_shutdown_stream()
+        except Exception:
+            _LOGGER.exception("Cleaning up after a failed Kohler setup did not complete")
+        raise
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
     if PLATFORMS:

@@ -1001,6 +1001,41 @@ could only infer. The write body wants wire units either way (`v0()` = ×10, `t0
 > or writing it on the wrong scale, changes it. Assert the outgoing value matches what was read
 > before every write, and abort if not.
 
+### ✅ VERIFIED 2026-09-15 — the valve enforces the scald limit in firmware
+
+**The valve clamps an over-limit temperature down to `maximumOutletTemperature` and reports the
+clamped value.** The app's slider is *not* the only thing standing between a third-party client
+and water above the owner's configured ceiling.
+
+Deliberate live test on the reference K-28212, whose limit is `maximumOutletTemperature` = 450
+tenths °C (45.0 °C / 113 °F) on all six outlets. Sent via `send_valve_hex`, bypassing every
+Home Assistant-side bound:
+
+| | sent | echoed by the valve |
+|---|---|---|
+| zone 1 | `01CDC804` — 0x1CD (461 tenths) = **115.0 °F**, outlet 3 | `01c2c8…` — 0x1C2 (450) = **113.0 °F** |
+| zone 2 | `11CDC800` — 0x1CD (461 tenths) = **115.0 °F**, no outlet | `11c2c8…` — 0x1C2 (450) = **113.0 °F** |
+
+Both zones clamped. **Zero** occurrences of `cd` in the capture for the whole episode; every
+`primaryValve1` and `secondaryValve1` word carried `c2`. The write was *accepted* — no error in
+the Home Assistant log, no rejection from the API — and silently reduced. The wall touchscreen
+switched its temperature display to **"Max"**, which is the same event seen from the panel.
+
+Two things follow:
+
+* **A client cannot drive the valve past the owner's configured limit.** This is the opposite
+  of the working assumption, which extrapolated from flow, `maximumRunTime` and
+  `maxshowerduration` writes — all of which this API *does* accept unclamped (§1c, §2, and
+  `hub/local_api.md`). Temperature is not like them, which in hindsight is the expected
+  asymmetry: temperature **is** the scald limit.
+* **Treat the echo as truth still holds, and now does useful work.** A client that reads its
+  own setpoint back from the valve self-corrects to the clamped value rather than displaying a
+  temperature the water never reached.
+
+> **Still not proven:** that the valve clamps *every* field. This result is for temperature
+> against `maximumOutletTemperature` only. Flow and runtime remain unclamped on the evidence
+> in §1c and §2.
+
 ### One outlet per call, chained on success
 
 There is **no list form**. The app writes N sequential calls, one per outlet, each carrying that
@@ -1895,6 +1930,11 @@ anyone else simply cannot survive contact with it.
 > **Not proven:** that the valve *never* clamps. We did not reproduce the state in which a 69
 > ceiling appeared, so the honest claim is "every write we made was honoured", not "no write
 > can be reduced".
+>
+> ⚠️ **Partly answered 2026-09-15 — and the answer is that it does clamp temperature.** A
+> 115 °F write came back as 113 °F, the outlet's `maximumOutletTemperature`. See §1c,
+> "the valve enforces the scald limit in firmware". The sentence above stands for the *flow*
+> and *runtime* writes it was written about; it must not be read as covering temperature.
 
 #### Why the Home Assistant integration exposes no flow control
 
@@ -2148,9 +2188,10 @@ closes.
 | **Ignores restatements** | the valve re-announces its mode ~4 s after every boot, and it rebooted 25 times in a week here. Only a transition out of a *known enabled* mode counts, so the first mode seen after a restart is never treated as something being taken away. |
 | **Stops fighting** | five consecutive restores that fail to stick and it gives up with a WARNING. A retry loop against something actively rewriting the field is traffic, not a fix. Seeing the mode enabled again resets the count. |
 | **Never during a shower** | the write is refused while water is running, mirroring the app. The next disable schedules another attempt. |
+| **Cancelled on unload** | the pending restore is dropped when the config entry unloads, reloads or is removed (`Valve.stop` → `_cancel_warmup_restore`). Fixed 2026-09-15: it used to be spawned with `hass.async_create_task`, which is bound to Home Assistant's lifetime rather than the entry's, so it outlived an unload and wrote the mode ~60 s later through a client session that unload does not close. A stored-setting write, never water — `async_set_warmup` cannot run any — but an unloaded entry should not still be talking to the valve. |
 
 The decision — *is this a disable we should undo?* — is
-[`anthem_plus/warmup.py`](../../anthem_plus/warmup.py)'s `should_restore_warmup()`, kept out of
+[`anthem_plus/warmup.py`](../../custom_components/kohler_anthem_plus/anthem_plus/warmup.py)'s `should_restore_warmup()`, kept out of
 the Home Assistant layer so `tests/test_warmup_auto_restore.py` can test the real function
 rather than a copy of it.
 
@@ -2163,8 +2204,9 @@ it would make the fault *less* visible by papering over it. §3g is the answer t
 question closed — §3h. It stays on as the watchdog that proves each restore and would catch
 the hub's behaviour changing.)*
 
-`/config/kohler_anthem_plus_raw/warmup_*.jsonl`, beside the raw MQTT capture and the cutoff
-journal, on the same UTC clock so all three interleave. **On by default** and independent of
+`warmup_*.jsonl` in the development capture folder (see
+[`../mqtt/capture_runbook.md`](../mqtt/capture_runbook.md)), beside the raw MQTT capture and
+the cutoff journal, on the same UTC clock so all three interleave. **On by default** and independent of
 the auto-restore switch: the event fires a few times a week, so a log that had to be switched
 on first would miss it, and an *unrestored* disable is the cleaner observation of the two.
 `README-warmup.txt` is written alongside and carries the analysis notes.
@@ -2441,6 +2483,95 @@ hand.
 **Display-scale note adopted from the pass:** `0x184` (388) is what the app's ladder writes
 for a *displayed* **102 °F** (the arithmetic 101.8 °F is not a value any UI shows). When
 naming setpoints against app/panel behaviour, prefer the display value.
+
+### 3j. ✅ FIXED 2026-09-15 — a seed read that carries no mode at all
+
+**Distinct from §3e and §3h.** Those are about the mode being *changed*. This is about a
+`gcs-state` read coming back with **no `warmUpState.warmUp` in it**, which is not a mode of
+"unknown" — it is a read that did not answer.
+
+`GcsState.apply_rest_state` merges rather than overwrites:
+
+```python
+self.warmup_mode = warm.get("warmUp") or self.warmup_mode
+```
+
+An absent field therefore leaves whatever was already there. On a reseed that is correct — a
+half-answered read must not blank a mode already known. **At setup there is nothing there**,
+so the mode stays `None`, `select.anthem_valve_warmup_mode` renders `unknown`, and
+auto-restore has no target: `_async_restore_warmup` would skip with *"no enabled mode has
+ever been seen"*, the same failure that cost seven hours on 2026-08-20 (§3g).
+
+#### Waiting for MQTT does not close it
+
+**The valve never volunteers its mode on connect.** Over all 74 raw captures the first
+`GCS_WARM_STS` in a file lands between **137 s and 7 h** in (§3g). So nothing bounds how long
+the control stays unknown, and until it resolves the integration cannot restore a disable it
+would otherwise have caught.
+
+#### Observed once, 2026-09-14
+
+| local (UTC−7) | what |
+|---|---|
+| 19:58:53 | setup; REST seed produced `{"event":"baseline","mode":null,…}` — the control shows unknown |
+| 19:58 → 20:19 | **20 minutes**, zero MQTT messages in the session's raw capture |
+| 20:19:17 | `GCS_WARM_STS` carrying `warmUpAllOutletsWithNoStartDelay`, journalled `announced` with `ours: true` |
+
+`ours: true` (a self-write inside `WARMUP_SELF_WRITE_GRACE_SECONDS` = 30 s) means it ended
+because **the owner set the mode by hand**, not because the integration recovered. The
+afternoon in question had ~51 integration setups — the owner was restarting Core repeatedly
+while working on an unrelated integration — so a seed racing a connection that had not
+settled is the likely shape. It is the only such baseline in the journal corpus.
+
+#### The fix: ask again, do not fall back
+
+When the mode is still `None` after the seed, `Valve.async_seed` calls
+`_schedule_warmup_reread()`, which spawns `_async_reread_warmup_mode()` as a background task.
+That task re-reads `gcs-state` at **`WARMUP_SEED_RETRY_DELAYS = (60.0, 300.0)`** — a
+six-minute window — and stops at the first answer. Walked only when the mode is unknown, so a
+normal start pays nothing at all.
+
+Five choices worth stating, because each rules out a plausible alternative:
+
+1. **Re-read rather than fall back to `last_warmup_mode`.** The persisted value is a memory
+   of what this integration last saw. Presenting it as the live mode would invent one: a mode
+   changed in the Konnect app while Home Assistant was down would be reported back as fact,
+   and the next genuine disable would be judged against a `before` that was never true.
+2. **Minutes, not seconds.** `WARMUP_READBACK_DELAYS` chases the echo of *our own* write and
+   knows one is coming; this waits on a cloud that answered nothing. The one observation sat
+   unknown for 20 minutes, so a walk that gave up in seconds would likely have missed it.
+3. **A background task, not an inline wait** — forced by choice 2. Home Assistant applies no
+   timeout to `async_setup_entry` (`SLOW_SETUP_WARNING` and `SLOW_SETUP_MAX_WAIT` wrap the
+   integration's `async_setup` only, and config entries are set up outside that block), so an
+   inline six-minute wait would not be warned about — it would simply hold the entry in
+   `SETUP_IN_PROGRESS`, with **every entity of the integration absent**, and at 300 s
+   bootstrap would name the domain in *"Setup timed out for stage 2 waiting on … - moving
+   forward"*. `entry.async_create_background_task` binds the task to the config entry, and
+   `Valve.stop` cancels it alongside the restore task.
+4. **Only the warmup field is taken from the response.** A reseed runs with the stream up, so
+   re-applying a whole payload fetched minutes earlier could overwrite valve words MQTT
+   delivered while the re-read was waiting. For the same reason the walk re-checks before each
+   read and exits without spending a request if the valve announced its mode meanwhile.
+5. **A successful read pushes.** Inside the seed the platforms do not exist yet and every
+   caller pushes its own snapshot afterwards, so writing the attribute was enough. As a task
+   it lands after the entities are built with nothing else due to push — so it calls
+   `_push()`, or the control would keep reading `unknown` with the right value behind it.
+
+If every attempt still comes back empty the mode stays `None` and the integration logs
+`WARMUP_MODE_STILL_UNKNOWN` at WARNING — it says so rather than inventing a value.
+
+> **Compatibility.** `hacs.json` promises **2024.2** or later, so the task API was checked at
+> both ends: in **2024.2.0** `ConfigEntry.async_create_background_task(hass, target, name)` is
+> already a `@callback def`, `HomeAssistant.async_create_background_task` already documented
+> *"will not block startup"*, and `async_block_till_done` already awaited `_tasks` only — so
+> the walk does not delay startup on the oldest release we claim. **2026.9.2** is the same
+> call plus an `eager_start` default we do not pass. ⚠️ Home Assistant's `dev` branch has made
+> the method `async def`; when that reaches a release the call must be awaited and
+> `_schedule_warmup_reread` must stop being a `@callback`, or it binds a coroutine instead of
+> a task and the walk silently never runs.
+
+Covered by `tests/test_warmup_seed_reread.py` (private; see the note on test locations in the
+project README).
 
 ## 4. Where to look in the decompile
 

@@ -135,7 +135,9 @@ from .const import (
     WARMUP_AUTO_RESTORE_MAX_CONSECUTIVE,
     WARMUP_AUTO_RESTORE_NO_TARGET,
     WARMUP_AUTO_RESTORE_SETTLED_SECONDS,
+    WARMUP_MODE_STILL_UNKNOWN,
     WARMUP_READBACK_DELAYS,
+    WARMUP_SEED_RETRY_DELAYS,
     WARMUP_SELF_WRITE_GRACE_SECONDS,
     ENDLESS_SHOWER_RESTARTED,
     ISSUE_NOT_SET_UP,
@@ -468,6 +470,8 @@ class Valve:
         self._warmup_self_write_at: float | None = None
         self._warmup_self_write_mode: str | None = None
         self._warmup_restore_task: asyncio.Task | None = None
+        #: The unknown-mode re-read (§3j). One at a time; cancelled by `stop()`.
+        self._warmup_seed_task: asyncio.Task | None = None
         self._warmup_restores = 0
         self._warmup_restored_at: float | None = None
         # CUSTOM SHOWER: the "No pausing warm-up" watcher, one at a time, and
@@ -633,6 +637,8 @@ class Valve:
     def stop(self) -> None:
         """Cancel everything that could fire into a torn-down coordinator."""
         self._cancel_custom_shower("the integration is shutting down")
+        self._cancel_warmup_restore("the integration is shutting down")
+        self._cancel_warmup_seed_reread("the integration is shutting down")
         # Before the stream, so a timer cannot fire into a half-torn-down coordinator.
         self.cloud_watch.async_stop()
 
@@ -791,6 +797,21 @@ class Valve:
         except KohlerError as err:
             _LOGGER.debug("Could not seed GCS state: %s", err)
 
+        # ⚠️ **No mode in the payload is not a mode of "unknown" — it is a read that did not
+        # answer.** `apply_rest_state` does `warm.get("warmUp") or self.warmup_mode`, so a
+        # response carrying no `warmUpState.warmUp` leaves whatever was there, which at setup
+        # is nothing: the select renders `unknown` and auto-restore has no target.
+        #
+        # Waiting for MQTT does not close it. The valve never volunteers its mode on connect
+        # — over all 74 raw captures the first `GCS_WARM_STS` in a file lands between 137 s
+        # and 7 h in — so the gap is bounded by nothing. Seen live 2026-09-14 19:58 PDT
+        # during a restart-heavy afternoon: unknown for 20 minutes, and it only ended because
+        # the owner set the mode by hand. See `docs/gcs/api.md` §3j.
+        #
+        # So ask again. Owner's decision, 2026-09-15.
+        if self.gcs_state.warmup_mode is None:
+            self._schedule_warmup_reread()
+
 
         # Presets push over MQTT on every create, edit, rename, and delete, so this is
         # only the seed — nothing re-reads them on a clock.
@@ -805,6 +826,113 @@ class Valve:
             self._seeded_presets = presets
         except KohlerError as err:
             _LOGGER.debug("Could not read GCS presets: %s", err)
+
+    @callback
+    def _schedule_warmup_reread(self) -> None:
+        """Spawn the unknown-mode re-read, at most one at a time.
+
+        **Background, not inline.** `WARMUP_SEED_RETRY_DELAYS` spans six minutes; awaiting it
+        from `async_seed` would hold `async_setup_entry` open for that long and leave the entry
+        in "setting up". `async_create_background_task` binds the task to this config entry —
+        the API `_schedule_warmup_restore` should have used, and `stop()` cancels it as well.
+
+        Single-flight: `async_seed` also runs on every MQTT reconnect, and a reconnect storm
+        would otherwise stack a six-minute walk per reconnect, all reading the same field.
+
+        **Checked against the whole supported range, 2026-09-15.** `hacs.json` and the README
+        promise **2024.2** or later, so "it works on this box" is not the test:
+
+        * **2024.2.0** (the floor) — `ConfigEntry.async_create_background_task(hass, target,
+          name)`, a `@callback def`. `HomeAssistant.async_create_background_task` already said
+          *"will not block startup ... If you are using this in your integration, use the
+          create task methods on the config entry instead"*, and `async_block_till_done`
+          already awaited only `_tasks`, never `_background_tasks`. So the six-minute walk
+          does not hold up startup on the oldest release we claim.
+        * **2026.9.2** (running here) — same `@callback def`, plus an `eager_start` default we
+          do not pass.
+
+        ⚠️ Home Assistant's `dev` branch has since made it `async def`. When that reaches a
+        release this call must be awaited and this method must stop being a `@callback`, or it
+        binds a coroutine instead of a task and the walk silently never runs.
+        """
+        if self._warmup_seed_task is not None and not self._warmup_seed_task.done():
+            return
+        self._warmup_seed_task = self.entry.async_create_background_task(
+            self.hass,
+            self._async_reread_warmup_mode(),
+            name=f"{DOMAIN} warmup mode re-read",
+        )
+
+    @callback
+    def _cancel_warmup_seed_reread(self, reason: str) -> None:
+        """Drop a pending unknown-mode re-read, saying why."""
+        task = self._warmup_seed_task
+        self._warmup_seed_task = None
+        if task is not None and not task.done():
+            _LOGGER.debug("warmup mode re-read cancelled, %s", reason)
+            task.cancel()
+
+    async def _async_reread_warmup_mode(self) -> None:
+        """Ask `gcs-state` again until it carries a warmup mode, or the attempts run out.
+
+        **Re-reads rather than falling back to `last_warmup_mode`** — owner's decision,
+        2026-09-15. The persisted value is a memory of what this integration last saw, and
+        presenting it as the live mode would be inventing one: a mode changed in the Konnect
+        app while Home Assistant was down would be reported back as current, and the next
+        genuine disable would be measured against a `before` that was never true.
+
+        Only the warmup field is taken from the response, deliberately. A reseed runs with
+        the stream up, so re-applying a whole payload fetched seconds ago could overwrite
+        valve words that MQTT delivered while this was waiting.
+
+        Sets `warmup_mode` directly, the same way `apply_rest_state` does, so it does not
+        reach `_handle_warmup_mode_change`. That is right: filling in an unknown is not a
+        transition, there is no `before` to restore to, and `should_restore_warmup` would
+        refuse it anyway.
+
+        Spawned by `_schedule_warmup_reread`, which explains why this is a task and not an
+        inline wait. It is bound to the config entry and cancelled by `stop()`, so it cannot
+        repeat the defect `_cancel_warmup_restore` exists to prevent.
+
+        Gives up rather than looping. If six minutes of asking produced nothing, the cloud is
+        not going to answer this field on the next request either, and the valve's own
+        announcement is still coming — `WARMUP_MODE_STILL_UNKNOWN` says so and stops.
+        """
+        for delay in WARMUP_SEED_RETRY_DELAYS:
+            await asyncio.sleep(delay)
+            if self.gcs_state.warmup_mode is not None:
+                # The valve announced it while we were waiting. At these delays that is a
+                # real possibility rather than a formality, and the whole point of the walk
+                # is already satisfied — so stop without spending a request.
+                _LOGGER.debug("Warmup mode arrived over MQTT; re-read not needed")
+                return
+            try:
+                payload = await self.client.async_get_gcs_state(
+                    self.gcs_device.device_id
+                )
+            except KohlerError as err:
+                _LOGGER.debug("Warmup mode re-read failed: %s", err)
+                continue
+            warm = ((payload or {}).get("state") or {}).get("warmUpState") or {}
+            mode = warm.get("warmUp")
+            if not mode:
+                continue
+            mode = str(mode)
+            self.gcs_state.warmup_mode = mode
+            _LOGGER.debug("Warmup mode arrived on a re-read after %.1fs: %s", delay, mode)
+            if mode != WARMUP_DISABLED:
+                # Same reason the seed does this: a mode that was simply already in force
+                # when we started is the third way to learn a restore target.
+                self._remember_warmup_mode(mode)
+            # ⚠️ **Required because this is a task, not part of the seed.** Inside
+            # `async_seed` the platforms do not exist yet and every caller pushes its own
+            # snapshot afterwards, so writing the attribute was enough. This lands a minute
+            # or five later, with the entities long since built and nothing else due to
+            # push — without this the select would keep showing `unknown` until the next
+            # MQTT message or reseed, which is the very wait this walk exists to end.
+            self._push()
+            return
+        _LOGGER.warning(WARMUP_MODE_STILL_UNKNOWN)
 
     def announce_readiness(self) -> None:
         """Say at startup whether the cutoff feature can act — the coordinator's old
@@ -1974,6 +2102,26 @@ class Valve:
         self._warmup_restore_task = self.hass.async_create_task(
             self._async_restore_warmup(taken_away)
         )
+
+    @callback
+    def _cancel_warmup_restore(self, reason: str) -> None:
+        """Drop a pending restore, saying why.
+
+        `_schedule_warmup_restore` spawns through `hass.async_create_task`, which binds the
+        task to Home Assistant's lifetime rather than this entry's. Without this the task
+        outlives an unload: it wakes after `WARMUP_AUTO_RESTORE_DELAY_SECONDS` and writes
+        the warmup mode through `async_get_clientsession`, which unload does not close, so
+        the write lands. `async_set_warmup` stores a mode and cannot run water, but an
+        entry that has been unloaded or removed should not still be talking to the valve.
+
+        Logged, never journalled: teardown is not an event the warmup journal is answering
+        a question about, and `Journals.note()` after `close()` would reopen the file.
+        """
+        task = self._warmup_restore_task
+        self._warmup_restore_task = None
+        if task is not None and not task.done():
+            _LOGGER.info("warmup auto-restore cancelled, %s", reason)
+            task.cancel()
 
     @callback
     def _handle_warmup_mode_change(

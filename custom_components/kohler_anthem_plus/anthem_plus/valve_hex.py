@@ -128,8 +128,14 @@ FAHRENHEIT_TO_TENTHS_C = {
     120: 488, 121: 494, 122: 500,
 }
 # The byte accepts up to 0xFF, but the Konnect app never sends above 0xE8 (48.8 °C /
-# 119.8 °F). Whether the firmware enforces that cap or only the app does is untested, so
-# writes clamp to the app's limit rather than the byte's.
+# 119.8 °F), so writes clamp to the app's limit rather than the byte's.
+#
+# ✅ **The firmware enforces the per-outlet scald limit itself — verified 2026-09-15.** A
+# `send_valve_hex` of 0x1CD (461 tenths, 115 °F) on both zones came back from the valve as
+# 0x1C2 (450 tenths, 113 °F) on both, matching `maximumOutletTemperature`; the touchscreen
+# showed "Max". So the app's slider is *not* the only gate, and a caller cannot drive the
+# valve past the owner's configured limit. See `docs/gcs/api.md` §1c. This cap stays at the
+# app's 48.8 °C regardless: it is the encoder's backstop, not the safety mechanism.
 TEMPERATURE_BYTE_MAX = 0xE8
 
 # Byte 2 — flow. The SAME byte is expressed on three different scales depending on where
