@@ -17,7 +17,7 @@ conclusions — this project already did, twice.**
 Kohler's cloud pushes status as **Azure IoT Hub direct methods**. The integration
 **registers its own client identity** on that hub, and the cloud then *invokes methods on
 us* — `$iothub/methods/POST/ExecuteControlCommand/?$rid=N` — which we must acknowledge on
-`$iothub/methods/res/200/`. See [`../../anthem_plus/mqtt.py`](../../anthem_plus/mqtt.py).
+`$iothub/methods/res/200/`. See [`../../anthem_plus/mqtt.py`](../../custom_components/kohler_anthem_plus/anthem_plus/mqtt.py).
 
 That is the shape of a **cloud talking to an app client**. As far as Kohler is concerned we
 are a Konnect app instance, and the payloads are instructions about **what the app should

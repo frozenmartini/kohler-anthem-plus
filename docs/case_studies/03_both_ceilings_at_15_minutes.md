@@ -174,7 +174,7 @@ would then have seen a ~1 s `flow_end`, matched nothing, and left it off.
 What makes the result *robust* rather than lucky is that both durations are 900 s: whichever
 device fires first, its signal lands at ~900 s and **matches a limit the detector knows
 about**. A `0x00` is treated exactly like a `0x40`
-([`runtime_cutoff.py`](../../anthem_plus/runtime_cutoff.py), the pause veto removed in session
+([`runtime_cutoff.py`](../../custom_components/kohler_anthem_plus/anthem_plus/runtime_cutoff.py), the pause veto removed in session
 9), so the controller's stop would have been caught on its own had it arrived first.
 
 **That is the real mechanism behind session 9's "set both to the same value" advice** — not

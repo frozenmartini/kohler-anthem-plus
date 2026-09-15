@@ -66,10 +66,17 @@ malformed payload verbatim and a non-UTF-8 one as `payload_b64` — instead of a
 ### The author's development capture — not part of the integration
 
 Everything in `docs/` cites files named `mqtt_raw_*.jsonl`, `cutoff_*.jsonl` and
-`warmup_*.jsonl` in `/config/kohler_anthem_plus_raw/`. Those are the **same records** — raw
+`warmup_*.jsonl`. Those are the **same records** — raw
 lines by `format_record`, trail lines by `format_event` without the `journal` key, since the
 filename says which trail — written **always**, one file per Home Assistant run per kind,
 never pruned, by a package (`_dev/`) that lives in the author's checkout and is gitignored.
+
+The folder it writes to is a setting in that gitignored package and has moved once, on
+2026-09-15, out of `/config/kohler_anthem_plus_raw/` and into the author's private evidence
+tree. **Paths quoted in older `docs/` pages and case studies are the ones that were current
+when those pages were written and are left as they stand** — the filenames are what identify
+a record, not the directory. A release install is unaffected either way: nothing shipped
+writes any of this.
 From 2026-08-13 to 0.4.1 those writers shipped inside `anthem_plus/`, pinned on by
 `const.py` constants, so every install wrote that folder; that was the author's tooling
 shipping by mistake, and it is out of the published integration now (0.4.1 offers a Repairs

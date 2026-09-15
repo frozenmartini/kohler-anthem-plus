@@ -8,7 +8,7 @@ to fix problems hit while using them.
 A working Home Assistant integration for the Anthem valve. The shape of the auth and config
 flow here follows it, including reading the account id from the access token's `oid` claim.
 The B2C sign-in itself is a different implementation — see
-[`../anthem_plus/auth.py`](../anthem_plus/auth.py) for why the browser-redirect approach had
+[`../anthem_plus/auth.py`](../custom_components/kohler_anthem_plus/anthem_plus/auth.py) for why the browser-redirect approach had
 to be replaced — but the pattern came from there.
 
 ## [kohler-anthem](https://github.com/yon/kohler-anthem) — the Python library

@@ -196,7 +196,7 @@ valve's echo at 15:52:02.462 is identical to the pre-pause word.
 ## 6. The controller's silence, measured
 
 The raw logger has **no filter** — `RawLog.write()` records every message that arrives on the
-subscription. And there is exactly one subscription: [`mqtt.py`](../../anthem_plus/mqtt.py)
+subscription. And there is exactly one subscription: [`mqtt.py`](../../custom_components/kohler_anthem_plus/anthem_plus/mqtt.py)
 subscribes `$iothub/methods/POST/#`, one connection carrying **every device on the account**,
 GCS and HUB alike, told apart by `sku` inside the payload. The GCS messages at 14:52, 15:52
 and 16:18 UTC prove the socket was up throughout.
@@ -336,7 +336,7 @@ This is the behaviour that the removal of the pause-flag veto (session 9 §1) pu
 not matching a limit. It held.
 
 ⚠️ **The journal cannot attribute this stop.** In
-[`runtime_cutoff.py`](../../anthem_plus/runtime_cutoff.py) the `match is None` branch returns
+[`runtime_cutoff.py`](../../custom_components/kohler_anthem_plus/anthem_plus/runtime_cutoff.py) the `match is None` branch returns
 before the `suppressed(zone)` check, so a non-matching duration always reports `"duration is
 not within 10s of any limit"` — even if Home Assistant had issued the stop within the 30 s
 grace window. **The absence of the grace reason is not evidence of an external stop.** The

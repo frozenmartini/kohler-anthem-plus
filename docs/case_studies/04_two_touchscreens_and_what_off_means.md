@@ -102,7 +102,7 @@ The detector correctly declined it:
 limit. **Had this shower been running ~15 minutes when that button was pressed, Endless Shower
 would have restarted the water.** This is the first time the corpus has captured the exact
 trigger for the cost session 9 accepted when it removed the pause-flag veto — a deliberate
-trade, documented in [`runtime_cutoff.py`](../../anthem_plus/runtime_cutoff.py), and now with
+trade, documented in [`runtime_cutoff.py`](../../custom_components/kohler_anthem_plus/anthem_plus/runtime_cutoff.py), and now with
 a concrete real-world path to it rather than a hypothetical one.
 
 Both zones carrying `0x40` also means a first-gen OFF is **indistinguishable from a
