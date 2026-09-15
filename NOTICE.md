@@ -15,7 +15,7 @@ The following materials are **not** licensed under the MIT License:
 - Everything in `custom_components/kohler_anthem_plus/brand/`
 - Everything in `protected-assets/`
 
-The original project materials within these paths are Copyright © 2026 Martinee. All rights
+The original project materials within these paths are Copyright © 2026 frozenmartini. All rights
 reserved.
 
 To the extent the copyright holder owns rights in these materials, permission is granted to
@@ -31,6 +31,12 @@ permission from the copyright holder.
 Forking or cloning this repository through ordinary GitHub functionality does not by itself
 constitute permission to use these protected materials as the branding or documentation of an
 independently maintained or distributed derivative project.
+
+For purposes of this notice, a fork becomes an independently maintained or distributed project
+when its maintainer releases, packages, promotes, documents, or supports the modified project for
+use separately from contributing changes to the original project. Creating a GitHub fork,
+performing personal development or testing, or submitting pull requests does not by itself make a
+fork an independent project.
 
 The project claims only the original expression and modifications contributed by its author.
 It does not claim third-party product designs, names, trademarks, interface designs, or other

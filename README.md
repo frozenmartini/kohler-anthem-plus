@@ -1,3 +1,9 @@
+<!--
+Copyright © 2026 frozenmartini.
+This README is not licensed under the MIT License.
+See NOTICE.md for permitted uses.
+-->
+
 <center>
 
 <p align="center">
@@ -331,12 +337,15 @@ readings differ from what the wire actually does.</p>
 
 <p>The <a href="LICENSE">source code for this project is licensed under the MIT License</a>.</p>
 
-<p>This repository-root README, the original integration logo and branding, and everything in
-<a href="protected-assets/"><code>protected-assets/</code></a> are not licensed under the MIT
-License. They may be displayed and copied as necessary for normal use, installation, development,
-and contribution to this project, but may not be reused as the documentation or branding of a
-derivative or independently distributed project without permission. See
-<a href="NOTICE.md">NOTICE.md</a> for details.</p>
+<p>This README and everything in
+<a href="custom_components/kohler_anthem_plus/brand/"><code>/brand/</code></a>
+and <a href="protected-assets/"><code>protected-assets/</code></a> are not licensed under the MIT
+License. The original project materials among these items are Copyright © 2026 frozenmartini.
+Third-party materials remain the property of their respective owners. These materials may be
+displayed and copied as necessary for normal use, installation, development, and contribution to
+this project, but may not be reused as the documentation or branding of a derivative or
+independently distributed project without permission. See <a href="NOTICE.md">NOTICE.md</a> for
+details.</p>
 
 <p>Kohler, Anthem, Anthem+ and Konnect are trademarks of Kohler Co. This project is not affiliated
 with, authorised by, or endorsed by Kohler Co., and is not a supported product.</p>
