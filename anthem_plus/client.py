@@ -253,7 +253,15 @@ class KohlerClient:
                 "retrying once. Expect this call to take a few seconds longer than usual",
                 path,
             )
-            await self._auth.async_refresh()
+            # Say "this token was rejected" rather than "refresh now". The distinction
+            # matters when calls overlap, which here they routinely do: if another
+            # caller already refreshed while this request was in flight, the token it
+            # holds is good, this invalidates nothing, and the retry below picks it
+            # up without a round trip. Calling async_refresh() unconditionally instead
+            # would redeem the rotating refresh token once per 401 — and B2C retires the
+            # previous one on every redeem, so two concurrent 401s left the loser
+            # presenting a dead token and looking like a revoked account.
+            self._auth.invalidate_access_token(token)
             return await self.async_request(
                 method, path, json_body=json_body, allow_retry=False
             )

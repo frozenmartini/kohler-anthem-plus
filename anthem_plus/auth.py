@@ -27,6 +27,7 @@ returns ``AADB2C90053`` for bad credentials, and step 3 returns the expected 302
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import binascii
 import hashlib
@@ -35,7 +36,7 @@ import re
 import secrets
 import time
 import urllib.parse
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 import aiohttp
@@ -149,6 +150,14 @@ class KohlerAuth:
 
     Holds the rotating refresh token in memory; callers persist it via
     :attr:`refresh_token` so a restart does not need the password again.
+
+    ⚠️ **Go through :meth:`async_get_access_token`, never :meth:`async_refresh`.** B2C
+    invalidates a refresh token the instant it is redeemed, so two callers redeeming the
+    same one means the second presents a token Kohler has already retired — and
+    because the winner's rotated token is what gets stored, the loser's failure looks
+    like a dead credential on a perfectly healthy account. Only
+    ``async_get_access_token`` holds the lock that makes concurrent callers share one
+    refresh.
     """
 
     def __init__(
@@ -159,6 +168,12 @@ class KohlerAuth:
         self._session = session
         self._tokens: TokenSet | None = None
         self._refresh_token = refresh_token
+        # Serialises refreshes so overlapping callers redeem the rotating refresh token
+        # once between them rather than once each. Overlap is routine here, not a
+        # corner case: the Endless Shower restart, the warm-up restore, the reconnect
+        # reseed and cloud_watch's unattended check all issue REST calls from their own
+        # tasks, with no coordination between them or with what the user is pressing.
+        self._refresh_lock = asyncio.Lock()
 
     @property
     def has_credentials(self) -> bool:
@@ -177,6 +192,13 @@ class KohlerAuth:
         Expiry here is routine, not a fault: the token is refreshed on demand by the next
         request that needs one. It is worth surfacing only because a refresh that *fails*
         is how a revoked account first shows itself.
+
+        ⚠️ **Can be ``0.0``, not just a real time or None** —
+        :meth:`invalidate_access_token` parks a rejected token there. Readers must treat
+        that as "no usable token" alongside None: the diagnostic attribute in
+        ``binary_sensor.py`` relies on both being falsy, so narrowing its guard to
+        ``is not None`` would render a 1970 timestamp for the second or two between a
+        401 and the refresh that answers it.
         """
         return self._tokens.expires_at if self._tokens else None
 
@@ -352,6 +374,14 @@ class KohlerAuth:
 
         B2C issues a NEW refresh token on every refresh and invalidates the old one, so the
         result must be persisted or the account is stranded once the old token expires.
+
+        ⚠️ **Unsynchronised — the raw primitive, not the way to get a token.** It
+        does not take the refresh lock, so two callers landing here together redeem the
+        same rotating token and the second one fails. Call
+        :meth:`async_get_access_token` instead; it refreshes only when it has to, and
+        coordinates the callers that do. This stays public for the standalone scripts
+        under ``scripts/kohler-work/tests/``, which drive one auth object from one task
+        and have no concurrency to worry about.
         """
         token = refresh_token or self.refresh_token
         if not token:
@@ -401,9 +431,48 @@ class KohlerAuth:
         self._refresh_token = refresh_token
         return self._tokens
 
+    def invalidate_access_token(self, access_token: str) -> bool:
+        """Mark ``access_token`` as spent, but only if it is still the one held.
+
+        This is how a caller that got a 401 says "the token you gave me was rejected"
+        without asserting anything about what is held *now*. Scoping it to the specific
+        token is the whole point: if another caller has already refreshed in the
+        meantime, this is a no-op and the next :meth:`async_get_access_token` hands back
+        their fresh token for free. Unconditionally refreshing on a 401 would redeem the
+        rotating refresh token again — burning a rotation to replace a token that had
+        already been replaced.
+
+        Returns whether the token was the current one. Synchronous and lock-free by
+        design: it is a single attribute swap with no ``await`` in it, so on the event
+        loop it cannot interleave, and making it async would mean taking the refresh
+        lock while a refresh is in flight — exactly when a 401 is most likely to arrive.
+        """
+        tokens = self._tokens
+        if tokens is None or tokens.access_token != access_token:
+            return False
+        # Expire it rather than dropping it: `refresh_token` and `tenant_id` both read
+        # through `_tokens`, and both are still good — it is only the access token
+        # Kohler rejected.
+        self._tokens = replace(tokens, expires_at=0.0)
+        return True
+
     async def async_get_access_token(self) -> str:
-        """Return a valid access token, refreshing it if needed."""
-        if self._tokens is None or self._tokens.expired:
+        """Return a valid access token, refreshing it if needed.
+
+        The coordinated entry point — see the class docstring. Concurrent callers
+        arriving with an expired token perform exactly one refresh between them.
+        """
+        tokens = self._tokens
+        if tokens is not None and not tokens.expired:
+            return tokens.access_token
+
+        async with self._refresh_lock:
+            # Re-read under the lock. Whoever held it may have refreshed while we
+            # waited, in which case their token is good and redeeming again would
+            # present a refresh token B2C has already invalidated.
+            tokens = self._tokens
+            if tokens is not None and not tokens.expired:
+                return tokens.access_token
             await self.async_refresh()
-        assert self._tokens is not None
-        return self._tokens.access_token
+            assert self._tokens is not None
+            return self._tokens.access_token
