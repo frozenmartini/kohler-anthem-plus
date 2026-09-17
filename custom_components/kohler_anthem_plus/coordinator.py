@@ -2562,11 +2562,20 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         devices = [*self.valves, *self.controllers]
         if event == "cloud_failed":
-            _LOGGER.warning("Kohler cloud unavailable; automatic recovery is scheduled")
+            # Says only what is true from here. Which mechanism retries depends on when
+            # this fires: during setup Home Assistant discards this coordinator and retries
+            # `async_setup_entry`, so the recovery gate below never runs; in normal operation
+            # the gate is what retries. Claiming a specific one misled a session on
+            # 2026-09-17 into reading a routine startup retry as a stuck integration.
+            _LOGGER.warning("Kohler cloud is not responding; it will be retried automatically")
             for device in devices:
                 device.cloud_watch.transport_lost("cloud service unavailable")
         elif event == "cloud_recovered":
-            _LOGGER.info("Kohler cloud service recovered")
+            # WARNING, matching the onset above. `logger.default: warning` is the norm, and
+            # at INFO this never appeared — the log showed the problem and never the
+            # resolution, which is exactly what made the startup retries look unresolved.
+            # It can only fire after that warning, so it adds nothing to a healthy log.
+            _LOGGER.warning("Kohler cloud is responding again")
             for device in devices:
                 if device.cloud_watch.needs_reseed:
                     device.cloud_watch._request_check("cloud service returned", force=True)

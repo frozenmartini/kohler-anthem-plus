@@ -422,7 +422,8 @@ class AnthemMqttStream:
         if self._closing or not self.connected or client is not self._mqtt:
             return
         if self._recovery.since is not None:
-            _LOGGER.info("Kohler MQTT connection recovered")
+            # WARNING to match the "disconnected" onset; see the note in `coordinator.py`.
+            _LOGGER.warning("Kohler MQTT connection recovered")
         self._recovery.reset()
         self.last_error = None
         self.next_retry_at = None

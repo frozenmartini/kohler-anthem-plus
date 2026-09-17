@@ -353,7 +353,8 @@ class CloudConnectionWatch:
             self._retry_cancel = None
         if self._backoff.since is not None:
             self.journal("recovered")
-            _LOGGER.info("Kohler %s connectivity recovered", self._device.device_id)
+            # WARNING to match the "is unreachable" onset; see the note in `coordinator.py`.
+            _LOGGER.warning("Kohler %s connectivity recovered", self._device.device_id)
         self._backoff.reset()
         self._next_check = None
 
