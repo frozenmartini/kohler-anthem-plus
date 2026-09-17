@@ -537,10 +537,13 @@ for **both**. Filter on `payload.deviceid` and `payload.sku`.
 MQTT (re)connect**. A manual `homeassistant.update_entity` is the only other routine way in, and
 a warmup write reads `gcs-state` back up to three times to confirm itself.
 
-⚠️ **One more read exists, and it is still not a poll** — the cloud reachability check
-(`cloud_watch.py`). It is driven by two push events, never by a clock: the controller reporting
-a zone running while the valve stays silent for 60 s, or the valve going quiet for three hours.
-At most one read per thirty minutes either way. See §"Reachability" below.
+Connectivity is the deliberate exception: `cloud_watch.py` investigates a controller ON/valve
+silent contradiction after 60 seconds, or three hours of per-device silence. Healthy
+contradiction checks have a 30-minute cooldown. Detected outages/incomplete reconciliation
+use 1/2/5-minute recovery, slowing to 15 minutes after an hour and hourly after a day.
+The shared client gates cloud failures; each device retains an independent reachability
+verdict. Controller local fallback is a no-PIN version read, not a local control transport.
+See [connectivity behavior](user_guide.md#when-a-device-drops-off-the-cloud).
 
 | Call | Taken from it |
 |---|---|
@@ -549,7 +552,7 @@ At most one read per thirty minutes either way. See §"Reachability" below.
 | `GET /gcs-state/gcsadvancestate/{id}` | Per-outlet `minimumFlowrate` / `maximumFlowrate` / `maximumRuntime` → `OutletLimits`. This is what arms Endless Shower |
 | `GET /gcs-preset/{id}` | Preset id, title, `isExperience`. The raw payload is also handed to the preset-1 timer sync, which needs fields `apply_preset_list` discards |
 | `GET /hub-state/{id}` | Per-zone status/outlets/temperature/flowRate, `musicStateModel.status`, `hubSteamState.status`, `light[].status`, top-level `showerWarmUp` |
-| `GET /hub-configuration/{id}` | `parts` → which accessories are connected. **First seed only** — `hub_capabilities.known` latches it |
+| `GET /hub-configuration/{id}` | Installation capabilities latch at setup; physical valve-link status is refreshed on reconnect and connectivity investigations |
 | `GET /hub-experience/{id}/favorites` | The controller's favourite list — ids and titles |
 | `POST /platform/api/v1/mobile/settings` | IoT Hub host, device id and SAS credentials. Not state: this is what brings the stream up, and it runs on **every connect attempt** because the password is short-lived |
 
@@ -561,8 +564,8 @@ is set up as its own device).
 ### Reachability — the one fact neither transport volunteers
 
 **The valve drops off Kohler's cloud on its own and returns only on a power cycle.** While it is
-gone the controller, the account and the MQTT stream are all healthy, so nothing in the
-integration goes red and every valve entity simply freezes.
+gone the controller, the account and the MQTT stream can remain healthy. Historically valve
+entities simply froze; explicit device reachability now gates their operational availability.
 
 **MQTT can never report it.** Every message on that stream is published *by* the valve, so a
 disconnect is silence — and `GCS_SOLO_STS.IoTActive` reads `Active` in 1 020 of 1 020 captured
@@ -575,7 +578,7 @@ and the valve answered a command at the end of it — is **12 h 02 m**. The one 
 healthy overnight quiet, and every threshold quiet enough to live with misses it.
 
 So silence never decides anything here; it only decides **when to ask**. The answer always comes
-from `connectionState`, which is ground truth. Two push events ask:
+from device evidence, not an elapsed-time verdict. Two discovery conditions ask:
 
 | Trigger | Needs | Evidence |
 |---|---|---|
@@ -596,10 +599,9 @@ The remaining duplication is deliberate: the post-connect reseed repeats the set
 the broker replays nothing, so it is the only thing that closes the gap between the setup read
 and the stream existing.
 
-⚠️ **Nothing logs a successful seed.** Every debug line in `_async_seed_state` sits inside an
-`except` block, so this inventory is derived from the call sites, not measured on the wire. What
-*was* measured is the fold: the first refresh logs
-`Finished fetching kohler_anthem_plus data in 0.000 seconds`.
+Connectivity journals now record reconciliation start/completion/incomplete reads, separate
+from raw MQTT. Developer capture splits this into `connectivity_*.jsonl`; a user's active
+Report Log includes it alongside MQTT, cutoff and warmup records in the same episode.
 
 **Auth failures cannot escape setup.** Both reads `async_setup` awaits — the customer read and
 the seed — map `AuthUnavailable` → `ConfigEntryNotReady` (retry: Kohler was unreachable, the

@@ -70,7 +70,7 @@ class KohlerValveEntity(CoordinatorEntity[KohlerAnthemPlusCoordinator]):
 
     @property
     def available(self) -> bool:
-        return super().available
+        return super().available and self._valve.cloud_watch.operational
 
 
 class KohlerControllerEntity(CoordinatorEntity[KohlerAnthemPlusCoordinator]):
@@ -106,15 +106,5 @@ class KohlerControllerEntity(CoordinatorEntity[KohlerAnthemPlusCoordinator]):
 
     @property
     def available(self) -> bool:
-        """Available whenever the entry is — deliberately no freshness test.
-
-        Session 10 flagged that 18 hours of silence looks healthy here; closed 2026-08-22 as
-        designed. This integration is push-only, so silence is the normal state of an unused
-        shower — "no messages" means "no changes", not "no data" — and the REST reseed
-        refreshes controller state on every reconnect. A staleness timeout would mark a
-        healthy-but-quiet system unavailable on every calm day, and the one honest probe (the
-        local ping) was removed 2026-08-15 as the integration's only polling loop. The
-        controller's Last Update sensor is the freshness surface instead. See
-        `docs/hub/cloud_api.md` §5.1.
-        """
-        return super().available
+        """Usable only with live push transport and reconciled device state."""
+        return super().available and self._controller.cloud_watch.operational

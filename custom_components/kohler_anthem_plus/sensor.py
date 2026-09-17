@@ -428,6 +428,10 @@ class ControllerStatusSensor(KohlerControllerEntity, SensorEntity):
         self._attr_unique_id = f"{self._device_id}_status"
 
     @property
+    def available(self) -> bool:
+        return super().available and not self._controller.water_link_failed
+
+    @property
     def native_value(self) -> str | None:
         state = self._state
         if state is None:
@@ -484,6 +488,10 @@ class ControllerZoneTemperatureSensor(KohlerControllerEntity, SensorEntity):
         self._attr_native_unit_of_measurement = (
             UnitOfTemperature.FAHRENHEIT if fahrenheit else UnitOfTemperature.CELSIUS
         )
+
+    @property
+    def available(self) -> bool:
+        return super().available and not self._controller.water_link_failed
 
     @property
     def native_value(self) -> float | None:

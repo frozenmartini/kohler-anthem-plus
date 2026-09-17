@@ -343,16 +343,21 @@ all — the `OFF` reports sit before the water and during the pause). **Never us
 status as the authority for "is water running"** — that is the valve's own `GCS_SOLO_STS`
 outlet bits; the integration's safety guards already read the GCS side.
 
-**And the entities deliberately do nothing further about staleness — closed 2026-08-22,
-owner's decision.** Session 10 flagged that the controller's entities report `available` on
-the state object existing, so 18 hours of silence looks healthy. That stays as designed: this
-is a push-only integration, silence is the *normal* state of an unused shower ("no messages"
-means "no changes", not "no data"), the REST reseed refreshes hub state on every reconnect,
-and the one honest freshness probe — the local ping — was deliberately removed 2026-08-15 as
-the integration's only polling loop, along with its outage counter. An availability timeout
-would mark a healthy-but-quiet system unavailable on every calm day. The controller's **Last
-Update** sensor (`ControllerLastUpdateSensor`) is the freshness surface: it answers "how old
-is this" without pretending to know whether old means broken.
+**Availability and reachability (updated 2026-09-16).** Silence still is not an outage.
+Each controller has a three-hour quiet discovery timer. An explicit cloud disconnection,
+account transport failure or incomplete post-gap state reconciliation makes operational
+entities unavailable; diagnostic answers remain readable with stale/error metadata.
+
+The hidden **System Controller Reachable** diagnostic uses own MQTT/cloud evidence and,
+during a cloud failure, an optional no-PIN local version read. Local liveness does not enable
+cloud commands. The separate, disabled-by-default **Valve Connected to System Controller**
+diagnostic reads `configuration.parts.valve1` (and valve2 only once physically observed).
+These link values are runtime evidence, not static installation capabilities; read them on
+setup/reconnect and connectivity investigations. A HUB message alone cannot clear a link fault.
+
+Recovery reads follow 1/2/5-minute backoff, then 15 minutes after an hour and hourly after a day.
+See [connectivity behavior](../user_guide.md#when-a-device-drops-off-the-cloud) for availability,
+state reconciliation, long outages and logging.
 
 ### 5.2 `…/favorites`
 ```json

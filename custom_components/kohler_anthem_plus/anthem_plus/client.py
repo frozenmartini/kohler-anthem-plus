@@ -14,14 +14,17 @@ A request can therefore "succeed" with HTTP 200 and still have done nothing.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import time
 import uuid
 from typing import Any
 
 import aiohttp
 
-from .auth import AuthError, KohlerAuth
+from .auth import AuthError, AuthUnavailable, KohlerAuth
+from .connectivity import RecoveryBackoff, error_label
 from .models import OutletStateSource, resolve_outlet_source
 from .const import (
     API_BASE,
@@ -63,6 +66,14 @@ class DeviceOffline(KohlerError):
 
     Expected and transient — surface it gently rather than as a failure.
     """
+
+
+class CloudUnavailable(KohlerError):
+    """Shared cloud failure; callers must wait for the account's recovery gate."""
+
+    def __init__(self, retry_after: float = 0, status: int | None = None) -> None:
+        super().__init__("Kohler cloud is temporarily unavailable", status=status)
+        self.retry_after = retry_after
 
 
 class DeviceRunning(KohlerError):
@@ -198,6 +209,29 @@ class KohlerClient:
         self._session = session
         self._auth = auth
         self._tenant_id = tenant_id
+        self._cloud_backoff = RecoveryBackoff()
+        self._cloud_lock = asyncio.Lock()
+        self._auth_blocked = False
+        self._server_retry_until = 0.0
+        self._failure_epoch = 0
+        self.on_connectivity = None
+
+    @property
+    def cloud_available(self) -> bool:
+        return self._cloud_backoff.since is None and not self._auth_blocked
+
+    @property
+    def cloud_retry_delay(self) -> float:
+        return self._cloud_backoff.remaining
+
+    def request_recovery(self) -> None:
+        """A user-requested refresh may investigate a network failure immediately."""
+        if time.monotonic() >= self._server_retry_until:
+            self._cloud_backoff.due = None
+
+    def _connection_event(self, event: str, **fields: Any) -> None:
+        if self.on_connectivity is not None:
+            self.on_connectivity(event, **fields)
 
     @property
     def auth(self) -> KohlerAuth:
@@ -215,6 +249,68 @@ class KohlerClient:
         path: str,
         *,
         json_body: dict[str, Any] | None = None,
+        allow_retry: bool = True,
+    ) -> Any:
+        """Request once, with one shared recovery gate for every device and MQTT."""
+        if self._auth_blocked:
+            raise AuthError("Kohler reauthentication required")
+        recovering = self._cloud_backoff.since is not None
+        if recovering:
+            await self._cloud_lock.acquire()
+        epoch = self._failure_epoch
+        try:
+            if self._auth_blocked:
+                raise AuthError("Kohler reauthentication required")
+            if self._cloud_backoff.remaining:
+                raise CloudUnavailable(self._cloud_backoff.remaining)
+            try:
+                result = await self._async_request(
+                    method, path, json_body=json_body, allow_retry=allow_retry
+                )
+            except (CloudUnavailable, AuthUnavailable) as err:
+                first = self._cloud_backoff.since is None
+                # Requests already in flight when the first failure arrived must not
+                # accelerate backoff once per device. Only a new recovery probe does.
+                delay = self._cloud_backoff.remaining
+                if first or recovering:
+                    self._failure_epoch += 1
+                    delay = self._cloud_backoff.fail(minimum=getattr(err, "retry_after", 0))
+                if getattr(err, "retry_after", 0):
+                    self._server_retry_until = time.monotonic() + err.retry_after
+                    self._cloud_backoff.due = max(self._cloud_backoff.due or 0, self._server_retry_until)
+                self._connection_event(
+                    "cloud_failed" if first else "cloud_retry_failed",
+                    error=error_label(err), retry_in=delay,
+                )
+                raise
+            except DeviceOffline:
+                # The API answered successfully; its device verdict is a separate fact.
+                if self._cloud_backoff.since is not None and epoch == self._failure_epoch:
+                    self._cloud_backoff.reset()
+                    self._server_retry_until = 0.0
+                    self._connection_event("cloud_recovered")
+                device_id = (json_body or {}).get("deviceId") or path.rsplit("/", 1)[-1]
+                # Reads own their freshness checks. A delayed GET's 900 must not
+                # override a newer device push before the watcher can discard it.
+                if method.upper() != "GET":
+                    self._connection_event("device_offline", device_id=device_id)
+                raise
+            except AuthError:
+                if not self._auth_blocked:
+                    self._auth_blocked = True
+                    self._connection_event("auth_required")
+                raise
+            if self._cloud_backoff.since is not None and epoch == self._failure_epoch:
+                self._cloud_backoff.reset()
+                self._server_retry_until = 0.0
+                self._connection_event("cloud_recovered")
+            return result
+        finally:
+            if recovering:
+                self._cloud_lock.release()
+
+    async def _async_request(
+        self, method: str, path: str, *, json_body: dict[str, Any] | None = None,
         allow_retry: bool = True,
     ) -> Any:
         """Make an authenticated request, refreshing the token once on a 401."""
@@ -237,8 +333,21 @@ class KohlerClient:
             ) as resp:
                 text = await resp.text()
                 status = resp.status
-        except aiohttp.ClientError as err:
-            raise KohlerError(f"Network error calling {path}: {err}") from err
+                retry_header = getattr(resp, "headers", {}).get("Retry-After", "0")
+        except (aiohttp.ClientError, TimeoutError) as err:
+            raise CloudUnavailable() from err
+
+        if status == 429 or status >= 500:
+            try:
+                retry_after = max(0, float(retry_header))
+            except (TypeError, ValueError):
+                from email.utils import parsedate_to_datetime
+                import time
+                try:
+                    retry_after = max(0, parsedate_to_datetime(retry_header).timestamp() - time.time())
+                except (TypeError, ValueError, OverflowError):
+                    retry_after = 0
+            raise CloudUnavailable(retry_after, status)
 
         # A 401 usually means the access token aged out mid-flight; one retry with a
         # freshly minted token is enough. Retrying more would mask a real auth failure.
@@ -262,9 +371,11 @@ class KohlerClient:
             # previous one on every redeem, so two concurrent 401s left the loser
             # presenting a dead token and looking like a revoked account.
             self._auth.invalidate_access_token(token)
-            return await self.async_request(
+            return await self._async_request(
                 method, path, json_body=json_body, allow_retry=False
             )
+        if status == 401:
+            raise AuthError("Kohler rejected a freshly refreshed access token")
 
         payload: Any = None
         if text:

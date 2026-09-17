@@ -197,7 +197,8 @@ becomes `switch.anthem_plus_master_bath_shower` and `switch.anthem_valve_shower`
 | Entity | Device | What it does |
 |---|---|---|
 | `MQTT Connection` | both | Whether the push stream is connected — **our** link to Kohler |
-| `Cloud Connection` | valve | Whether **Kohler's cloud** can reach the valve. A different question, and the one behind "the app says my valve is offline" — see [When the valve drops off the cloud](#when-the-valve-drops-off-the-cloud) |
+| `Valve Reachable Online` / `System Controller Reachable` | respective device | Device reachability, separate from account MQTT — see [connectivity behavior](#when-a-device-drops-off-the-cloud) |
+| `Valve Connected to System Controller` | controller | Physical valve-port link; disabled and hidden by default |
 | `Last Update` | both | Timestamp of the most recent message |
 | `Report Log` | both | Switch; one-file bug-report capture — every raw MQTT message plus the integration's own decision records — see [The Report Log switch](#the-report-log-switch) |
 | `Zone N Hex` | valve | The current command word for that zone — copy it into `send_valve_hex` |
@@ -809,35 +810,69 @@ after a restart — not that anything is wrong.
 sensor on either device. Control is cloud-only, so an internet outage or a Kohler-side problem
 takes everything with it. The integration reconnects and reseeds from REST on its own.
 
-### When the valve drops off the cloud
+### When a device drops off the cloud
 
-**The Konnect app says the valve is offline, but Home Assistant looks fine.** These are
-different faults and it is worth knowing which you have. `MQTT Connection` reports *our* link
-to Kohler; the valve can vanish from Kohler's side while that stays green, and then every valve
-entity simply freezes at its last value with nothing to say so.
+Connectivity has separate meanings: our account-level MQTT stream, each device's cloud
+reachability, and the physical valve link reported by its controller. One working link does
+not prove the others are working.
 
-`Cloud Connection` on the Anthem Valve device is the answer to that. It reports what Kohler's
-cloud believes about the valve, and it is **on**, **off**, or **unknown** (not yet checked — a
-failed check leaves the previous answer alone rather than inventing an outage; look at the
-`last_error` attribute).
+| Diagnostic | Default | Meaning |
+|---|---|---|
+| MQTT Connection (both devices) | Enabled, hidden | Our shared push subscription is connected |
+| Valve Reachable Online | Enabled, hidden | Cloud or this valve's own MQTT reports it reachable |
+| System Controller Reachable | Enabled, hidden | Cloud/own MQTT, or a successful no-PIN local liveness check |
+| Valve Connected to System Controller | Disabled, hidden | The controller's physical valve-port link |
+| Valve 2 Connected to System Controller | Disabled, hidden | Created only after a second physical valve port has actually reported connected; retained thereafter |
 
-It is **hidden by default**, not disabled: it keeps running and keeps its history whether or
-not you are looking at it. To put it on a dashboard, open the Anthem Valve device, show hidden
-entities, and clear the hidden flag.
+All are diagnostic entities. Their names can change without changing existing unique IDs.
+Disabling a diagnostic does not disable recovery: the coordinator owns the watches.
 
-**It is not polled.** The integration asks Kohler only when there is a reason to:
+Normal operation remains push-driven, with no routine state polling. Three hours without
+a device message triggers one reachability check; silence itself never means offline.
+A controller reporting water ON without a valve message for a minute can also trigger a
+valve check (healthy contradiction checks have a 30-minute cooldown).
 
-* the controller reports a zone running while the valve says nothing for a minute — the
-  signature of a valve that is working at the wall but gone from the cloud; or
-* the valve has said nothing at all for three hours.
+An explicit disconnected cloud answer or device-offline command response makes that device's
+controls and operational readings unavailable. A failed API request instead preserves the
+last diagnostic answer with `stale`/`last_error`, or unknown if none exists. MQTT loss
+makes cloud-controlled operational entities unavailable across the account. Diagnostic
+answers and Home Assistant-owned preferences remain accessible.
 
-At most one check every thirty minutes either way. The `checked_because` and `last_checked`
-attributes say which reason fired and when.
+Recovery checks run after **1 minute, then 2 minutes, then every 5 minutes**. After an hour
+they slow to every 15 minutes; after a day, hourly. MQTT gets one immediate reconnect
+attempt before that backoff. Cloud failures share an account recovery gate, and server
+`Retry-After` is respected. A device push or manual refresh can accelerate recovery.
+There is one onset/recovery log message and a long-outage informational message, not a
+warning every attempt. Rejected account credentials suspend retries and request reauthentication.
 
-**If it says off:** the valve is still working from its own touchscreen — this is a cloud
-problem, not a plumbing one. Nothing in Home Assistant can bring it back; the valve needs to be
-power-cycled at the outlet. It returns on its own once that happens, and the integration picks
-it up from the valve's `DEVICE_REBOOT_STS` announcement without any further action.
+For a controller cloud failure, one local `get_hub_version_info` read can distinguish
+a locally alive controller from an unreachable one. It uses an unambiguous discovered
+`.local` hostname (the default only on a single-controller account), a three-second timeout,
+and no redirects. **No PIN, sign-in, local control or configuration write is involved.**
+Local success does not make cloud controls available. Physical-link failures do not disable
+unrelated controller music/light/steam readings; no controller-to-cloud-valve mapping is guessed.
+
+On return, the integration reads current state and required metadata before restoring control.
+Incomplete reads retry. Newer device pushes win over older REST responses. Normal commands
+are never queued or replayed; old custom-shower resumes and cutoff restart tasks are canceled,
+and session timing/masks are forgotten. An explicit stop is still attempted best-effort,
+but no cloud integration can guarantee delivery during an outage.
+
+Warmup Auto-Restore is the limited exception for a **setting**, never a water-start command:
+a previously eligible pending restore survives disconnection/restart. It waits for confirmed
+disabled warmup plus fresh idle state, then its normal 60-second delay and read-back. A
+running shower waits for a fresh idle event, without polling solely for that purpose.
+An intentional Home Assistant disable or switching Auto-Restore off cancels the pending
+intent. A remembered mode alone does not create a new restore on startup.
+
+For a broken device awaiting repair, leaving the integration enabled costs only hourly checks
+after the first day. There is no automatic disable or repeated repair nag. You may disable the
+whole integration from Settings if none of its devices are needed; that also disables its
+healthy devices and automations.
+
+The Report Log switch includes connectivity events in the same capture episode as raw MQTT
+and the other decision trails until switched off. Restart continues that episode; normal size
+limits create continuation parts. Enabling it mid-outage records the current baseline.
 
 **Home Assistant keeps asking me to sign in again.** Kohler's identity provider rotates the
 refresh token on every use. If another tool is refreshing the same grant, it invalidates the

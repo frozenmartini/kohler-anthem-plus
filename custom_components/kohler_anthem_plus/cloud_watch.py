@@ -1,415 +1,426 @@
-"""Cloud reachability for the Anthem valve — the one fact MQTT cannot carry.
-
-# =====================================================================
-# CLOUD CONNECTION WATCH
-# =====================================================================
-#
-#     grep -rn "CLOUD CONNECTION WATCH" custom_components/kohler_anthem_plus/
-#
-# That finds this module, the constants in `const.py`, the wiring in `coordinator.py`, and
-# the entity in `binary_sensor.py`.
-#
-# =====================================================================
-
-## The problem
-
-The GCS valve drops off Kohler's cloud on its own, at random, and comes back only when it is
-physically power-cycled. While it is gone the Konnect app shows it as cut off, Home Assistant
-shows nothing at all, and the valve keeps working perfectly from the wall.
-
-**MQTT cannot report this, ever.** Every message on that stream is published *by* the valve,
-so a disconnect is silence — and the valve is silent most of the time anyway, because the
-channel is event-driven. `GCS_SOLO_STS.IoTActive` looks purpose-built for the job and is
-useless for the same reason: it read `Active` in 1 020 of 1 020 captured samples, because a
-disconnected device cannot publish a message saying so.
-
-## Why there is no silence threshold, and why this module does not use one
-
-Measured across a 19-day capture corpus (2026-08-07 → 08-26):
-
-===========================================================  ===========
-Longest GCS silence provably benign (capture never stopped,
-no reboot, valve answered a command at the end of it)          12 h 02 m
-Longest benign silence observed at all                         35 h 49 m
-The one real outage                                            12 h 22 m
-===========================================================  ===========
-
-The outage is **20 minutes longer than a known-good idle period**. Any threshold low enough
-to catch it fires constantly on healthy quiet, and any threshold high enough to be quiet
-misses it. So neither trigger below decides anything from silence. **Silence only decides
-when to ask.** The answer always comes from `connectionState`, which is ground truth.
-
-## The two triggers
-
-**A — contradiction (needs a HUB).** The controller reports a zone `ON` while the valve says
-nothing. This is the only signal in the corpus that separated the outage from 18 healthy
-days: of 437 zone-`ON` `SHOWER_VALVE_STS` messages, 435 had a valve message within 60 s, and
-**the only 2 that did not are the outage itself** — zero false positives over 435 healthy
-samples. It fires within a minute rather than hours, and costs no network traffic to detect.
-
-⚠️ **Zone `ON` only.** An all-`OFF` card gets republished with no valve action at all: the
-controller emits its whole card set (`MUSIC_STS` + `SHOWER_VALVE_STS` + `STEAM_STS` +
-`FAVORITE_STS` + `LIGHT_STS`) in one second during favourite activity, and every
-`SHOWER_VALVE_STS` in the captured favourite bursts reads `z1:OFF z2:OFF`. The valve owes no
-reply to an unchanged OFF card, so a missing valve message there means nothing. The `OFF`
-variant is not merely noisier — it is evidentially empty.
-
-**B — prolonged quiet (any account with a valve).** Trigger A can only see an outage the
-controller happens to be awake for; measured against the corpus that is 36 % of all silence
-time, and a GCS-only account has no controller at all. So after
-:data:`CLOUD_CHECK_QUIET_SECONDS` with no valve message, ask once, then keep asking on that
-interval while the quiet continues.
-
-## What this is not
-
-**It is not a polling loop.** `SCAN_INTERVAL` stays `None`; nothing here runs on a clock while
-the valve is talking. Trigger A is driven by an arriving message. Trigger B's timer is reset
-by every valve message, so on a normal day it never reaches its deadline — and when it does,
-it is because the thing it watches has actually stopped.
-
-## The earlier `Connection` sensor, and why this is not a repeat of it
-
-An entity reporting `connectionState` existed once and was **deliberately removed** (see
-`binary_sensor.py`). Its stated faults were that it was a fact about the plumbing rather than
-the integration, that it *had no push source so it went stale as soon as polling was removed*,
-and that a valve dropping off the cloud is fixed in the Konnect app rather than here.
-
-The middle one was the real objection and it is the one this module answers: the field still
-has no push source, so instead of polling it, **two push-driven events decide when to read
-it**. The other two did not survive contact with 2026-08-26 — the owner needed exactly this
-fact, and the app is where the problem *appeared*, not where it got fixed. It took a power
-cycle.
-"""
-
+"""Event-driven reachability with bounded recovery reads, never silence verdicts."""
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
+import uuid
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
+import aiohttp
 from homeassistant.core import callback
 from homeassistant.helpers.event import async_call_later
 
-from .anthem_plus import AuthError, KohlerError
+from .anthem_plus import AuthError, AuthUnavailable, DeviceOffline, KohlerError
+from .anthem_plus.connectivity import RecoveryBackoff, error_label, local_hostname
 from .anthem_plus.const import MSG_HUB_SHOWER_VALVE
-from .const import (
-    CLOUD_CHECK_COOLDOWN_SECONDS,
-    CLOUD_CHECK_PAIR_WINDOW_SECONDS,
-    CLOUD_CHECK_QUIET_SECONDS,
-)
-
-if TYPE_CHECKING:  # pragma: no cover - typing only
-    from .anthem_plus.mqtt import Envelope
-    from .coordinator import KohlerAnthemPlusCoordinator, Valve
+from .const import CLOUD_CHECK_COOLDOWN_SECONDS, CLOUD_CHECK_PAIR_WINDOW_SECONDS, CLOUD_CHECK_QUIET_SECONDS
 
 _LOGGER = logging.getLogger(__name__)
-
-#: The value Kohler's cloud reports for a reachable device. Compared case-insensitively —
-#: only ``"Connected"`` has ever been observed, and the negative value is **unconfirmed**,
-#: which is why this matches the positive rather than testing for a guessed negative.
 CONNECTED = "connected"
 
 
 def _utc_iso(stamp: float | None) -> str | None:
-    """Wall-clock seconds to the ISO-8601 Z form the journals and raw capture use."""
-    if stamp is None:
-        return None
-    return datetime.fromtimestamp(stamp, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+    return None if stamp is None else datetime.fromtimestamp(stamp, timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 class CloudConnectionWatch:
-    """Decides when to ask Kohler whether the valve is still reachable, and remembers.
+    """One device's cloud verdict; HUBs also have local and valve-link evidence."""
 
-    One instance per valve, owned by its :class:`~.coordinator.Valve` — it is that valve's
-    reachability it reports. Trigger A is wired only when the account also has a
-    controller.
-
-    **Nothing here ever changes valve state.** The only network call is a GET of
-    ``gcs-state``, and its payload is deliberately *not* fed to :class:`GcsState` — see
-    :meth:`_async_check`.
-    """
-
-    def __init__(
-        self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve
-    ) -> None:
+    def __init__(self, coordinator: Any, device: Any, *, controller: bool = False) -> None:
         self._coordinator = coordinator
-        self._valve = valve
+        self._device = device
         self._hass = coordinator.hass
-
-        # Answer state. `_connected` is None until the first successful read: "we have not
-        # asked" and "it said no" are different answers and must not render the same.
+        self._is_controller = controller
+        self._state_endpoint = "hub-state" if controller else "gcs-state"
+        self._device_label = "controller" if controller else "valve"
         self._connected: bool | None = None
+        self._local: bool | None = None
         self._reported: str | None = None
         self._checked_at: float | None = None
         self._trigger: str | None = None
-        self._checks = 0
         self._last_error: str | None = None
-        # Present only if Kohler returns it for the valve. `hub-state` carries it; whether
-        # `gcs-state` does is an open question, so this surfaces the answer the first time a
-        # real read happens rather than waiting for someone to probe it by hand.
-        self._last_connected_epoch: Any = None
-
-        # Clocks. Monotonic for every interval decision, so a system clock step cannot make
-        # the valve look absent or suppress a check.
-        self._last_gcs_at: float | None = None
+        self._stale = True
+        self._last_device_at: float | None = None
         self._last_check_at: float | None = None
-
-        self._pair_cancel: Any = None
-        self._quiet_cancel: Any = None
-        self._task: Any = None
+        self._generation = 0
+        self.state_ready = False
+        self.warmup_ready = False
+        self.favorite_ready = False
+        self.needs_reseed = True
+        self.hostname: str | None = None
+        self.links: dict[int, bool | None] = {1: None}
+        self.links_stale = True
+        self.link_error: str | None = None
+        self.links_checked: float | None = None
+        self._backoff = RecoveryBackoff()
+        self._next_check: float | None = None
+        self._pending_check: str | None = None
+        self._pair_cancel = self._quiet_cancel = self._retry_cancel = None
+        self._task: asyncio.Task | None = None
         self._stopped = False
+        self._auth_blocked = False
 
-    # ------------------------------------------------------------------ #
-    # What entities read
-    # ------------------------------------------------------------------ #
     @property
-    def connected(self) -> bool | None:
-        """True/False from the last successful read, None before there has been one.
-
-        A failed read does **not** move this. "We could not reach Kohler" is a different
-        fault from "Kohler cannot reach the valve", and collapsing them would report the
-        valve offline every time the WAN hiccups.
-        """
+    def cloud_connected(self) -> bool | None:
         return self._connected
 
     @property
+    def connected(self) -> bool | None:
+        if self._is_controller and self._local is True:
+            return True
+        return self._connected
+
+    @property
+    def operational(self) -> bool:
+        stream = self._coordinator.stream
+        return bool(
+            not self._stopped and not self._auth_blocked
+            and stream and stream.connected and self._connected is True
+            and not self._stale and self.state_ready
+            and getattr(self._coordinator.client, "cloud_available", True)
+        )
+
+    @property
     def attributes(self) -> dict[str, Any]:
-        """Everything needed to judge how much the boolean above is worth."""
-        now = time.monotonic()
-        quiet_for = None if self._last_gcs_at is None else round(now - self._last_gcs_at, 1)
         return {
-            "connection_state": self._reported,
+            "cloud_connection": self._reported,
+            "answer_source": "local" if self._is_controller and self._local is True else self._trigger,
             "last_checked": _utc_iso(self._checked_at),
-            "checked_because": self._trigger,
-            "checks": self._checks,
+            "stale": self._stale and self._local is not True,
             "last_error": self._last_error,
-            "cloud_last_connected": self._last_connected_epoch,
-            "seconds_since_valve_message": quiet_for,
-            "contradiction_watch": bool(self._coordinator.controllers),
+            "next_check": _utc_iso(self._next_check),
         }
 
-    # ------------------------------------------------------------------ #
-    # Lifecycle
-    # ------------------------------------------------------------------ #
+    def journal(self, event: str, **fields: Any) -> None:
+        fn = getattr(self._coordinator, "connectivity_event", None)
+        if fn:
+            fn(event, device_id=self._device.device_id, device_kind=self._device_label, **fields)
+
+    def _notify(self) -> None:
+        if not self._stopped:
+            self._coordinator.async_refresh_entities()
+
     def async_start(self) -> None:
-        """Arm the quiet timer. Idempotent — safe to call again on every reconnect."""
         self._stopped = False
         self._arm_quiet_timer()
+        if self._connected is False or self._last_error or self.needs_reseed:
+            self._schedule_retry()
 
     def async_stop(self) -> None:
-        """Cancel every pending timer and in-flight read. Called from entry unload."""
         self._stopped = True
-        for cancel in (self._pair_cancel, self._quiet_cancel):
-            if cancel is not None:
+        self._next_check = self._pending_check = None
+        for name in ("_pair_cancel", "_quiet_cancel", "_retry_cancel"):
+            cancel = getattr(self, name)
+            if cancel:
                 cancel()
-        self._pair_cancel = None
-        self._quiet_cancel = None
-        if self._task is not None and not self._task.done():
+            setattr(self, name, None)
+        if self._task and not self._task.done():
             self._task.cancel()
-        self._task = None
 
-    # ------------------------------------------------------------------ #
-    # Push — fed from the coordinator's envelope handler
-    # ------------------------------------------------------------------ #
+    def _invalidate(self, reason: str) -> None:
+        self.state_ready = False
+        self.warmup_ready = False
+        self.favorite_ready = False
+        self.needs_reseed = True
+        fn = getattr(self._device, "connectivity_lost", None)
+        if fn:
+            fn(reason)
+
+    def transport_lost(self, reason: str) -> None:
+        self._generation += 1
+        self._stale = True
+        self._local = None
+        self.links_stale = True
+        self._last_error = reason
+        self._invalidate(reason)
+        self._schedule_retry()
+        self._notify()
+
+    def auth_required(self) -> None:
+        self._auth_blocked = True
+        self.transport_lost("reauthentication required")
+        if self._retry_cancel:
+            self._retry_cancel()
+            self._retry_cancel = None
+        self._next_check = None
+
+    def note_offline(self, reason: str = "device reported offline") -> None:
+        first = self._connected is not False
+        self._generation += 1
+        self._connected = False
+        self._reported = "Disconnected"
+        self._stale = False
+        self._last_error = None
+        self._local = None
+        self._checked_at = time.time()
+        self._trigger = reason
+        self._invalidate(reason)
+        if first:
+            _LOGGER.warning("Kohler %s %s is unreachable through the cloud", self._device_label, self._device.device_id)
+            self.journal("device_disconnected", reason=reason)
+        self._schedule_retry()
+        self._notify()
+
+    def _note_device_message(self) -> None:
+        returning = self._connected is not True or self._stale or self.needs_reseed
+        self._generation += 1
+        self._last_device_at = time.monotonic()
+        self._connected = True
+        self._reported = "Connected"
+        self._local = None
+        self._stale = False
+        self._last_error = None
+        self._trigger = "mqtt"
+        self._checked_at = time.time()
+        self._arm_quiet_timer()
+        if returning:
+            self.journal("device_returned", source="mqtt")
+            recovery = getattr(self._coordinator.client, "request_recovery", None)
+            if recovery:
+                recovery()
+            self._request_check("MQTT recovery", force=True)
+        self._notify()
+
     def note_gcs_message(self) -> None:
-        """A valve message arrived: it is reachable, by definition.
-
-        This is the cheapest possible confirmation and it is why the module costs nothing on
-        an active day. It also settles any pending contradiction — a valve message inside the
-        pair window is exactly what trigger A was waiting to see.
-        """
-        self._last_gcs_at = time.monotonic()
-        if self._pair_cancel is not None:
+        self._note_device_message()
+        if self._pair_cancel:
             self._pair_cancel()
             self._pair_cancel = None
-        self._arm_quiet_timer()
 
-    def note_hub_envelope(self, envelope: Envelope) -> None:
-        """Trigger A. Only ``SHOWER_VALVE_STS`` with a zone ``ON`` is evidence."""
-        if envelope.code != MSG_HUB_SHOWER_VALVE:
-            return
-        if not any(
-            isinstance(item, dict) and item.get("status") == "ON"
-            for item in envelope.attributes
-        ):
-            # An all-OFF card is republished without the valve doing anything. See the module
-            # docstring: this is not a weaker signal, it is not a signal.
-            return
-        now = time.monotonic()
-        if self._last_gcs_at is not None and now - self._last_gcs_at <= (
-            CLOUD_CHECK_PAIR_WINDOW_SECONDS
-        ):
-            # Already paired by a valve message in the window's trailing half.
-            return
-        if self._pair_cancel is not None:
-            # A check is already pending for an earlier report in the same shower.
-            return
-        _LOGGER.debug(
-            "Controller reports a zone ON with no valve message in %.0fs; watching for %.0fs",
-            CLOUD_CHECK_PAIR_WINDOW_SECONDS,
-            CLOUD_CHECK_PAIR_WINDOW_SECONDS,
-        )
-        self._pair_cancel = async_call_later(
-            self._hass, CLOUD_CHECK_PAIR_WINDOW_SECONDS, self._pair_window_elapsed
-        )
+    def note_hub_message(self) -> None:
+        self._note_device_message()
 
-    # ------------------------------------------------------------------ #
-    # Timers
-    # ------------------------------------------------------------------ #
-    #
-    # ⚠️ **Both handlers below MUST carry `@callback`, and it is load-bearing, not style.**
-    #
-    # `async_call_later` wraps a bare callable in a `HassJob`, and `HassJob` infers its type
-    # from the callable: a coroutine function runs on the loop, a function marked `@callback`
-    # runs on the loop, and **anything else is classified `HassJobType.Executor` and dispatched
-    # to a worker thread** (`homeassistant/core.py`, `get_hassjob_callable_job_type`). Nothing
-    # warns about it — the handler simply runs on the wrong thread.
-    #
-    # That is fatal here rather than merely untidy, because `_request_check` ends in
-    # `hass.async_create_task`, which raises for a custom integration the moment it sees a
-    # foreign thread id. The raise escapes `_quiet_elapsed` **before** its closing
-    # `_arm_quiet_timer()`, so trigger B does not just miss one check — it fires once and then
-    # never re-arms for the life of the coordinator.
-    #
-    # Shipped that way in v0.2.6 and found in session 22: across 45 h and an 11 h 44 m valve
-    # silence, `checked_because` was "REST seed" in 120 of 120 recorded states. Neither trigger
-    # had ever fired. `select.py` had the decorator on its own `async_call_later` handler all
-    # along; this module was written without it.
+    def note_hub_envelope(self, envelope: Any) -> None:
+        if self._is_controller or envelope.code != MSG_HUB_SHOWER_VALVE:
+            return
+        if not any(isinstance(a, dict) and a.get("status") == "ON" for a in envelope.attributes):
+            return
+        if self._last_device_at is not None and time.monotonic() - self._last_device_at <= CLOUD_CHECK_PAIR_WINDOW_SECONDS:
+            return
+        if self._pair_cancel is None:
+            self._pair_cancel = async_call_later(self._hass, CLOUD_CHECK_PAIR_WINDOW_SECONDS, self._pair_window_elapsed)
+
     @callback
     def _pair_window_elapsed(self, _now: Any) -> None:
-        """The full ±window passed with no valve message. Ask the cloud."""
         self._pair_cancel = None
         self._request_check("controller reported a zone ON, valve silent")
 
     def _arm_quiet_timer(self) -> None:
-        """(Re)start trigger B's countdown. Every valve message pushes it back."""
         if self._stopped:
             return
-        if self._quiet_cancel is not None:
+        if self._quiet_cancel:
             self._quiet_cancel()
-        self._quiet_cancel = async_call_later(
-            self._hass, CLOUD_CHECK_QUIET_SECONDS, self._quiet_elapsed
-        )
+        self._quiet_cancel = async_call_later(self._hass, CLOUD_CHECK_QUIET_SECONDS, self._quiet_elapsed)
 
     @callback
     def _quiet_elapsed(self, _now: Any) -> None:
-        """Trigger B. Ask, then keep the interval running while the quiet continues."""
         self._quiet_cancel = None
-        self._request_check(
-            f"no valve message for {CLOUD_CHECK_QUIET_SECONDS / 3600:.0f}h"
-        )
-        # Re-armed unconditionally, including when the check was skipped or failed: the point
-        # of trigger B is that it keeps asking while the valve stays quiet.
+        if self._retry_cancel is None:
+            self._request_check(f"three hours without a {self._device_label} message")
         self._arm_quiet_timer()
 
-    # ------------------------------------------------------------------ #
-    # The read
-    # ------------------------------------------------------------------ #
-    def _request_check(self, trigger: str) -> None:
-        """Apply the guards, then spawn the read. Never blocks the caller."""
-        if self._stopped:
+    def _schedule_retry(self) -> None:
+        if self._stopped or self._auth_blocked or self._retry_cancel:
             return
+        delay = self._backoff.fail(minimum=getattr(self._coordinator.client, "cloud_retry_delay", 0))
+        if not self._backoff.long_reported and time.monotonic() - self._backoff.since >= 86400:
+            self._backoff.long_reported = True
+            _LOGGER.info("Kohler %s remains unavailable; checking hourly", self._device.device_id)
+            self.journal("long_outage", retry_in=delay)
+        self.journal("retry_scheduled", retry_in=delay)
+        self._next_check = time.time() + delay
+        self._retry_cancel = async_call_later(self._hass, delay, self._retry_elapsed)
 
-        stream = self._coordinator.stream
-        if stream is None or not stream.connected:
-            # Our own stream is down, so the valve's silence is ours, not its. The reconnect
-            # path already reseeds from REST; asking here would report our outage as the
-            # valve's.
-            _LOGGER.debug("Cloud check skipped (%s): our MQTT stream is down", trigger)
+    @callback
+    def _retry_elapsed(self, _now: Any) -> None:
+        self._retry_cancel = None
+        self._next_check = None
+        self._request_check("recovery check", force=True)
+
+    def _request_check(self, trigger: str, *, force: bool = False) -> None:
+        if self._stopped or self._auth_blocked:
             return
-
+        if self._task and not self._task.done():
+            if force and trigger in ("MQTT recovery", "cloud service returned"):
+                self._pending_check = trigger
+            return
         now = time.monotonic()
-        if (
-            self._last_check_at is not None
-            and now - self._last_check_at < CLOUD_CHECK_COOLDOWN_SECONDS
-        ):
-            _LOGGER.debug(
-                "Cloud check skipped (%s): %.0fs since the last one, cooldown is %.0fs",
-                trigger,
-                now - self._last_check_at,
-                CLOUD_CHECK_COOLDOWN_SECONDS,
-            )
+        if not force and self._last_check_at is not None and now - self._last_check_at < CLOUD_CHECK_COOLDOWN_SECONDS:
             return
-
         self._last_check_at = now
-        if self._task is not None and not self._task.done():
-            return
         self._task = self._hass.async_create_task(self._async_check(trigger))
+        self._task.add_done_callback(self._check_done)
+
+    def _check_done(self, task: asyncio.Task) -> None:
+        if not task.cancelled() and task.exception() is not None:
+            _LOGGER.error("Kohler connectivity check failed unexpectedly: %s", error_label(task.exception()))
+        trigger, self._pending_check = self._pending_check, None
+        if trigger and self.needs_reseed:
+            self._request_check(trigger, force=True)
+
+    async def async_check_now(self, trigger: str = "manual refresh") -> None:
+        self._request_check(trigger, force=True)
+        if self._task:
+            await self._task
+
+    async def _async_local_probe(self) -> None:
+        generation = self._generation
+        controllers = self._coordinator.controllers
+        hostname = self.hostname or ("kohler-myshower.local" if len(controllers) == 1 else None)
+        if not hostname or sum(1 for c in controllers if getattr(getattr(c, "cloud_watch", None), "hostname", None) == hostname) > 1:
+            self._local = None
+            self.journal("local_probe_skipped", reason="no unambiguous local hostname")
+            return
+        try:
+            session = getattr(self._coordinator.client, "_session", None)
+            if session is None or getattr(session, "closed", False):
+                self._local = None
+                self.journal("local_probe_skipped", reason="HTTP session unavailable")
+                return
+            async with session.get(
+                f"http://{hostname}/web/api/v1/device/get_hub_version_info",
+                timeout=aiohttp.ClientTimeout(total=3), allow_redirects=False,
+                headers={"Content-Type": "application/json", "random_uuid": str(uuid.uuid4())},
+            ) as response:
+                if response.status != 200:
+                    raise ValueError("local status")
+                payload = await response.json()
+                reachable = isinstance(payload, dict) and isinstance(payload.get("version"), str) and bool(payload["version"].strip())
+        except (aiohttp.ClientError, TimeoutError, ValueError, RuntimeError):
+            reachable = False
+        if generation != self._generation or self._stopped:
+            return
+        self._local = reachable
+        if reachable:
+            self._checked_at = time.time()
+        self.journal("local_probe_result", reachable=self._local)
 
     async def _async_check(self, trigger: str) -> None:
-        """One GET of ``gcs-state``, read for ``connectionState`` and nothing else.
-
-        ⚠️ **The payload is deliberately not applied to :class:`GcsState`.** It would be free
-        state, but `apply_rest_state` feeds the warmup-change machinery, and this runs
-        unattended at arbitrary hours — including 3 a.m. on trigger B. A reachability check
-        must not be able to start a warmup restore as a side effect. The reseed paths that
-        *are* meant to apply state still do.
-        """
-        device = self._valve.gcs_device
+        generation = self._generation
+        self.journal("check_started", reason=trigger)
         try:
-            payload = await self._coordinator.client.async_get_gcs_state(device.device_id)
-        except (AuthError, KohlerError) as err:
-            # Explicitly not a verdict about the valve. `_connected` keeps its previous value.
-            self._last_error = f"{type(err).__name__}: {err}"
-            _LOGGER.debug("Cloud check (%s) could not reach Kohler: %s", trigger, err)
-            self._coordinator.async_refresh_entities()
-            return
+            getter = self._coordinator.client.async_get_hub_state if self._is_controller else self._coordinator.client.async_get_gcs_state
+            payload = await getter(self._device.device_id)
+            if generation != self._generation or self._stopped:
+                self.journal("check_superseded", reason="newer device evidence")
+                return
+            self.note_rest_payload(payload, trigger, notify=False)
+            if self._connected is True and self.needs_reseed:
+                apply = getattr(self._coordinator, "async_reconcile_device", None)
+                if apply:
+                    await apply(self._device, payload, generation)
+            if self._is_controller:
+                if self._connected is True:
+                    await self.async_read_links()
+                else:
+                    self.links_stale = True
+        except DeviceOffline:
+            if generation == self._generation and not self._stopped:
+                self.note_offline()
+        except AuthError as err:
+            if not isinstance(err, AuthUnavailable):
+                self.auth_required()
+                handler = getattr(self._coordinator, "_handle_auth_error", None)
+                if handler:
+                    handler(err)
+            else:
+                self._read_failed(err)
+        except (KohlerError, TimeoutError, aiohttp.ClientError) as err:
+            self._read_failed(err)
+        finally:
+            if not self._stopped and not self._auth_blocked:
+                if self._is_controller and (self._connected is not True or self._stale):
+                    await self._async_local_probe()
+                unresolved = self._connected is not True or self._stale or self.needs_reseed
+                unresolved |= self._is_controller and (self.links_stale or any(v is False for v in self.links.values()))
+                if unresolved:
+                    self._schedule_retry()
+                else:
+                    self._recovered()
+                self._notify()
 
-        self.note_rest_payload(payload, trigger)
+    def _read_failed(self, err: BaseException) -> None:
+        self._last_error = error_label(err)
+        self._stale = True
+        self._invalidate(self._last_error)
+        self.journal("check_failed", error=self._last_error)
 
-    def note_rest_payload(
-        self, payload: Any, trigger: str, *, notify: bool = True
-    ) -> None:
-        """Take the answer out of a ``gcs-state`` payload somebody else already fetched.
+    def _recovered(self) -> None:
+        if self._retry_cancel:
+            self._retry_cancel()
+            self._retry_cancel = None
+        if self._backoff.since is not None:
+            self.journal("recovered")
+            _LOGGER.info("Kohler %s connectivity recovered", self._device.device_id)
+        self._backoff.reset()
+        self._next_check = None
 
-        **This is the cheap path and it is the important one.** The integration reads
-        ``gcs-state`` at setup, on every MQTT reconnect, on a manual ``update_entity``, and on
-        every warmup write — four places, all of which had this field in hand and dropped it,
-        because `GcsState.apply_rest_state` starts at ``payload["state"]`` and never looks at
-        its siblings. Routing those reads through here means the sensor has a real value from
-        the moment the integration starts, instead of sitting at ``unknown`` until one of the
-        two triggers happens to fire — which on a quiet account is up to three hours.
-
-        These calls cost **nothing**: the request was already made and paid for. They do not
-        touch the cooldown, which governs only reads this module initiates — a free answer
-        must never be able to suppress an investigation, because the valve can be Connected at
-        one moment and gone two minutes later. That is the whole failure mode.
-
-        ``notify`` is False for the setup seed, which pushes its own snapshot immediately
-        afterwards and must not notify listeners before the platforms exist.
-        """
-        reported = (payload or {}).get("connectionState")
-        self._reported = None if reported is None else str(reported)
-        self._last_connected_epoch = (payload or {}).get("lastConnected")
-        self._checked_at = time.time()
-        self._trigger = trigger
-        self._checks += 1
-        self._last_error = None
-
-        if reported is None:
-            # The field is documented and observed, so its absence is worth saying out loud
-            # rather than silently reading as "not connected".
-            self._last_error = "gcs-state carried no connectionState field"
-            _LOGGER.warning(
-                "Kohler gcs-state returned no connectionState; cannot judge reachability"
-            )
-            if notify:
-                self._coordinator.async_refresh_entities()
-            return
-
-        was = self._connected
-        self._connected = str(reported).strip().lower() == CONNECTED
-        if self._connected:
-            _LOGGER.debug("Cloud check (%s): valve reachable (%s)", trigger, reported)
-        elif was is not False:
-            # Once per transition, at WARNING: this is the condition the module exists for and
-            # the user cannot see it anywhere else.
-            _LOGGER.warning(
-                "Kohler's cloud reports the Anthem valve as %s — checked because %s. "
-                "This clears on a power cycle of the valve, not from Home Assistant.",
-                reported,
-                trigger,
-            )
+    def note_rest_payload(self, payload: Any, trigger: str, *, notify: bool = True) -> None:
+        reported = payload.get("connectionState") if isinstance(payload, dict) else None
+        if not isinstance(reported, str) or not reported.strip():
+            self._last_error = f"{self._state_endpoint} carried no connectionState field"
+            self._stale = True
+            self._schedule_retry()
+        elif reported.lower() != CONNECTED:
+            self.note_offline(trigger)
+            self._reported = reported
+        else:
+            self._connected = True
+            self._reported = reported
+            self._checked_at = time.time()
+            self._trigger = "cloud"
+            self._local = None
+            self._stale = False
+            self._last_error = None
         if notify:
-            self._coordinator.async_refresh_entities()
+            self._notify()
+
+    async def async_read_links(self) -> None:
+        generation = self._generation
+        try:
+            payload = await self._coordinator.client.async_get_hub_configuration(self._device.device_id)
+            if generation == self._generation and not self._stopped:
+                self.note_configuration(payload)
+        except (KohlerError, AuthUnavailable) as err:
+            self.links_stale = True
+            self.link_error = error_label(err)
+            self.journal("link_check_failed", error=self.link_error)
+
+    def note_configuration(self, payload: Any) -> None:
+        config = payload.get("configuration") if isinstance(payload, dict) else None
+        if not isinstance(config, dict):
+            self.links_stale = True
+            self.link_error = "missing HUB configuration"
+            return
+        about = config.get("about")
+        hub = about.get("hub") if isinstance(about, dict) else None
+        hostname = local_hostname(hub.get("hubname")) if isinstance(hub, dict) else None
+        if hostname:
+            self.hostname = hostname
+        parts = config.get("parts")
+        if not isinstance(parts, dict):
+            self.links_stale = True
+            self.link_error = "missing valve-link status"
+            return
+        before = dict(self.links)
+        incomplete = False
+        for port, alias in ((1, "valveOne"), (2, "valveTwo")):
+            value = parts.get(f"valve{port}") or parts.get(alias)
+            if port == 2 and port not in self.links and str(value).lower() != CONNECTED:
+                continue
+            if isinstance(value, str) and value:
+                self.links[port] = value.lower() == CONNECTED
+            else:
+                incomplete = True
+        self.links_stale = incomplete or self._connected is not True or any(v is None for v in self.links.values())
+        self.link_error = "incomplete or stale valve-link status" if self.links_stale else None
+        self.links_checked = time.time()
+        if before != self.links:
+            self.journal("valve_link_changed", links=dict(self.links))
+            hook = getattr(self._coordinator, "remember_controller_ports", None)
+            if hook:
+                hook(self._device)
+        if any(v is False for v in self.links.values()):
+            self._schedule_retry()

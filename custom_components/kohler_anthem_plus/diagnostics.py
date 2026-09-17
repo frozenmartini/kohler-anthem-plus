@@ -123,6 +123,7 @@ def _valve_report(valve: Valve) -> dict[str, Any]:
         },
         "last_update": gcs.last_update,
         "cloud_connected": valve.cloud_watch.connected,
+        "connectivity": valve.cloud_watch.attributes,
         "endless_shower": {
             "enabled": valve.restart_on_runtime_cutoff,
             "run_times_seconds": {
@@ -177,6 +178,9 @@ def _controller_report(controller: Controller) -> dict[str, Any]:
             "steam": caps.steam,
         },
         "last_update": hub.last_update,
+        "cloud_connected": controller.cloud_watch.connected,
+        "connectivity": controller.cloud_watch.attributes,
+        "valve_links": {"values": controller.cloud_watch.links, "stale": controller.cloud_watch.links_stale},
     }
 
 

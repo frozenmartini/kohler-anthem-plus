@@ -119,7 +119,7 @@ class OptimisticOptionMixin:
     def _handle_coordinator_update(self) -> None:
         # The one clear that is always right: the device now reports what was asked for, so
         # the guess has been overtaken by fact and there is nothing left to hold.
-        if self._optimistic is not None and self._device_option == self._optimistic:
+        if self._optimistic is not None and (not self.available or self._device_option == self._optimistic):
             self._cancel_optimistic_timer()
             self._optimistic = None
         super()._handle_coordinator_update()
@@ -190,6 +190,8 @@ class FavouriteSelect(OptimisticOptionMixin, KohlerValveEntity, SelectEntity):
         """
         state = self._state
         if state is None:
+            return None
+        if not self._valve.cloud_watch.favorite_ready:
             return None
         active = state.active_preset_id
         if active is None:
@@ -302,6 +304,10 @@ class ValveWarmupSelect(OptimisticOptionMixin, KohlerValveEntity, SelectEntity):
     def _mode(self) -> str | None:
         state = self._state
         return None if state is None else state.warmup_mode
+
+    @property
+    def available(self) -> bool:
+        return super().available and self._valve.cloud_watch.warmup_ready
 
     @property
     def options(self) -> list[str]:
@@ -453,6 +459,8 @@ class HubFavouriteSelect(OptimisticOptionMixin, KohlerControllerEntity, SelectEn
         """
         state = self._state
         if state is None:
+            return None
+        if not self._controller.cloud_watch.favorite_ready:
             return None
         active = state.active_favorite_id
         if active is None:

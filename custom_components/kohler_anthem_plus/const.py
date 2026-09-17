@@ -321,7 +321,7 @@ DEFAULT_PRESET_TIMER_SECONDS = 3600
 #   exclusion matters more than the comparison it is part of.
 # * `CONF_MOBILE_DEVICE_ID` — generated once on first connect, then reused forever.
 RELOAD_IGNORED_DATA_KEYS = frozenset(
-    {CONF_REFRESH_TOKEN, CONF_OUTLET_RUN_TIMES, CONF_MOBILE_DEVICE_ID, CONF_VALVES}
+    {CONF_REFRESH_TOKEN, CONF_OUTLET_RUN_TIMES, CONF_MOBILE_DEVICE_ID, CONF_VALVES, "controller_ports"}
 )
 
 # `RELOAD_IGNORED_OPTION_KEYS` is defined further down, after the warmup constants it

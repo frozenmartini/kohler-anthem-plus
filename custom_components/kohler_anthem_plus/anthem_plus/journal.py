@@ -21,10 +21,13 @@ the coordinator supplies (`hass.async_add_executor_job`), so this is testable of
 from __future__ import annotations
 
 from collections.abc import Callable
+import logging
 from typing import Any, Protocol
 
 CUTOFF = "cutoff"
 WARMUP = "warmup"
+CONNECTIVITY = "connectivity"
+_LOGGER = logging.getLogger(__name__)
 
 
 class JournalSink(Protocol):
@@ -54,9 +57,12 @@ class Journals:
     def note(self, journal: str, event: str, **fields: Any) -> None:
         """Write one record to every sink, and get any sink its executor open if it asks."""
         for sink in self._sinks:
-            sink.note(journal, event, **fields)
-            if getattr(sink, "wants_open", False):
-                self._schedule_prepare(sink.prepare)  # type: ignore[attr-defined]
+            try:
+                sink.note(journal, event, **fields)
+                if getattr(sink, "wants_open", False):
+                    self._schedule_prepare(sink.prepare)  # type: ignore[attr-defined]
+            except Exception:  # diagnostics must never interrupt device recovery
+                _LOGGER.debug("Kohler journal sink failed", exc_info=True)
 
     def close(self) -> None:
         """Release every sink's file. Blocking — call from an executor."""

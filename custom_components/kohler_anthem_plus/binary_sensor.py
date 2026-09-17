@@ -78,9 +78,13 @@ async def async_setup_entry(
     # the one stream carries messages for all — and each is its own device with its own
     # state, its own accessories, and its own outlet layout.
     for controller in coordinator.controllers:
-        # The controller's own copy of the stream-health diagnostic. Same stream as the
-        # valve's, deliberately duplicated per device — see `MqttConnectionMixin`.
-        entities.append(ControllerMqttConnectionSensor(coordinator, controller))
+        # Stream health and physical-device reachability answer different questions. The
+        # MQTT row is account-level transport; Cloud Connection is this controller's own
+        # `hub-state.connectionState`, checked after prolonged controller silence.
+        entities += [
+            ControllerMqttConnectionSensor(coordinator, controller),
+            ControllerCloudConnectionSensor(coordinator, controller),
+        ]
 
         capabilities = controller.capabilities
 
@@ -120,6 +124,24 @@ async def async_setup_entry(
             ]
 
     async_add_entities(entities)
+
+    # A second physical valve may first become visible after recovery. Never remove
+    # a known port's diagnostic just because that valve is temporarily disconnected.
+    added_links: set[tuple[str, int]] = set()
+
+    def add_links() -> None:
+        new = []
+        for controller in coordinator.controllers:
+            for port in controller.cloud_watch.links:
+                key = (controller.device_id, port)
+                if key not in added_links:
+                    added_links.add(key)
+                    new.append(ControllerValveLinkSensor(coordinator, controller, port))
+        if new:
+            async_add_entities(new)
+
+    add_links()
+    entry.async_on_unload(coordinator.async_add_listener(add_links))
 
 
 class ValveAtTemperatureSensor(KohlerValveEntity, BinarySensorEntity):
@@ -172,6 +194,12 @@ class MqttConnectionMixin:
 
     _attr_name = "MQTT Connection"
     _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
+    _attr_entity_registry_enabled_default = True
+    _attr_entity_registry_visible_default = False
+
+    @property
+    def available(self) -> bool:
+        return not self.coordinator._closing
 
     @property
     def is_on(self) -> bool | None:
@@ -180,52 +208,19 @@ class MqttConnectionMixin:
 
     @property
     def extra_state_attributes(self) -> dict[str, object]:
-        """Stream and credential detail — never any token material.
-
-        Credentials are reported separately from the connection state rather than folded
-        into it. A dead stream and a rejected login need different fixes (wait, versus sign
-        in again), so collapsing them into one boolean would hide which one happened.
-        """
         stream = self.coordinator.stream
-        auth = self.coordinator.auth
-        expires_at = auth.access_token_expires_at
-        attributes: dict[str, object] = {
-            "credentials_present": auth.has_credentials,
-            "access_token_expires_at": (
-                datetime.fromtimestamp(expires_at, tz=timezone.utc).isoformat()
-                if expires_at
-                else None
-            ),
+        return {
+            "answer_source": "mqtt",
+            "last_error": stream.last_error if stream else None,
+            "next_check": datetime.fromtimestamp(stream.next_retry_at, timezone.utc).isoformat() if stream and stream.next_retry_at else None,
         }
-        if stream is not None:
-            attributes["warming_up"] = stream.warming_up
-            attributes["last_message_at"] = (
-                datetime.fromtimestamp(
-                    stream.last_message_at, tz=timezone.utc
-                ).isoformat()
-                if stream.last_message_at
-                else None
-            )
-        return attributes
 
 
 class MqttConnectionSensor(MqttConnectionMixin, ValveDiagnosticBinarySensor):
-    """Whether the MQTT stream that carries all state is alive.
+    """Whether the account's push subscription is connected.
 
-    This is the health signal that matters: with no polling interval, **push is the only
-    way state changes reach Home Assistant**. If this is off, every entity is frozen at
-    whatever it last saw, and nothing will correct it until the stream returns.
-
-    It replaces an earlier ``Connection`` sensor that reported Kohler's own
-    ``connectionState`` — whether the *cloud* considered the *valve* reachable. That was a
-    fact about the plumbing, not about this integration, it had no push source so it went
-    stale as soon as polling was removed, and a valve dropping off the cloud is fixed in the
-    Konnect app rather than here.
-
-    **Caveat: this reflects what the MQTT client believes.** A half-open socket reads
-    connected until the 60 s keepalive fails. Pair it with ``sensor.anthem_valve_last_update``
-    — a stale timestamp alongside ``connected`` is the signature of a dead-but-unnoticed
-    stream.
+    Device reachability is separate. Keepalive detects a broken socket; no message-age
+    threshold is a device verdict. Both device copies report the same transport.
     """
 
     def __init__(self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve) -> None:
@@ -234,43 +229,22 @@ class MqttConnectionSensor(MqttConnectionMixin, ValveDiagnosticBinarySensor):
 
 
 class ValveCloudConnectionSensor(KohlerValveEntity, BinarySensorEntity):
-    """Whether **Kohler's cloud** can reach the valve — not whether *we* can reach Kohler.
+    """The valve's last reachability answer, independent of account transport.
 
-    This is the answer to "the Konnect app says my valve is offline": the valve drops off
-    Kohler's cloud on its own and returns only when it is physically power-cycled. While it
-    is gone the controller, the account and this integration are all healthy, so
-    ``MQTT Connection`` stays on and every other entity simply freezes.
-
-    ⚠️ **This is not the sensor that was removed in favour of ``MQTT Connection``**, though it
-    reports the same REST field. That one polled, and when polling was deleted it had no push
-    source and went stale. This one is driven by two push events that decide when to read —
-    see `cloud_watch.py` for both, and for why silence alone can never be one of them.
-
-    **Created but hidden, unlike the other valve diagnostics.** They are disabled outright,
-    which costs nothing until someone wants them. This one has to keep *running* — its whole
-    value is the record it builds while nobody is looking, and a disabled entity builds none —
-    so it stays enabled and is hidden from the dashboards instead. Unhide it from the device
-    page when the question "is the shower going to work" actually comes up.
-
-    ⚠️ ``entity_registry_visible_default`` applies only when the entity is first created. An
-    installation that already has it from v0.2.6, where it was enabled *and* visible, keeps it
-    visible — hide it by hand there, or delete the entity and let it be recreated.
-
-    States:
-
-    * **on** — the last successful read said ``Connected``.
-    * **off** — the last successful read said otherwise. Only ``Connected`` has ever been
-      observed on this account, so the exact negative string is surfaced in
-      ``connection_state`` rather than assumed.
-    * **unknown** — no successful read yet. ⚠️ A *failed* read does not move this: "we could
-      not reach Kohler" and "Kohler cannot reach the valve" are different faults, and the
-      error is reported in ``last_error`` instead of being rendered as an outage.
+    Enabled and hidden by default; existing registry choices remain unchanged. The
+    coordinator owns recovery even if this entity is disabled. API errors preserve the
+    last answer with stale/error attributes; before any answer the state is unknown.
     """
 
-    _attr_name = "Cloud Connection"
+    _attr_name = "Valve Reachable Online"
     _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_entity_registry_visible_default = False
+    _attr_entity_registry_enabled_default = True
+
+    @property
+    def available(self) -> bool:
+        return not self.coordinator._closing
 
     def __init__(self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve) -> None:
         super().__init__(coordinator, valve)
@@ -283,12 +257,7 @@ class ValveCloudConnectionSensor(KohlerValveEntity, BinarySensorEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, object]:
-        """When it was last asked, why, and what came back verbatim.
-
-        ``checked_because`` matters more than it looks: a result from the contradiction
-        trigger was taken while a shower was running, which is far stronger evidence than one
-        taken because the valve had been quiet overnight.
-        """
+        """Last evidence source, freshness, safe error and scheduled retry."""
         watch = self._valve.cloud_watch
         return {} if watch is None else watch.attributes
 
@@ -315,6 +284,71 @@ class ControllerMqttConnectionSensor(
     ) -> None:
         super().__init__(coordinator, controller)
         self._attr_unique_id = f"{self._device_id}_mqtt_connection"
+
+
+class ControllerCloudConnectionSensor(KohlerControllerEntity, BinarySensorEntity):
+    """Controller reachability from cloud/own MQTT or a no-PIN local probe.
+
+    Local liveness does not enable cloud control. Enabled, hidden and diagnostic;
+    coordinator-owned recovery does not depend on whether this entity is enabled.
+    """
+
+    _attr_name = "System Controller Reachable"
+    _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_visible_default = False
+    _attr_entity_registry_enabled_default = True
+
+    @property
+    def available(self) -> bool:
+        return not self.coordinator._closing
+
+    def __init__(
+        self, coordinator: KohlerAnthemPlusCoordinator, controller: Controller
+    ) -> None:
+        super().__init__(coordinator, controller)
+        self._attr_unique_id = f"{self._device_id}_cloud_connection"
+
+    @property
+    def is_on(self) -> bool | None:
+        return self._controller.cloud_watch.connected
+
+    @property
+    def extra_state_attributes(self) -> dict[str, object]:
+        return self._controller.cloud_watch.attributes
+
+
+class ControllerValveLinkSensor(KohlerControllerEntity, BinarySensorEntity):
+    """A physical controller port's link, independent of GCS cloud reachability."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
+    _attr_entity_registry_enabled_default = False
+    _attr_entity_registry_visible_default = False
+
+    def __init__(self, coordinator, controller, port: int) -> None:
+        super().__init__(coordinator, controller)
+        self._port = port
+        self._attr_unique_id = f"{self._device_id}_valve{port}_controller_connection"
+        self._attr_name = "Valve Connected to System Controller" if port == 1 else "Valve 2 Connected to System Controller"
+
+    @property
+    def available(self) -> bool:
+        return not self.coordinator._closing
+
+    @property
+    def is_on(self) -> bool | None:
+        return self._controller.cloud_watch.links.get(self._port)
+
+    @property
+    def extra_state_attributes(self):
+        watch = self._controller.cloud_watch
+        return {
+            "answer_source": "cloud",
+            "stale": watch.links_stale,
+            "last_error": watch.link_error,
+            "last_checked": datetime.fromtimestamp(watch.links_checked, timezone.utc).isoformat() if watch.links_checked else None,
+        }
 
 
 class ValveZoneActiveSensor(KohlerValveEntity, BinarySensorEntity):
@@ -432,7 +466,7 @@ class ValvePresetActiveSensor(KohlerValveEntity, BinarySensorEntity):
     @property
     def is_on(self) -> bool | None:
         state = self._state
-        return None if state is None else state.active_preset_id is not None
+        return None if state is None or not self._valve.cloud_watch.favorite_ready else state.active_preset_id is not None
 
     @property
     def extra_state_attributes(self) -> dict[str, object]:
@@ -561,6 +595,10 @@ class ControllerOutletSensor(KohlerControllerEntity, BinarySensorEntity):
         self._outlet = outlet
         self._attr_name = f"Zone {zone} Outlet {outlet}"
         self._attr_unique_id = f"{self._device_id}_zone_{zone}_outlet_{outlet}"
+
+    @property
+    def available(self) -> bool:
+        return super().available and not self._controller.water_link_failed
 
     @property
     def is_on(self) -> bool | None:

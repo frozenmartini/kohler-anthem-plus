@@ -359,6 +359,8 @@ class WarmupAutoRestoreSwitch(KohlerValveEntity, SwitchEntity):
     async def _async_set(self, value: bool) -> None:
         self._valve.set_option(CONF_WARMUP_AUTO_RESTORE, value)
         if not value:
+            self._valve.set_option("warmup_restore_pending", None)
+            self._valve._cancel_warmup_restore("auto-restore switched off")
             _LOGGER.info("Warmup Auto-Restore disabled")
         elif self._valve.last_warmup_mode is None:
             # On but inert, which is indistinguishable from broken unless it says so — the
@@ -475,6 +477,10 @@ class HubShowerSwitch(KohlerControllerEntity, SwitchEntity):
 
     _attr_name = "Shower"
     _attr_icon = "mdi:shower"
+
+    @property
+    def available(self) -> bool:
+        return super().available and not self._controller.water_link_failed
 
     def __init__(
         self, coordinator: KohlerAnthemPlusCoordinator, controller: Controller

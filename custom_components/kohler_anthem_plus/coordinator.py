@@ -75,6 +75,9 @@ from .anthem_plus import (
 )
 from .anthem_plus.entry_reload import reload_signature
 from .anthem_plus.journal import Journals
+from .anthem_plus.connectivity import error_label
+from .anthem_plus.const import MSG_GCS_PRESET_STATUS, MSG_HUB_FAVORITE
+from .anthem_plus.hub import zone_number
 from .anthem_plus.state import outlet_limits_from_settings
 from .anthem_plus.warmup_resume import Decision, WarmupResume
 from .anthem_plus.valve_hex import (
@@ -275,8 +278,14 @@ class Controller:
     """
 
     def __init__(
-        self, device: Device, hub: HubDevice, state: HubState, name: str
+        self,
+        coordinator: KohlerAnthemPlusCoordinator,
+        device: Device,
+        hub: HubDevice,
+        state: HubState,
+        name: str,
     ) -> None:
+        self.coordinator = coordinator
         self.device = device
         #: Command surface — favourites, `valvecontrol`, `stopall`.
         self.hub = hub
@@ -288,6 +297,12 @@ class Controller:
         #: Which accessories are attached. Latched by the first successful configuration
         #: read; `known` is what says whether that read has happened.
         self.capabilities = HubCapabilities()
+        # CLOUD CONNECTION WATCH: one per controller, reset only by this controller's MQTT
+        # messages and answered by this controller's `hub-state` endpoint.
+        self.cloud_watch = CloudConnectionWatch(coordinator, self, controller=True)
+        known_ports = (coordinator.entry.data.get("controller_ports") or {}).get(device.device_id, [])
+        if 2 in known_ports:
+            self.cloud_watch.links[2] = None
         # Set once `_apply_controller_topology` has seen a configuration with a layout in
         # it — separate from `capabilities.known`, which any successful read sets, so an
         # incomplete first response cannot pin the entry's layout on this controller
@@ -312,6 +327,12 @@ class Controller:
         one copy to get out of step. See `KohlerAnthemPlusCoordinator._apply_controller_topology`.
         """
         return self.state.model
+
+    @property
+    def water_link_failed(self) -> bool:
+        """Only a sole known physical valve can be mapped to all controller water."""
+        watch = self.cloud_watch
+        return len(watch.links) == 1 and watch.links.get(1) is False
 
     @property
     def water_is_running(self) -> bool | None:
@@ -478,6 +499,7 @@ class Valve:
         # a serial that every command sent from here bumps, so the watcher can tell that
         # something else was sent after its own write. See `anthem_plus/warmup_resume.py`.
         self._custom_shower_task: asyncio.Task | None = None
+        self._cutoff_tasks: set[asyncio.Task] = set()
         self._local_write_serial = 0
         # The raw `gcs-preset` payload from the most recent seed, held only long enough for
         # `_async_sync_default_preset_timer` to consume it. Cleared on use — it feeds a
@@ -616,8 +638,14 @@ class Valve:
 
     def handle_envelope(self, envelope: Envelope) -> bool:
         """Apply one of this valve's MQTT messages. True if anything changed."""
+        # Recovery must invalidate old session assumptions before processing a new frame.
+        self.cloud_watch.note_gcs_message()
         was_warmup = self.gcs_state.warmup_mode
         changed = self.gcs_state.apply_envelope(envelope)
+        if envelope.code == MSG_GCS_PRESET_STATUS:
+            self.cloud_watch.favorite_ready = True
+        if envelope.code == MSG_GCS_WARMUP_STATUS and self.gcs_state.warmup_mode:
+            self.cloud_watch.warmup_ready = True
         self._handle_warmup_mode_change(
             was_warmup,
             self.gcs_state.warmup_mode,
@@ -627,8 +655,32 @@ class Valve:
         self._check_runtime_cutoff()
         # A valve message is proof of reachability, and settles any pending
         # contradiction check. CLOUD CONNECTION WATCH.
-        self.cloud_watch.note_gcs_message()
+        self.resume_pending_warmup()
         return changed
+
+    def connectivity_lost(self, reason: str) -> None:
+        """Cancel water-capable tasks; retain only eligible warmup configuration intent."""
+        self._cancel_custom_shower(reason)
+        for task in tuple(self._cutoff_tasks):
+            task.cancel()
+        self._cutoff_tasks.clear()
+        self.forget_timings()
+        self._last_open_masks = self._last_open_flows = None
+        self._cancel_warmup_restore(reason)
+        self._cancel_warmup_seed_reread(reason)
+        self.coordinator.connectivity_event("actions_cancelled", device_id=self.device_id, reason=reason)
+
+    def resume_pending_warmup(self) -> None:
+        """Reconsider a deferred setting only on fresh, idle operational evidence."""
+        target = self.option("warmup_restore_pending")
+        if not target or not self.warmup_auto_restore or self.option("warmup_restore_suppressed", False):
+            return
+        if self.gcs_state.warmup_mode != WARMUP_DISABLED:
+            if self.gcs_state.warmup_mode:
+                self.set_option("warmup_restore_pending", None)
+            return
+        if self.cloud_watch.operational and self.cloud_watch.warmup_ready and not self.gcs_state.is_running:
+            self._schedule_warmup_restore(target)
 
     def forget_timings(self) -> None:
         """Drop the cutoff detector's clocks across a stream gap. See `_handle_connected`."""
@@ -636,7 +688,7 @@ class Valve:
 
     def stop(self) -> None:
         """Cancel everything that could fire into a torn-down coordinator."""
-        self._cancel_custom_shower("the integration is shutting down")
+        self.connectivity_lost("the integration is shutting down")
         self._cancel_warmup_restore("the integration is shutting down")
         self._cancel_warmup_seed_reread("the integration is shutting down")
         # Before the stream, so a timer cannot fire into a half-torn-down coordinator.
@@ -739,6 +791,8 @@ class Valve:
                 self.cloud_watch.note_rest_payload(
                     payload, "REST seed (setup, reconnect or update_entity)", notify=False
                 )
+                if self.cloud_watch.cloud_connected is not True:
+                    raise KohlerError("No current valve state while cloud reachability is unknown or offline")
             was_warmup = self.gcs_state.warmup_mode
             self.gcs_state.apply_rest_state(payload)
             mode_now = self.gcs_state.warmup_mode
@@ -795,7 +849,9 @@ class Valve:
             if mode is not None and mode != WARMUP_DISABLED:
                 self._remember_warmup_mode(mode)
         except KohlerError as err:
-            _LOGGER.debug("Could not seed GCS state: %s", err)
+            if isinstance(err, DeviceOffline):
+                self.cloud_watch.note_offline()
+            _LOGGER.debug("Could not seed GCS state: %s", error_label(err))
 
         # ⚠️ **No mode in the payload is not a mode of "unknown" — it is a read that did not
         # answer.** `apply_rest_state` does `warm.get("warmUp") or self.warmup_mode`, so a
@@ -900,6 +956,8 @@ class Valve:
         """
         for delay in WARMUP_SEED_RETRY_DELAYS:
             await asyncio.sleep(delay)
+            if not self.cloud_watch.operational:
+                return
             if self.gcs_state.warmup_mode is not None:
                 # The valve announced it while we were waiting. At these delays that is a
                 # real possibility rather than a formality, and the whole point of the walk
@@ -907,18 +965,27 @@ class Valve:
                 _LOGGER.debug("Warmup mode arrived over MQTT; re-read not needed")
                 return
             try:
+                generation = self.cloud_watch._generation
                 payload = await self.client.async_get_gcs_state(
                     self.gcs_device.device_id
                 )
             except KohlerError as err:
+                if isinstance(err, DeviceOffline) and generation == self.cloud_watch._generation:
+                    self.cloud_watch.note_offline()
                 _LOGGER.debug("Warmup mode re-read failed: %s", err)
                 continue
+            if generation != self.cloud_watch._generation:
+                continue
+            self.cloud_watch.note_rest_payload(payload, "warmup mode recovery")
+            if self.cloud_watch.cloud_connected is not True or self.cloud_watch._stale:
+                return
             warm = ((payload or {}).get("state") or {}).get("warmUpState") or {}
             mode = warm.get("warmUp")
             if not mode:
                 continue
             mode = str(mode)
             self.gcs_state.warmup_mode = mode
+            self.cloud_watch.warmup_ready = True
             _LOGGER.debug("Warmup mode arrived on a re-read after %.1fs: %s", delay, mode)
             if mode != WARMUP_DISABLED:
                 # Same reason the seed does this: a mode that was simply already in force
@@ -931,6 +998,7 @@ class Valve:
             # push — without this the select would keep showing `unknown` until the next
             # MQTT message or reseed, which is the very wait this walk exists to end.
             self._push()
+            self.resume_pending_warmup()
             return
         _LOGGER.warning(WARMUP_MODE_STILL_UNKNOWN)
 
@@ -1303,7 +1371,11 @@ class Valve:
         # then failed. The cut time is captured here rather than in the restart, which runs a
         # few seconds later as a task.
         cut_at = dt_util.now()
-        self.hass.async_create_task(self._async_restart_after_cutoff(fired, cut_at))
+        if not self.cloud_watch.operational:
+            return
+        task = self.hass.async_create_task(self._async_restart_after_cutoff(fired, cut_at))
+        self._cutoff_tasks.add(task)
+        task.add_done_callback(self._cutoff_tasks.discard)
 
     @callback
     def _journal(self, event: str, **fields: Any) -> None:
@@ -1361,6 +1433,8 @@ class Valve:
         """
         state = self.gcs_state
         if self.gcs is None or state is None:
+            return
+        if not self.cloud_watch.operational:
             return
 
         snapshot = self._last_open_masks or {}
@@ -1511,6 +1585,8 @@ class Valve:
         }
         if zone_masks:
             masks.update(zone_masks)
+        if any(masks.values()) and not paused and not self.cloud_watch.operational:
+            raise HomeAssistantError("The valve is not ready for control; waiting for connectivity and current state")
 
         def resolve(zone: int, temperature: float | None, flow: float | None):
             word = state.valve1 if zone == 1 else state.valve2
@@ -1670,6 +1746,8 @@ class Valve:
             # Not `decoded`: that name is the response built above, and reusing it here
             # returned the last zone's raw `ValveWord` instead (v0.2.7 and earlier).
             closing[zone] = 0 if parsed.paused else parsed.outlet_mask
+        if any(closing.values()) and not self.cloud_watch.operational:
+            raise HomeAssistantError("The valve is not ready for control; waiting for connectivity and current state")
         self._note_local_write()
         self._cutoff.note_local_write(closing)
         try:
@@ -1821,6 +1899,8 @@ class Valve:
         """
         if self.gcs is None:
             raise HomeAssistantError("No Anthem valve on this account")
+        if not self.cloud_watch.operational:
+            raise HomeAssistantError("The valve is not ready for control")
         self._note_local_write()
         try:
             await self.gcs.async_activate_preset(preset_id, True)
@@ -1862,9 +1942,10 @@ class Valve:
         which would write a flat 38.0 °C to both zones — this preserves each zone's own
         setpoint while clearing its outlets.
         """
+        self.client.request_recovery()
         await self.async_apply_valve(zone_masks={1: 0, 2: 0})
 
-    async def async_set_warmup(self, mode: str) -> None:
+    async def async_set_warmup(self, mode: str) -> bool:
         """Set the valve's warmup mode. **This does not run water now.**
 
         Warmup is a stored mode, not an action: an enabled mode means the valve warms up by
@@ -1885,11 +1966,17 @@ class Valve:
         """
         if self.gcs is None:
             raise HomeAssistantError("No Anthem valve on this account")
+        if mode == WARMUP_DISABLED:
+            self.set_option("warmup_restore_suppressed", True)
+            self.set_option("warmup_restore_pending", None)
+            self._cancel_warmup_restore("intentional Home Assistant disable")
         if mode not in WARMUP_MODES_CURRENT:
             raise HomeAssistantError(
                 f"{mode!r} is not a warmup mode this integration writes. Expected one of: "
                 + ", ".join(WARMUP_MODES_CURRENT)
             )
+        if not self.cloud_watch.operational:
+            raise HomeAssistantError("The valve is not ready for control")
         state = self.gcs_state
         if state is not None and state.is_running:
             raise HomeAssistantError(
@@ -1924,11 +2011,15 @@ class Valve:
         for delay in WARMUP_READBACK_DELAYS:
             if delay:
                 await asyncio.sleep(delay)
+            if not self.cloud_watch.operational:
+                return False
             confirmed = await self.async_read_warmup_mode()
             if confirmed == mode:
+                if mode != WARMUP_DISABLED:
+                    self.set_option("warmup_restore_suppressed", False)
                 self._remember_warmup_mode(mode)
                 _LOGGER.info("Warmup mode set to %s and confirmed by the valve", mode)
-                return
+                return True
         if confirmed is None:
             _LOGGER.info(
                 "Warmup mode %s sent to the Anthem valve; the read-back did not answer, so "
@@ -1947,6 +2038,7 @@ class Valve:
                 confirmed,
                 sum(WARMUP_READBACK_DELAYS),
             )
+        return False
 
     async def async_read_warmup_mode(self) -> str | None:
         """Read the warmup mode from the REST API and apply it, returning what it said.
@@ -1967,17 +2059,31 @@ class Valve:
         """
         if self.gcs_device is None or self.gcs_state is None:
             return None
+        generation = self.cloud_watch._generation
         try:
             payload = await self.client.async_get_gcs_state(self.gcs_device.device_id)
         except KohlerError as err:
+            if isinstance(err, DeviceOffline) and generation == self.cloud_watch._generation:
+                self.cloud_watch.note_offline()
             _LOGGER.debug("Could not read warmup mode: %s", err)
             return None
+        if generation != self.cloud_watch._generation:
+            return self.gcs_state.warmup_mode if self.cloud_watch.warmup_ready else None
         if self.cloud_watch is not None:
             # CLOUD CONNECTION WATCH — the fourth free read. A warmup write reads this back
             # up to three times; each one carries `connectionState` and would otherwise
             # discard it.
             self.cloud_watch.note_rest_payload(payload, "warmup read-back")
-        self.gcs_state.apply_rest_state(payload)
+        if self.cloud_watch.cloud_connected is not True or self.cloud_watch._stale:
+            return None
+        warm = ((payload or {}).get("state") or {}).get("warmUpState") or {}
+        mode = warm.get("warmUp")
+        if not isinstance(mode, str) or not mode:
+            return None
+        # A read-back answers only this setting. Never overwrite newer outlet/session
+        # state with the cloud's cached copy as a side effect of confirming a dropdown.
+        self.gcs_state.warmup_mode = mode
+        self.cloud_watch.warmup_ready = True
         # Same notification path as an MQTT update, so the dropdown lands on the confirmed
         # value and drops its optimistic guess exactly as it would on a device push.
         self._push()
@@ -2022,7 +2128,7 @@ class Valve:
     def _warmup_journal(self, event: str, **fields: Any) -> None:
         """A warm-up-trail record. Mirrors `_journal`."""
         journals = self.coordinator.journals
-        if journals is None:
+        if journals is None or self.coordinator._closing:
             return
         journals.note("warmup", event, **self._tagged(fields))
 
@@ -2061,8 +2167,10 @@ class Valve:
         endless restore loop is reset here, because the mode staying enabled is exactly the
         outcome that counter exists to wait for.
         """
-        if mode == WARMUP_DISABLED:
+        if not mode or mode == WARMUP_DISABLED:
             return
+        if self.option("warmup_restore_pending"):
+            self.set_option("warmup_restore_pending", None)
         self._warmup_restores = 0
         self._warmup_restored_at = None
         if mode != self.option(CONF_LAST_WARMUP_MODE):
@@ -2096,23 +2204,31 @@ class Valve:
         single field, and the journal should say a second trigger arrived rather than let
         the tasks interleave silently.
         """
+        if not self.warmup_auto_restore or self.option("warmup_restore_suppressed", False):
+            return
+        target = restore_target(taken_away, self.last_warmup_mode)
+        if target and self.option("warmup_restore_pending") != target:
+            self.set_option("warmup_restore_pending", target)
+        if not self.cloud_watch.operational or not self.cloud_watch.warmup_ready or self.gcs_state.is_running:
+            self._warmup_journal("restore_deferred_offline", target=target, reason="offline or not freshly idle")
+            self.coordinator.connectivity_event("warmup_restore_deferred", device_id=self.device_id, target=target)
+            return
         if self._warmup_restore_task is not None and not self._warmup_restore_task.done():
             self._warmup_journal("restore_skipped", reason="a restore is already pending")
             return
-        self._warmup_restore_task = self.hass.async_create_task(
-            self._async_restore_warmup(taken_away)
+        self._warmup_restore_task = self.entry.async_create_background_task(
+            self.hass,
+            self._async_restore_warmup(taken_away),
+            name=f"{DOMAIN} deferred warmup restore",
         )
 
     @callback
     def _cancel_warmup_restore(self, reason: str) -> None:
         """Drop a pending restore, saying why.
 
-        `_schedule_warmup_restore` spawns through `hass.async_create_task`, which binds the
-        task to Home Assistant's lifetime rather than this entry's. Without this the task
-        outlives an unload: it wakes after `WARMUP_AUTO_RESTORE_DELAY_SECONDS` and writes
-        the warmup mode through `async_get_clientsession`, which unload does not close, so
-        the write lands. `async_set_warmup` stores a mode and cannot run water, but an
-        entry that has been unloaded or removed should not still be talking to the valve.
+        The entry owns the background task, so its delay does not hold up HA startup.
+        Cancel it explicitly on connectivity loss or changed intent as well as unload;
+        a delayed restore must not act on state from before that event.
 
         Logged, never journalled: teardown is not an event the warmup journal is answering
         a question about, and `Journals.note()` after `close()` would reopen the file.
@@ -2121,11 +2237,14 @@ class Valve:
         self._warmup_restore_task = None
         if task is not None and not task.done():
             _LOGGER.info("warmup auto-restore cancelled, %s", reason)
-            task.cancel()
+            # A command's own failure callback can invalidate connectivity synchronously.
+            # Let that command unwind normally so it can account for a rejected write.
+            if task is not asyncio.current_task():
+                task.cancel()
 
     @callback
     def _handle_warmup_mode_change(
-        self, before: str | None, after: str | None, *, announced: bool = False
+        self, before: str | None, after: str | None, *, announced: bool = False, source: str = "mqtt"
     ) -> None:
         """React to the valve announcing a new warmup mode.
 
@@ -2174,7 +2293,7 @@ class Valve:
         # the `baseline` record in `async_setup` — so it is true as stated. Check all three
         # before trusting it again.
         self._warmup_journal(
-            "mode", before=before, after=after, ours=ours, source="mqtt"
+            "mode", before=before, after=after, ours=ours, source=source
         )
 
         if after != WARMUP_DISABLED:
@@ -2266,6 +2385,9 @@ class Valve:
         if not self.warmup_auto_restore:
             self._warmup_journal("restore_skipped", reason="switched off during the wait")
             return
+        if not self.cloud_watch.operational or not self.cloud_watch.warmup_ready or self.gcs_state.is_running or self.option("warmup_restore_suppressed", False):
+            self._warmup_journal("restore_deferred_offline", target=target)
+            return
         state = self.gcs_state
         if state is None or state.warmup_mode != WARMUP_DISABLED:
             # Someone got there first. Nothing to do, and saying so beats a silent return
@@ -2298,16 +2420,19 @@ class Valve:
             self._warmup_restores,
         )
         self._warmup_journal("restore", target=target, attempt=self._warmup_restores)
+        self.coordinator.connectivity_event("warmup_restore_resumed", device_id=self.device_id, target=target)
         try:
-            await self.async_set_warmup(target)
+            confirmed = await self.async_set_warmup(target)
         except HomeAssistantError as err:
             # Not retried. The known refusal is water running, and a shower is exactly when
             # nobody wants this fighting the valve; the next disable will schedule another.
             _LOGGER.warning("Warmup auto-restore could not write: %s", err)
-            self._warmup_journal("restore_failed", target=target, error=str(err))
+            self._warmup_journal("restore_failed", target=target, error=error_label(err.__cause__ or err))
+            if isinstance(err.__cause__, DeviceOffline):
+                self._warmup_restores = max(0, self._warmup_restores - 1)
             return
         self._warmup_journal(
-            "restore_done",
+            "restore_done" if confirmed else "restore_unconfirmed",
             target=target,
             attempt=self._warmup_restores,
             mode_now=None if self.gcs_state is None else self.gcs_state.warmup_mode,
@@ -2400,10 +2525,176 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Rolling record of recent messages, so a warmup disable can be journalled
         # with what surrounded it. Bounded by count and trimmed by age on read.
         self._recent_messages: deque = deque(maxlen=WARMUP_CONTEXT_MAX_MESSAGES)
+        self._connectivity_events: deque = deque(maxlen=128)
+        self._closing = False
+        self._reauth_requested = False
+        self._reseed_task: asyncio.Task | None = None
+        self.client.on_connectivity = self._client_connectivity
 
     # ------------------------------------------------------------------ #
     # Setup / teardown
     # ------------------------------------------------------------------ #
+    def connectivity_event(self, event: str, **fields: Any) -> None:
+        """One diagnostic trail, split only by the installed journal sinks."""
+        if self._closing:
+            return
+        if self.journals is None:
+            self._connectivity_events.append((event, fields))
+        else:
+            self.journals.note("connectivity", event, **fields)
+        if event.startswith("mqtt_"):
+            self.async_refresh_entities()
+
+    def connectivity_baseline(self, emit: Any = None) -> None:
+        """Make an episode opened halfway through an outage understandable."""
+        emit = emit or self.connectivity_event
+        emit("baseline", mqtt_connected=bool(self.stream and self.stream.connected))
+        for device in [*self.valves, *self.controllers]:
+            watch = device.cloud_watch
+            emit("device_baseline", device_id=device.device_id,
+                                    reachable=watch.connected, **watch.attributes)
+            if isinstance(device, Controller):
+                emit("link_baseline", device_id=device.device_id, links=dict(watch.links), stale=watch.links_stale, last_error=watch.link_error)
+
+    def _client_connectivity(self, event: str, **fields: Any) -> None:
+        self.connectivity_event(event, **fields)
+        if self._closing:
+            return
+        devices = [*self.valves, *self.controllers]
+        if event == "cloud_failed":
+            _LOGGER.warning("Kohler cloud unavailable; automatic recovery is scheduled")
+            for device in devices:
+                device.cloud_watch.transport_lost("cloud service unavailable")
+        elif event == "cloud_recovered":
+            _LOGGER.info("Kohler cloud service recovered")
+            for device in devices:
+                if device.cloud_watch.needs_reseed:
+                    device.cloud_watch._request_check("cloud service returned", force=True)
+        elif event == "device_offline":
+            for device in devices:
+                if device.device_id == fields.get("device_id"):
+                    device.cloud_watch.note_offline()
+        elif event == "auth_required":
+            for device in devices:
+                device.cloud_watch.auth_required()
+            self._handle_auth_error(AuthError("Kohler reauthentication required"))
+
+    @callback
+    def _handle_disconnected(self) -> None:
+        if self._closing:
+            return
+        self.connectivity_event("mqtt_disconnected")
+        for device in [*self.valves, *self.controllers]:
+            device.cloud_watch.transport_lost("MQTT disconnected")
+        self.async_refresh_entities()
+
+    def remember_controller_ports(self, controller: Controller) -> None:
+        if 2 not in controller.cloud_watch.links:
+            return
+        known = dict(self.entry.data.get("controller_ports") or {})
+        if known.get(controller.device_id) != [1, 2]:
+            known[controller.device_id] = [1, 2]
+            self.hass.config_entries.async_update_entry(self.entry, data={**self.entry.data, "controller_ports": known})
+
+    async def async_reconcile_device(self, device: Valve | Controller, payload: Any, generation: int) -> None:
+        """Adopt a complete current snapshot; never replay a pre-outage session."""
+        watch = device.cloud_watch
+        state = payload.get("state") if isinstance(payload, dict) else None
+        if not isinstance(state, dict) or watch.cloud_connected is not True:
+            return
+        if isinstance(device, Valve):
+            complete = True
+            for zone in device.model.zones:
+                word = state.get(f"valve{zone}")
+                if not isinstance(word, dict):
+                    complete = False
+                    break
+                try:
+                    complete &= all(
+                        str(word.get(key)) in ("0", "1")
+                        for key in ("pauseFlag", *[f"out{i}" for i in range(1, device.model.outlets_in_zone(zone) + 1)])
+                    )
+                    complete &= 0 <= float(word["temperatureSetpoint"]) <= 100
+                    complete &= 0 <= float(word["flowSetpoint"]) <= 50
+                except (KeyError, TypeError, ValueError):
+                    complete = False
+        else:
+            shower = state.get("shower")
+            zones = {zone_number(item): item for item in shower if isinstance(item, dict)} if isinstance(shower, list) else {}
+            complete = all(
+                zone in zones and str(zones[zone].get("status")).upper() in ("ON", "OFF")
+                and isinstance(zones[zone].get("outlets"), list)
+                for zone in device.model.zones
+            )
+        if not complete:
+            watch.journal("reconcile_incomplete", reason="missing operating state")
+            return
+        if generation != watch._generation or self._closing:
+            return
+        watch.journal("reconcile_started")
+        # Stage reads before applying anything. A push/disconnect during any await wins
+        # over this entire REST snapshot, including its favourite and warmup state.
+        if isinstance(device, Valve):
+            presets = await self.client.async_get_gcs_presets(device.device_id)
+            settings = await self.client.async_get_gcs_settings(device.device_id)
+            if not isinstance(presets, dict) or not isinstance(presets.get("gcsPresetExperienceDetails"), list):
+                watch.journal("reconcile_incomplete", reason="missing preset list")
+                return
+        else:
+            try:
+                favorites = await self.client.async_get_hub_favorites(device.device_id)
+            except KohlerError as err:
+                if err.status != 404:
+                    raise
+                favorites = {"favorites": []}
+            if not isinstance(favorites, dict) or not isinstance(favorites.get("favorites"), list):
+                watch.journal("reconcile_incomplete", reason="missing favorite list")
+                return
+        if generation != watch._generation or self._closing or watch.cloud_connected is not True or watch._stale:
+            watch.journal("reconcile_superseded")
+            return
+        if isinstance(device, Valve):
+            before = device.gcs_state.warmup_mode
+            watch.favorite_ready = "presetOrExperienceId" in state
+            device.gcs_state.active_preset_id = None
+            device.gcs_state.apply_rest_state(payload)
+            device.gcs_state.apply_preset_list(presets)
+            limits = outlet_limits_from_settings(settings)
+            device.gcs_state.outlet_limits.clear()
+            device.gcs_state.outlet_limits.update(limits)
+            device._learn_run_times(device.gcs_state)
+            warm = state.get("warmUpState")
+            watch.warmup_ready = isinstance(warm, dict) and bool(warm.get("warmUp"))
+            if watch.warmup_ready:
+                device._handle_warmup_mode_change(before, device.gcs_state.warmup_mode, source="rest")
+                if device.gcs_state.warmup_mode != WARMUP_DISABLED:
+                    device._remember_warmup_mode(device.gcs_state.warmup_mode)
+            else:
+                device.gcs_state.warmup_mode = None
+                device._schedule_warmup_reread()
+        else:
+            # Absent accessory fields stay unknown rather than inheriting pre-gap values.
+            device.state.music_on = device.state.steam_on = device.state.light_on = None
+            device.state.shower_warmup = None
+            device.state.apply_rest_state(payload)
+            device.favorites = favorites["favorites"]
+            device.state.active_favorite_id = device.state.active_favorite_name = None
+            watch.favorite_ready = all(
+                isinstance(item, dict) and str(item.get("state", item.get("status", ""))).upper() in ("ON", "OFF")
+                for item in device.favorites
+            )
+            if watch.favorite_ready:
+                for item in device.favorites:
+                    if str(item.get("state", item.get("status", ""))).upper() == "ON":
+                        device.state.active_favorite_id = str(item.get("id"))
+                        device.state.active_favorite_name = item.get("title") or item.get("name")
+                        break
+        watch.state_ready = True
+        watch.needs_reseed = False
+        watch.journal("reconcile_done")
+        if isinstance(device, Valve):
+            device.resume_pending_warmup()
+
     async def async_setup(self) -> None:
         """Discover devices, seed state from REST, then start the MQTT stream."""
         try:
@@ -2455,6 +2746,7 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         names = controller_names(controllers)
         self.controllers = [
             Controller(
+                self,
                 device,
                 HubDevice(self.client, device.device_id, self.temperature_unit),
                 HubState(self.model),
@@ -2486,6 +2778,7 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # would repeat every read above for nothing. Claimed here, spent in
         # `_async_update_data`.
         self._seeded_during_setup = True
+        self._runtime_seed = True
         for valve in self.valves:
             await valve._async_sync_default_preset_timer()
         self._persist_refresh_token()
@@ -2530,13 +2823,19 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             valve.attach_journals(self.journals)
         if _dev is not None:
             await _dev.async_install(self)
+        while self._connectivity_events:
+            event, fields = self._connectivity_events.popleft()
+            self.journals.note("connectivity", event, **fields)
         for valve in self.valves:
             valve.journal_baseline()
+        self.connectivity_baseline()
 
         self.stream = AnthemMqttStream(
             self.client,
             self._handle_envelope,
             on_connect=self._handle_connected,
+            on_disconnect=self._handle_disconnected,
+            on_event=self.connectivity_event,
             on_auth_error=self._handle_auth_error,
             mobile_device_id=mobile_device_id,
             raw_sinks=self.raw_sinks,
@@ -2546,7 +2845,7 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         try:
             await self.stream.async_start()
-        except (AuthError, KohlerError) as err:
+        except (AuthError, KohlerError, ConnectionError, TimeoutError) as err:
             # State is already seeded, so the integration is usable but frozen until the
             # stream recovers. A warning rather than a setup failure — the reconnect loop
             # keeps trying, and each success re-seeds.
@@ -2563,6 +2862,10 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # actually been quiet for the full interval, and any valve message resets it.
             valve.cloud_watch.async_start()
             valve.async_refresh_setup_issue()
+        for controller in self.controllers:
+            # Same event-driven quiet check as the valve, but each controller's timer is
+            # reset only by MQTT envelopes carrying that controller's device id.
+            controller.cloud_watch.async_start()
 
     @callback
     def _migrate_valve_settings(self, device_id: str) -> None:
@@ -2623,9 +2926,12 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         `async_start_reauth` is idempotent; the stream also latches, so repeated failures
         do not stack up flows.
         """
-        _LOGGER.error(
-            "Kohler rejected the stored credential (%s); reauthentication required", err
-        )
+        if self._closing or self._reauth_requested:
+            return
+        self._reauth_requested = True
+        for device in [*self.valves, *self.controllers]:
+            device.cloud_watch.auth_required()
+        _LOGGER.error("Kohler rejected the stored credential; reauthentication required")
         self.entry.async_start_reauth(self.hass)
 
     @callback
@@ -2641,9 +2947,11 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # outlets did while the stream was down, and the gap has been as long as 11.9 hours.
         # Dropping the timings means a session spanning a reconnect is simply not judged,
         # rather than judged on a number we made up.
+        self.connectivity_event("mqtt_connected")
         for valve in self.valves:
             valve.forget_timings()
-        self.hass.async_create_task(self._async_reseed_after_connect())
+        if self._reseed_task is None or self._reseed_task.done():
+            self._reseed_task = self.hass.async_create_task(self._async_reseed_after_connect())
 
     async def _async_reseed_after_connect(self) -> None:
         try:
@@ -2662,8 +2970,13 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def async_shutdown_stream(self) -> None:
         """Stop the MQTT stream on unload."""
+        self._closing = True
+        if self._reseed_task and not self._reseed_task.done():
+            self._reseed_task.cancel()
         for valve in self.valves:
             valve.stop()
+        for controller in self.controllers:
+            controller.cloud_watch.async_stop()
         if self.stream is not None:
             await self.stream.async_stop()
             self.stream = None
@@ -2690,7 +3003,10 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # added in the app since setup — falls through untouched until a reload lists it.
         controller = self._controllers_by_id.get(envelope.device_id)
         if controller is not None:
+            controller.cloud_watch.note_hub_message()
             changed |= controller.state.apply_envelope(envelope)
+            if envelope.code == MSG_HUB_FAVORITE:
+                controller.cloud_watch.favorite_ready = True
             self._remember_message(envelope)
             if controller.state.favorites:
                 controller.favorites = controller.state.favorites
@@ -2719,7 +3035,8 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # CLOUD CONNECTION WATCH. Carried here so a check result re-renders the entity
             # the same way a device push does — the value itself lives on the watch.
             "cloud_connected": {
-                v.device_id: v.cloud_watch.connected for v in self.valves
+                **{v.device_id: v.cloud_watch.connected for v in self.valves},
+                **{c.device_id: c.cloud_watch.connected for c in self.controllers},
             },
         }
 
@@ -2731,7 +3048,8 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         reachability check, which is answered over REST on its own schedule and has no push
         source to ride in on.
         """
-        self.async_set_updated_data(self._snapshot())
+        if not self._closing and getattr(self, "data", None) is not None:
+            self.async_set_updated_data(self._snapshot())
 
     # ------------------------------------------------------------------ #
     # Poll
@@ -2766,6 +3084,7 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._seeded_during_setup = False
             self._persist_refresh_token()
             return self._snapshot()
+        self.client.request_recovery()
         try:
             await self._async_seed_state()
         except AuthUnavailable as err:
@@ -2783,6 +3102,11 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         Runs at setup, on every MQTT connect, and on a manual `update_entity`. Failures for
         one device do not blank the other.
         """
+        if getattr(self, "_runtime_seed", False):
+            for device in [*self.valves, *self.controllers]:
+                device.cloud_watch.needs_reseed = True
+                await device.cloud_watch.async_check_now("setup/reconnect/manual refresh")
+            return
         for valve in self.valves:
             await valve.async_seed()
 
@@ -2800,6 +3124,7 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if not controller.capabilities.known or not controller.topology_checked:
                 try:
                     config = await self.client.async_get_hub_configuration(device_id)
+                    controller.cloud_watch.note_configuration(config)
                     configuration = config.get("configuration") or {}
                     if not controller.capabilities.known:
                         controller.capabilities = HubCapabilities.from_configuration(
@@ -2817,10 +3142,20 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         "Could not read HUB configuration for %s: %s", device_id, err
                     )
             try:
-                controller.state.apply_rest_state(
-                    await self.client.async_get_hub_state(device_id)
+                payload = await self.client.async_get_hub_state(device_id)
+                # CLOUD CONNECTION WATCH. `connectionState` and `lastConnected` are
+                # top-level siblings of `state`; HubState intentionally reads only live
+                # operating state, so give the reachability answer to its own owner first.
+                controller.cloud_watch.note_rest_payload(
+                    payload,
+                    "REST seed (setup, reconnect or update_entity)",
+                    notify=False,
                 )
+                if controller.cloud_watch.cloud_connected is True:
+                    controller.state.apply_rest_state(payload)
             except KohlerError as err:
+                if isinstance(err, DeviceOffline):
+                    controller.cloud_watch.note_offline()
                 _LOGGER.debug("Could not seed HUB state for %s: %s", device_id, err)
             try:
                 payload = await self.client.async_get_hub_favorites(device_id)
@@ -2943,6 +3278,7 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             options={**self.entry.options, CONF_REPORT_LOG_FILE: episode},
         )
         # Both devices carry this switch; refresh them together so they never disagree.
+        self.connectivity_baseline()
         self.async_update_listeners()
 
     async def async_stop_report_log(self) -> None:
@@ -3007,6 +3343,8 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         command, so a favourite is created holding that configuration and then activated.
         Activation is allowed even while something else is running.
         """
+        if not controller.cloud_watch.operational:
+            raise HomeAssistantError("The controller is not ready for control")
         self._note_local_write()
         try:
             await controller.hub.async_activate_favorite(favorite_id, name, True)
@@ -3026,6 +3364,10 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         Off stops the water only, leaving music, steam, and lighting running. Use
         :meth:`async_stop_hub` to idle everything.
         """
+        if on and (not controller.cloud_watch.operational or controller.water_link_failed):
+            raise HomeAssistantError("The controller water connection is not ready")
+        if not on:
+            self.client.request_recovery()
         self._note_local_write()
         try:
             await controller.hub.async_set_shower(on)
@@ -3041,6 +3383,7 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         favourite may already have been replaced by whatever is running now, and a stop
         should not depend on correctly identifying what to stop.
         """
+        self.client.request_recovery()
         self._note_local_write()
         try:
             await controller.hub.async_stop_all()
@@ -3048,4 +3391,3 @@ class KohlerAnthemPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raise HomeAssistantError(_controller_offline(controller)) from err
         except KohlerError as err:
             raise HomeAssistantError(f"Kohler command failed: {err}") from err
-

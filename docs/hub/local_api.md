@@ -71,7 +71,10 @@ HTTP 403  {"error":"Unauthorised token","message":"The request contains invalid 
 **Endpoint:** `POST /web/api/v1/device/request_user_login`
 **Body:** `{"req_command":"login","pin":"<enc>"}`
 **Response:** `{"token":"<JWT>"}`  → store as `currentUser`; JWT payload is
-`{"type":"response","exp":<unix>}` and is **short-lived** (~minutes). Re-login when it expires.
+`{"type":"response","exp":<unix>}`. The token observed on 2026-09-16 had a **two-hour**
+lifetime (7,200 seconds); honor `exp` rather than assuming minutes. Re-login has the warmup
+side effect described below. The integration's connectivity fallback uses only the pre-auth
+`get_hub_version_info` endpoint: it never signs in or stores a PIN/JWT.
 
 **PIN encryption** (mirrors the web UI's `forge` code exactly):
 

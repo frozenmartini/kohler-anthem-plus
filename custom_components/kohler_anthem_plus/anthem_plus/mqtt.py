@@ -35,6 +35,7 @@ from typing import Any
 import paho.mqtt.client as mqtt
 
 from .auth import AuthError, AuthUnavailable
+from .connectivity import RecoveryBackoff, error_label
 from .client import KohlerClient
 from .const import (
     MQTT_PORT,
@@ -47,11 +48,11 @@ _LOGGER = logging.getLogger(__name__)
 
 _RID = re.compile(r"\$rid=([^&]+)")
 
-# Reconnect backoff. The SAS token from registration is short-lived, so a reconnect
-# re-registers rather than reusing stale credentials.
-RECONNECT_MIN_SECONDS = 5
-RECONNECT_MAX_SECONDS = 300
 KEEPALIVE_SECONDS = 60
+
+
+class MqttCredentialRejected(ConnectionError):
+    """Broker rejected SAS credentials, not proof that OAuth reauth is needed."""
 
 # Building an SSL context reads the system CA bundle from disk. That is blocking file I/O,
 # so it must never happen on an event loop — paho's `tls_set()` does exactly that
@@ -110,6 +111,8 @@ class AnthemMqttStream:
         on_envelope: Callable[[Envelope], None],
         *,
         on_connect: Callable[[], None] | None = None,
+        on_disconnect: Callable[[], None] | None = None,
+        on_event: Callable[..., None] | None = None,
         on_auth_error: Callable[[AuthError], None] | None = None,
         mobile_device_id: str | None = None,
         raw_sinks: list[Any] | None = None,
@@ -127,6 +130,10 @@ class AnthemMqttStream:
         # read triggered from here, a consumer is blind from connect until somebody next
         # uses the shower.
         self._on_connect_cb = on_connect
+        self._on_disconnect_cb = on_disconnect
+        self._on_event = on_event
+        self._recovery = RecoveryBackoff()
+        self._connection_waiter: asyncio.Future | None = None
         # Called on the owning loop when a reconnect fails because the stored credential was
         # *rejected* — not merely because Kohler was unreachable.
         #
@@ -143,7 +150,6 @@ class AnthemMqttStream:
         self._mqtt: mqtt.Client | None = None
         self._closing = False
         self._reconnect_task: asyncio.Task[None] | None = None
-        self._backoff = RECONNECT_MIN_SECONDS
         self._connected_at: float | None = None
         # Reuse one registered identity instead of a throwaway per connect. None falls back
         # to the old behaviour of generating a fresh one.
@@ -159,6 +165,8 @@ class AnthemMqttStream:
         self._warmup_pending = expect_warmup
         self.connected = False
         self.last_message_at: float | None = None
+        self.last_error: str | None = None
+        self.next_retry_at: float | None = None
 
     # ------------------------------------------------------------------ #
     # Lifecycle
@@ -167,14 +175,27 @@ class AnthemMqttStream:
         """Register, connect, and subscribe. Returns once the socket is up."""
         self._closing = False
         self._loop = self._loop or asyncio.get_running_loop()
-        await self._async_connect()
+        try:
+            await self._async_connect()
+        except AuthError as err:
+            if isinstance(err, AuthUnavailable):
+                self._start_reconnect_task()
+            else:
+                self._report_auth_error(err)
+            raise
+        except Exception:
+            self._start_reconnect_task()
+            raise
 
     async def async_stop(self) -> None:
         """Disconnect and stop reconnecting."""
         self._closing = True
+        self.next_retry_at = None
         if self._reconnect_task is not None:
-            self._reconnect_task.cancel()
+            task = self._reconnect_task
+            task.cancel()
             self._reconnect_task = None
+            await asyncio.gather(task, return_exceptions=True)
         client, self._mqtt = self._mqtt, None
         if client is not None:
             client.disconnect()
@@ -183,7 +204,7 @@ class AnthemMqttStream:
         # Release every sink's file on unload. For the Report Log this is the handle only —
         # `close()` does not end the episode, so a reload resumes the same file.
         for sink in self._raw_sinks:
-            sink.close()
+            await asyncio.to_thread(sink.close)
 
     @property
     def warming_up(self) -> bool:
@@ -221,6 +242,7 @@ class AnthemMqttStream:
             "client_id": device_id,
             "protocol": mqtt.MQTTv311,
             "transport": "tcp",
+            "reconnect_on_failure": False,
         }
         # paho-mqtt 2.x requires an explicit callback API version; 1.x has no such
         # argument and rejects it. Home Assistant has shipped both.
@@ -232,13 +254,26 @@ class AnthemMqttStream:
         context = self._ssl_context or await async_default_ssl_context()
         client.tls_set_context(context)
         client.on_connect = self._on_connect
+        client.on_subscribe = self._on_subscribe
         client.on_disconnect = self._on_disconnect
         client.on_message = self._on_message
 
         self._mqtt = client
+        self._connection_waiter = asyncio.get_running_loop().create_future()
         client.connect_async(host, MQTT_PORT, keepalive=KEEPALIVE_SECONDS)
         client.loop_start()
         _LOGGER.debug("Kohler MQTT connecting to %s as %s", host, device_id[-16:])
+        await asyncio.wait_for(self._connection_waiter, timeout=30)
+
+    def _finish_connect(self, client: mqtt.Client, error: Exception | None = None) -> None:
+        if self._closing or client is not self._mqtt:
+            return
+        waiter = self._connection_waiter
+        if waiter is not None and not waiter.done():
+            if error:
+                waiter.set_exception(error)
+            else:
+                waiter.set_result(None)
 
     # ------------------------------------------------------------------ #
     # paho callbacks — these run on paho's network thread
@@ -246,13 +281,22 @@ class AnthemMqttStream:
     def _on_connect(
         self, client: mqtt.Client, _userdata: Any, _flags: Any, rc: int, *_: Any
     ) -> None:
+        if self._closing or client is not self._mqtt:
+            return
         if rc != 0:
-            _LOGGER.warning("Kohler MQTT connect refused: %s", mqtt.connack_string(rc))
+            error = MqttCredentialRejected("MQTT SAS credential rejected") if rc in (4, 5) else ConnectionError("MQTT connection refused")
+            self._loop.call_soon_threadsafe(self._finish_connect, client, error)
             return
         client.subscribe(MQTT_SUBSCRIBE_TOPIC, qos=1)
+
+    def _on_subscribe(self, client: mqtt.Client, _userdata: Any, _mid: int, granted_qos: Any, *_: Any) -> None:
+        if self._closing or client is not self._mqtt:
+            return
+        if not granted_qos or any(int(qos) >= 128 for qos in granted_qos):
+            self._loop.call_soon_threadsafe(self._finish_connect, client, ConnectionError("MQTT subscription rejected"))
+            return
         self.connected = True
         self._connected_at = time.monotonic()
-        self._backoff = RECONNECT_MIN_SECONDS
         # Credentials demonstrably work again; re-arm for the next outage.
         self._auth_error_reported = False
         # Only mention warm-up when one can actually apply. A reused identity is already
@@ -269,21 +313,36 @@ class AnthemMqttStream:
                 "Kohler MQTT connected (identity %s, already provisioned — no warm-up)",
                 (self._mobile_device_id or "generated")[-8:],
             )
-        self._dispatch_connected()
+        self._dispatch_connected(client)
+        self._loop.call_soon_threadsafe(self._finish_connect, client)
 
     def _on_disconnect(
         self, _client: mqtt.Client, _userdata: Any, rc: int, *_: Any
     ) -> None:
+        if self._closing or _client is not self._mqtt:
+            return
         self.connected = False
         self._connected_at = None
+        self.last_error = "MQTT disconnected"
         if self._closing:
             return
-        _LOGGER.warning("Kohler MQTT disconnected (rc=%s); reconnecting", rc)
-        self._schedule_reconnect()
+        self._loop.call_soon_threadsafe(self._disconnected, _client)
+
+    def _disconnected(self, client: mqtt.Client) -> None:
+        if self._closing or client is not self._mqtt:
+            return
+        self._finish_connect(client, ConnectionError("MQTT disconnected before setup completed"))
+        if self._recovery.since is None:
+            _LOGGER.warning("Kohler MQTT disconnected; reconnecting")
+        if self._on_disconnect_cb:
+            self._on_disconnect_cb()
+        self._start_reconnect_task()
 
     def _on_message(
         self, client: mqtt.Client, _userdata: Any, message: mqtt.MQTTMessage
     ) -> None:
+        if self._closing or client is not self._mqtt:
+            return
         # Acknowledge first: the service treats an unanswered direct method as unhandled,
         # and a decode failure should not suppress the acknowledgement.
         match = _RID.search(message.topic)
@@ -329,35 +388,44 @@ class AnthemMqttStream:
         # connection: once an identity has received anything it is provisioned, and a
         # reconnect cannot un-provision it.
         self._warmup_pending = False
-        self._dispatch(envelope)
+        self._dispatch(envelope, client)
 
     # ------------------------------------------------------------------ #
     # Thread hand-off
     # ------------------------------------------------------------------ #
-    def _dispatch(self, envelope: Envelope) -> None:
+    def _dispatch(self, envelope: Envelope, client: mqtt.Client) -> None:
         """Hand an envelope to the consumer on the owning event loop."""
         loop = self._loop
         if loop is None or loop.is_closed():
             return
-        loop.call_soon_threadsafe(self._safe_callback, envelope)
+        loop.call_soon_threadsafe(self._safe_callback, envelope, client)
 
-    def _safe_callback(self, envelope: Envelope) -> None:
+    def _safe_callback(self, envelope: Envelope, client: mqtt.Client) -> None:
+        if self._closing or not self.connected or client is not self._mqtt:
+            return
         try:
             self._on_envelope(envelope)
         except Exception:  # noqa: BLE001 - a bad consumer must not kill the stream
             _LOGGER.exception("Kohler MQTT consumer raised on %s", envelope.code)
 
-    def _dispatch_connected(self) -> None:
+    def _dispatch_connected(self, client: mqtt.Client) -> None:
         """Notify the consumer of a connect, on the owning loop.
 
         Runs on paho's network thread, so it hands off the same way envelopes do.
         """
         loop = self._loop
-        if loop is None or loop.is_closed() or self._on_connect_cb is None:
+        if loop is None or loop.is_closed():
             return
-        loop.call_soon_threadsafe(self._safe_connected)
+        loop.call_soon_threadsafe(self._safe_connected, client)
 
-    def _safe_connected(self) -> None:
+    def _safe_connected(self, client: mqtt.Client) -> None:
+        if self._closing or not self.connected or client is not self._mqtt:
+            return
+        if self._recovery.since is not None:
+            _LOGGER.info("Kohler MQTT connection recovered")
+        self._recovery.reset()
+        self.last_error = None
+        self.next_retry_at = None
         try:
             if self._on_connect_cb is not None:
                 self._on_connect_cb()
@@ -373,6 +441,8 @@ class AnthemMqttStream:
         if self._auth_error_reported or self._on_auth_error_cb is None:
             return
         self._auth_error_reported = True
+        self.last_error = "Reauthentication required"
+        self.next_retry_at = None
         try:
             self._on_auth_error_cb(err)
         except Exception:  # noqa: BLE001 - a bad consumer must not kill the stream
@@ -392,11 +462,11 @@ class AnthemMqttStream:
         self._reconnect_task = asyncio.create_task(self._async_reconnect())
 
     async def _async_reconnect(self) -> None:
-        """Reconnect with exponential backoff, re-registering each attempt."""
+        """One reconnect owner: immediate, 1/2/5 minutes, then long-outage backoff."""
+        delay = 0.0
         while not self._closing:
-            delay = self._backoff
-            self._backoff = min(self._backoff * 2, RECONNECT_MAX_SECONDS)
             await asyncio.sleep(delay)
+            self.next_retry_at = None
             if self._closing:
                 return
             old, self._mqtt = self._mqtt, None
@@ -408,16 +478,28 @@ class AnthemMqttStream:
                     _LOGGER.debug("Error tearing down old MQTT client", exc_info=True)
             try:
                 await self._async_connect()
-                return
+                if self.connected:
+                    return
             except AuthError as err:
-                # A rejected credential cannot be retried out of, so tell the consumer —
-                # but keep retrying anyway, at the 300 s ceiling. Re-authenticating
-                # elsewhere (or a reload) should heal this without a restart, and the cost
-                # of an attempt every five minutes is nothing next to a stream that stays
-                # down because nobody noticed. `AuthUnavailable` is excluded: that is
-                # Kohler being unreachable, which is exactly what retrying is for.
+                # OAuth rejection requires reauth; a network failure does not. Broker
+                # SAS rejection is a separate ConnectionError: retry with newly minted
+                # SAS credentials without incorrectly declaring the user's login dead.
                 if not isinstance(err, AuthUnavailable):
                     self._report_auth_error(err)
-                _LOGGER.warning("Kohler MQTT reconnect failed: %s", err)
+                    return
+                self._mqtt_failure(err)
             except Exception as err:  # noqa: BLE001 - keep retrying on any failure
-                _LOGGER.warning("Kohler MQTT reconnect failed: %s", err)
+                self._mqtt_failure(err)
+            delay = self._recovery.fail(minimum=getattr(self._client, "cloud_retry_delay", 0))
+            self.next_retry_at = time.time() + delay
+            if self._on_event:
+                self._on_event("mqtt_retry_scheduled", retry_in=delay)
+            if not self._recovery.long_reported and time.monotonic() - self._recovery.since >= 86400:
+                self._recovery.long_reported = True
+                _LOGGER.info("Kohler MQTT remains unavailable; retrying hourly")
+
+    def _mqtt_failure(self, err: BaseException) -> None:
+        self.last_error = error_label(err)
+        _LOGGER.debug("Kohler MQTT reconnect failed: %s", error_label(err))
+        if self._on_event:
+            self._on_event("mqtt_retry_failed", error=error_label(err))

@@ -100,7 +100,7 @@ Two kinds of line share the file. Tell them apart by which key they carry:
 
   A decision record — has `journal` and `event`:
 
-    journal      "cutoff" or "warmup" — which watcher wrote it
+    journal      "cutoff", "warmup", or "connectivity" — which watcher wrote it
     event        what happened (the two journals reuse some event names,
                  which is why `journal` is there)
     valve        present only on an account with several valves: which one
@@ -143,6 +143,13 @@ the Anthem Plus hub's own web UI resets to `warmUpDisabled` on every sign-in:
     context         written shortly after a disable, holding `after_window`
     restore_scheduled / restore / restore_done / restore_failed / restore_skipped
                     what Auto-Restore did, and why when it did nothing
+
+The connectivity journal (journal: "connectivity") records MQTT/cloud/device
+failures, scheduled retries, local HUB probe results, valve-link changes,
+state reconciliation, canceled actions, authentication failures and recovery.
+baseline/device_baseline describe the state when a report starts during an outage.
+No credentials or cloud response bodies are added to connectivity records.
+Warmup restore_deferred_offline / restore_resumed_online remain in the warmup trail.
 
 Attach these files to a GitHub issue to document a bug — or a healthy run on
 hardware the integration has never been verified against.
