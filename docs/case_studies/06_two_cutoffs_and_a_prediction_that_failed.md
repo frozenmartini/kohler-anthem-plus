@@ -147,9 +147,9 @@ Only the third survives, and only directionally.
 ### 5b. ⚠️ The cause: the corpus was 58 files, not 90
 
 Every analysis was run against `/config/kohler_anthem_plus_raw/` alone. **The corpus is 90
-files across five directories**, and the 32 oldest live in
-`/homeassistant/scripts/kohler_konnect_custom/log/` in a **different schema** —
-`received_at_utc` rather than `ts`, and `payload` as a dict rather than a JSON string. A reader
+files across five directories**, and the 32 oldest came from the older bridge capture tree,
+in a **different schema** — `received_at_utc` rather than `ts`, and `payload` as a dict rather
+than a JSON string. A reader
 written for the newer format silently sees none of them.
 
 That is 36 % of the corpus and the entire 2026-08-07 → 08-13 period. Session 10's handoff said

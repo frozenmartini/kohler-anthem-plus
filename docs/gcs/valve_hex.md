@@ -13,14 +13,13 @@ are wrong. Device: `gcs-sio32343h7` (SKU `GCS`).
 | Where it is implemented | File |
 |---|---|
 | Encoder (Home Assistant) | `scripts.yaml` → `anthem_valve_hex_convert` |
-| Sender | `kohler_konnect_custom/send_solowritesystem.py` |
-| **Decoder — authoritative** | `kohler_konnect_custom/mqtt_capture.py` → `decode_valve_state()` |
+| **Decoder — authoritative** | This document — see [Word layout](#word-layout) |
 
-**`mqtt_capture.py` is the reference implementation.** Where any other document or library
+**This document is the reference implementation.** Where any other document or library
 disagrees with it, it wins — its constants (`VALVE_TEMPERATURE_BASE_C = 25.6`,
 `VALVE_TEMPERATURE_STEP_C = 0.1`, `VALVE_FLOW_PER_PERCENT = 2`, `OUTLET_MASK_BITS = 0x07`,
 `VALVE_PAUSE_FLAG = 0x40`) are the ones validated against the captures below. Two earlier
-decompile-derived readings contradicted it and are recorded in
+decompile-derived readings contradicted them and are recorded in
 [Superseded readings](#superseded-readings).
 
 ## Word layout
@@ -405,7 +404,7 @@ calibrated ceiling in place of the setpoint, then reverts to `0xC8`.
 ```
 
 Mask, preset, `configChangeIndent` and temperature are unchanged across the burst — only byte
-2 moves. Measured over the `kohler_konnect_custom` corpus (2026-08-07 → 08-13):
+2 moves. Measured over the 2026-08-07 → 08-13 capture corpus:
 
 | | dip cycles | within 5 s | median |
 |---|---:|---:|---:|

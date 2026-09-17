@@ -147,7 +147,7 @@ water.** Measured directly, linear in the HUB's slider position.
 
 The owner ran the test that had never been possible before — **HUB flow control enabled**, on
 a calibrated valve, with the **first-gen touchscreen disconnected**. Capture:
-`captures/2026-08-14_hub_flow_double_scaling/mqtt_raw_20260814T185418Z_*.jsonl`.
+`logs/2026-08-14_hub_flow_double_scaling/mqtt_raw_20260814T185418Z_*.jsonl`.
 
 Dialling the HUB's flow slider with all three zone-2 outlets open:
 
@@ -176,7 +176,7 @@ flow control the recommended workaround. What produces it is still open.
 
 A second factory reset the same day, with the **GCS setup skipped entirely so the valve was
 never calibrated**, the HUB calibrated with flow control on, and **no first-gen touchscreen
-connected**. Capture: `captures/2026-08-14_uncalibrated_valve_test/`.
+connected**. Capture: `logs/2026-08-14_uncalibrated_valve_test/`.
 
 **The throttling persisted.** HUB reporting `FLOWRATE=100` throughout:
 
@@ -642,7 +642,7 @@ types.
 
 **The mapping is identical before and after the 2026-08-14 factory reset, on the same
 `deviceid` (`gcs-sio32343h7` for the valve, `gcs-sious0103D` for the HUB)** — checked against
-`captures/2026-08-14_valve_reboot_fault/`. A factory reset changed neither. `deviceid` and
+`logs/2026-08-14_valve_reboot_fault/`. A factory reset changed neither. `deviceid` and
 `sku` are the identity fields; `sysid` is not.
 
 **When both report the same fact, trust the GCS word.** The HUB's `SHOWER_VALVE_STS` lags

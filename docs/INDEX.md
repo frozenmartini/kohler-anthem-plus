@@ -34,9 +34,9 @@ What that means in practice:
 | you see | what it is |
 |---|---|
 | `mqtt_raw_*.jsonl`, `cutoff_*.jsonl`, `warmup_*.jsonl` | MQTT captures and journals from the author's own system, written by tooling that lives outside this repository. Not published. Your install does **not** write these (before 0.4.1 it did, unasked); the **Report Log** switch writes the same records — raw messages and both journals — into one file when you turn it on. |
-| `kohler-work/…`, `kohler_konnect_custom/…`, `/homeassistant/scripts/…` | Analysis scripts and an experiment workspace kept outside this repo. Not published. |
+| `kohler-work/…`, `/homeassistant/scripts/…` | Analysis scripts and an experiment workspace kept outside this repo. Not published. |
 | `tests/…`, `run_offline.sh` | The regression suite, also outside this repo. |
-| `captures/…` | Archived evidence from specific incidents, kept with the workspace above. |
+| `logs/…` | Captures, journals and archived incident evidence, kept with the workspace above. |
 
 The **protocol documentation itself is complete without them** — every finding is written out
 here, in full, including the raw messages it rests on. The references say where each one came
@@ -68,8 +68,8 @@ from; they are not a dependency.
 State is read over **MQTT** (event-driven); REST reads are poll-only and partly cached.
 Control is **cloud-only** for both SKUs — the HUB's local API cannot turn anything on.
 
-When documents disagree about the valve word, the reference implementation is
-`kohler_konnect_custom/mqtt_capture.py` → `decode_valve_state()`. Two decompile-derived
+When documents disagree about the valve word, the reference implementation is the layout
+specified in [valve_hex.md](gcs/valve_hex.md). Two decompile-derived
 readings were found to contradict it and have been corrected — see
 [Superseded readings](gcs/valve_hex.md#superseded-readings).
 

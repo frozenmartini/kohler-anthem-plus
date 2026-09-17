@@ -38,7 +38,7 @@ three ended by themselves.**
 | Start route | **HUB `valveOnOff`**, all three | owner-confirmed |
 | All other control | **Anthem Plus touchscreen** | owner-confirmed |
 | Warm-up / preset | `warmUpNotInProgress`, `presetOrExperienceId: 0` | first word of each capture |
-| **Anthem Plus firmware** | **application `2.88`, OS `5.4`** | `captures/20260810_*_hub_config.json`, `/configuration/about/firmware`. ⚠️ Read **2026-08-10** and not re-read since — the PIN file did not survive the container being recreated. `firmwareUpdate: noUpdateAvailable` in every capture since is weak corroboration that it has not moved. |
+| **Anthem Plus firmware** | **application `2.88`, OS `5.4`** | `logs/20260810_*_hub_config.json`, `/configuration/about/firmware`. ⚠️ Read **2026-08-10** and not re-read since — the PIN file did not survive the container being recreated. `firmwareUpdate: noUpdateAvailable` in every capture since is weak corroboration that it has not moved. |
 
 Temperatures below are the wire value: `0x184` (388) = 101.8 °F is the configured
 `defaultOutletTemperature`; the owner moved it to `0x17F` (383) = 100.9 °F and `0x179` (377) =
@@ -476,5 +476,5 @@ as a contradiction, not folded into the model.
 | CS5 arithmetic | `05_three_restarts_and_the_unexplained_00.md` §2, §4 |
 | The experiment, four legs | `cutoff_20260819T212223Z_72_701402e1.jsonl`, `mqtt_raw_20260819T212223Z_72_52ea9d5b.jsonl` (same connection, appended) |
 | Model scoring, 14 hits / 0 false alarms | `kohler-work/sweep_sim.py`, five sessions |
-| Controller firmware 2.88 / OS 5.4 | `captures/20260810_133428_hub_config.json` `/configuration/about/firmware` |
+| Controller firmware 2.88 / OS 5.4 | `logs/20260810_133428_hub_config.json` `/configuration/about/firmware` |
 | The mechanism itself | **owner's hypothesis, 2026-08-19**; simulated and confirmed here |

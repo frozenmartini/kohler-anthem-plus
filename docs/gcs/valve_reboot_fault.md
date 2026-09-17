@@ -101,9 +101,10 @@ reboot described below, not a spontaneous one. **The last spontaneous reboot is
 Cross-check against water: of 26 captured reboots, **17 occurred idle, 4 with water running,
 5 indeterminate** — so flow is not the trigger.
 
-Raw evidence archived at
-`/homeassistant/scripts/kohler-work/captures/2026-08-14_valve_reboot_fault/` — the two MQTT
-captures, both cutoff debug logs, and `device_state_before_factory_reset.json`.
+Raw evidence archived at `logs/2026-08-14_valve_reboot_fault/` —
+`device_state_before_factory_reset.json` and the state captured either side of the reset. The
+two MQTT captures and both cutoff debug logs for the same window sit in `logs/` under their
+own timestamps (`*_20260814T033343Z_*` and `*_20260814T055846Z_*`).
 
 > **File retention changed 2026-08-15.** `RAW_MQTT_LOG_KEEP_FILES` and
 > `CUTOFF_DEBUG_LOG_KEEP_FILES` are now `None` — **no limit on the number of files**, at the
@@ -194,8 +195,8 @@ normalOperation` throughout, and the HUB reports `SYSTEM_READY`.
 
 > **CORRECTED 2026-08-14.** An earlier revision of this section listed 15 reboots and said the
 > fault "began 2026-08-13". Both were wrong: that count came from the integration's own
-> capture directory only. Including the **older bridge corpus** in
-> `scripts/kohler_konnect_custom/log/` gives **25 reboots, the first on 2026-08-07** — and a
+> capture directory only. Including the **older bridge corpus** — the separate capture tree
+> that predated this integration — gives **25 reboots, the first on 2026-08-07** — and a
 > cluster of six on 08-11, before most of the work in this project existed.
 
 | Reboot (local) | Gap | Attribution |
@@ -255,7 +256,7 @@ control on, and the **first-gen K-28214 touchscreen left disconnected** — conf
 and nothing being sent to it — still rebooting.** It substantially weakens the two-interface
 hypothesis in §3b, which is left standing only because nothing positively excludes it either.
 
-Evidence: `captures/2026-08-14_uncalibrated_valve_test/`.
+Evidence: `logs/2026-08-14_uncalibrated_valve_test/`.
 
 ### Why the 08-11 cluster matters
 

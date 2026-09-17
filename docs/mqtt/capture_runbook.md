@@ -95,11 +95,7 @@ devices. Filter forwarded messages by the payload field `deviceid`.
 
 ## Important Environment Rules
 
-Run from the standalone scripts directory:
-
-```sh
-cd /root/homeassistant/scripts/kohler_konnect_custom
-```
+Run from the directory holding the capture helper, outside the integration tree.
 
 Use Home Assistant's virtual environment:
 
@@ -445,10 +441,9 @@ subscription, local Mosquitto forwarding, and clean disconnect without
 importing the Home Assistant integration. It reads the Kohler and MQTT config
 entries from `/homeassistant/.storage/core.config_entries`.
 
-Run a continuous capture from the scripts directory:
+Run a continuous capture from the directory holding the helper:
 
 ```sh
-cd /root/homeassistant/scripts/kohler_konnect_custom
 python3 mqtt_capture.py --listen-seconds 0
 ```
 
