@@ -45,7 +45,7 @@
 - [Documentation](#documentation)
 - [Prior art](#prior-art)
 - [Contributing](#contributing)
-- [Licence and trademarks](#licence-and-trademarks)
+- [License and trademarks](#license-and-trademarks)
 
 ---
 
@@ -952,7 +952,6 @@ of it.
 | [`hub/cloud_api.md`](hub/cloud_api.md) | The controller's cloud API |
 | [`hub/local_api.md`](hub/local_api.md) | The controller's local LAN API, and what it can't do |
 | [`hub/lighting.md`](hub/lighting.md) | Lighting and Lumiwave |
-| [`mqtt/capture_runbook.md`](mqtt/capture_runbook.md) | Capturing and reading MQTT traffic |
 | [`case_studies/`](case_studies/) | Real showers, worked through message by message |
 
 The case studies are where the reasoning lives. They're how the run-time cutoff behaviour,

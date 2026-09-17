@@ -152,7 +152,7 @@ and held locally on the panel — it is not transmitted.
 `presetOrExperienceId` — it tracks per-zone mask and pause state only, and a real
 `maximumRunTime` cutoff pauses every zone a preset owns in one atomic message, a different shape
 from the staggered manual pattern above. See
-[`valve_reboot_fault.md`](valve_reboot_fault.md#5-fixed-2026-08-15--the-restore-now-replays-the-pre-cutoff-flow)
+[`valve_reboot_fault.md`](valve_reboot_fault.md#5--fixed-2026-08-15--the-restore-now-replays-the-pre-cutoff-flow)
 for the full reasoning.
 
 > ⚠️ **An earlier revision of this paragraph said "None of this affects the integration."
@@ -2205,8 +2205,9 @@ question closed — §3h. It stays on as the watchdog that proves each restore a
 the hub's behaviour changing.)*
 
 `warmup_*.jsonl` in the development capture folder (see
-[`../mqtt/capture_runbook.md`](../mqtt/capture_runbook.md)), beside the raw MQTT capture and
-the cutoff journal, on the same UTC clock so all three interleave. **On by default** and independent of
+[`../architecture.md`](../architecture.md), "The Report Log and the developer trails"),
+beside the raw MQTT capture and the cutoff journal, on the same UTC clock so all three
+interleave. **On by default** and independent of
 the auto-restore switch: the event fires a few times a week, so a log that had to be switched
 on first would miss it, and an *unrestored* disable is the cleaner observation of the two.
 `README-warmup.txt` is written alongside and carries the analysis notes.

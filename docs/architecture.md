@@ -531,6 +531,59 @@ status over Azure IoT Hub as direct-method messages on
 One subscription is account-level, so a session opened for either device receives messages
 for **both**. Filter on `payload.deviceid` and `payload.sku`.
 
+### Holding the stream — what the connection experiments established
+
+Measured 2026-08-12, and the reason the MQTT client is shaped the way it is.
+
+**Hold one connection. A client that connects per command receives nothing, ever.** On one
+connection held for 400 s:
+
+```text
+t+  0.2s  SUBACK x4                                    (all four topics, qos 1)
+t+ 60.1s  command  ->  t+ 61.2s  GCS_SOLO_STS          received
+t+150.7s  command  ->  t+152.5s  GCS_SOLO_STS          received
+t+241.9s  command  ->  t+243.1s  GCS_SOLO_STS          received
+t+330.6s  command  ->  t+332.0s  GCS_SOLO_STS          received
+```
+
+Every command on the held connection produced a message within 1–2 s, while four earlier
+attempts — each of which connected, fired and disconnected inside a minute — received nothing
+at all.
+
+**Reuse one registered identity.** `mobileDeviceId` is an *identity*, not a credential:
+generate it once and persist it. Passing `None` mints a throwaway, so every connect leaves
+another dead "phone" registered on the account. The SAS password *is* the credential and must
+still be fetched fresh on every connect — which is why the mobile-settings POST sits in the
+table above. `keepalive` is an MQTT heartbeat interval, not a connection lifetime; the
+connection stays open as long as the token and the network session hold.
+
+⚠️ **Retracted: the "60-second warm-up".** The capture notes used to state that a newly
+registered mobile device receives nothing for roughly the first minute. Two things sink it.
+The comparison was **confounded** — the four failing attempts did not merely fire *early*,
+they each tore down inside a minute, and the reply takes 1–2 s, so elapsed time was never
+isolated. And the captures **contradict** it: across 27 sessions, every one a freshly
+registered identity, five received their first message inside the supposed window, at 37.1,
+47.7, 50.5, 56.6 and 59.0 s. A plain client on a *pre-existing* identity sees traffic
+immediately, with no warm-up of any kind. A newly registered identity may still need a
+moment — plausible, weakly evidenced, and hard to retest now that the identity is persisted
+and registered only once — so treat any wait as a cap on how long silence is uninformative,
+and note that **a delivered message settles it instantly**, which is a far better signal than
+any timer.
+
+**Any experiment that connects, fires a command and disconnects inside a minute produces a
+false negative.** Several conclusions in these documents were drawn exactly that way and had
+to be retracted, including the first of the two `SHOWER_VALVE_STS` claims recorded below.
+
+Two other things the held connection showed. **Unprompted status pairs** arrive roughly every
+three minutes with no command sent (t+189.5 s, t+370.4 s), so the channel is not purely
+command-driven. And the HUB's `SHOWER_VALVE_STS` followed `GCS_SOLO_STS` by 0.4–0.6 s in five
+of six cases and was **absent once**, so a HUB message is likely but not guaranteed after a
+GCS command.
+
+⏱ **For message-to-message timing use the receive timestamp, not the payload's.** A capture
+stamps `ts` on receipt to microseconds; the payload's own `timestamp` field is generally only
+whole seconds.
+
 ### What this integration reads over REST, and when
 
 `SCAN_INTERVAL = None` — there is no polling loop. REST is read on **setup** and on **every
@@ -602,6 +655,8 @@ and the stream existing.
 Connectivity journals now record reconciliation start/completion/incomplete reads, separate
 from raw MQTT. Developer capture splits this into `connectivity_*.jsonl`; a user's active
 Report Log includes it alongside MQTT, cutoff and warmup records in the same episode.
+Record format and the journal vocabularies are below, under
+[The Report Log and the developer trails](#the-report-log-and-the-developer-trails--one-record-vocabulary).
 
 **Auth failures cannot escape setup.** Both reads `async_setup` awaits — the customer read and
 the seed — map `AuthUnavailable` → `ConfigEntryNotReady` (retry: Kohler was unreachable, the
@@ -616,6 +671,64 @@ prompt, no retry (found 2026-08-21 while proving the startup-read fold).
 |---|---|
 | GCS | `GCS_SOLO_STS`, `GCS_WARM_STS`, `READ_GCS_EXPERIENCE_STS` |
 | HUB | `SHOWER_VALVE_STS`, `STEAM_STS`, `MUSIC_STS`, `LIGHT_STS`, `FAVORITE_STS` |
+
+### The Report Log and the developer trails — one record vocabulary
+
+The **Report Log** switch (either device page, diagnostic section) writes one file per
+switch-on into `custom_components/kohler_anthem_plus/reports/`, appended across a Home
+Assistant restart, capped at 8 MB with `_p2`, `_p3`… continuation parts. The design is
+[`anthem_plus/report_log.py`](../custom_components/kohler_anthem_plus/anthem_plus/report_log.py),
+and the `README.txt` written beside the files lists every record. The user-facing description
+is [in the user guide](user_guide.md#the-report-log-switch).
+
+One JSON object per line, in write order, every line stamped `ts` (ISO-8601 UTC, `Z`). Two
+kinds of line share the file:
+
+```json
+{"ts":"2026-08-13T15:04:28.123456Z","topic":"$iothub/methods/POST/…","qos":1,"retain":false,"payload":"{\"sku\":\"GCS\",…}"}
+{"ts":"2026-08-14T02:07:11.108Z","journal":"cutoff","event":"flow_end","zone":1,"duration":900.07,"limits":[900],"mask":4,"paused":true,"verdict":"cutoff","matched":900}
+{"ts":"2026-08-14T02:11:20.441Z","journal":"cutoff","event":"flow_end","zone":2,"duration":249.1,"limits":[900],"mask":2,"paused":false,"verdict":"ignored","reason":"stopped (0x00) rather than paused (0x40) — not the valve's timer"}
+```
+
+* A line with `topic` is a raw message. `payload` is the payload text **exactly as
+  received** — not a re-serialised dict, so key order, duplicates and numeric formatting
+  survive. Bytes that are not valid UTF-8 appear as `payload_b64` instead, with no `payload`.
+* A line with `journal` and `event` is a decision record. `journal` is `cutoff` — the
+  run-time cutoff detector: `arm` (what it could act on at startup), `flow_start`,
+  `mask_change`, `setting_change`, `flow_end` (the verdict), `restore` / `restore_done` /
+  `restore_failed`, `anchor`, `forget` — or `warmup`, whose own vocabulary is tabulated in
+  [`gcs/api.md`](gcs/api.md) §3g. The two share event names, which is what `journal` is for.
+  On an account with several valves a record also carries `valve`.
+
+**The cutoff trail exists because that feature's real failure mode is *silence*.**
+`home-assistant.log` gets a WARNING when the water is restarted, and nothing whatsoever when a
+cutoff should have been detected and wasn't — which is the case that shipped undetected for a
+day. The trail records every close the detector evaluated, including the ones it declined and
+why, and is written whether or not Endless Shower is on: a `flow_end` with
+`verdict: "cutoff"` followed by a `restore` carrying
+`skipped: "restart_on_runtime_cutoff is off"` is exactly what an install with the switch off
+reports.
+
+Reading a pair together — a `GCS_SOLO_STS` whose valve word carries `0x40`, against the
+`flow_end` written in the same instant — is the fastest way to answer "why did this not fire":
+
+```sh
+cd custom_components/kohler_anthem_plus/reports
+jq -c 'select(.topic)   | {ts, code:(.payload|fromjson?|.data.code)}' report_*.jsonl > /tmp/a.jsonl
+jq -c 'select(.journal) | {ts, journal, event, zone, verdict, reason}' report_*.jsonl > /tmp/b.jsonl
+cat /tmp/a.jsonl /tmp/b.jsonl | sort -t'"' -k4 | less
+```
+
+(They are already in order in the file; the split is only to read one kind at a time. The `?`
+on `fromjson` skips the odd record whose payload is not JSON — a malformed payload is kept
+verbatim and a non-UTF-8 one as `payload_b64` — instead of aborting.)
+
+**The `mqtt_raw_*.jsonl`, `cutoff_*.jsonl`, `warmup_*.jsonl` and `connectivity_*.jsonl` files
+cited throughout these documents hold the same records**, split one file per Home Assistant
+run per kind, written always and never pruned, by a developer package that is not part of the
+published integration — see [the note on file references](INDEX.md). Their trail lines carry
+no `journal` key, because the filename already says which trail it is. Nothing in a release
+writes any of them.
 
 ### ⚠️ `sysid` names the message, not the device — never filter on it
 
@@ -764,8 +877,9 @@ is not a usable source for a GCS-driven session.
 >
 > 1. "The HUB emits no `SHOWER_VALVE_STS`" — the right conclusion from a broken
 >    measurement. The client used to verify it was receiving nothing at all, including
->    `GCS_SOLO_STS`, so it could not have detected anything. See the warm-up section of
->    [the MQTT runbook](mqtt/capture_runbook.md).
+>    `GCS_SOLO_STS`, so it could not have detected anything. See the retracted
+>    "60-second warm-up" under
+>    [Holding the stream](#holding-the-stream--what-the-connection-experiments-established).
 > 2. "The HUB does emit `SHOWER_VALVE_STS`" — an over-correction. That test fired
 >    stop-words, which are themselves OFF transitions, and OFF is exactly the case the HUB
 >    does report. Testing an "is it silent?" hypothesis with a command that produces the
@@ -841,5 +955,4 @@ first time — that is what makes this project **Anthem Plus** rather than Anthe
 1. This document.
 2. [`gcs/valve_hex.md`](gcs/valve_hex.md) — the valve command word, if you touch GCS at all.
 3. [`gcs/api.md`](gcs/api.md) or [`hub/cloud_api.md`](hub/cloud_api.md) — the endpoints.
-4. [`mqtt/capture_runbook.md`](mqtt/capture_runbook.md) — wiring up live state.
-5. [`hub/local_api.md`](hub/local_api.md) — only if you need config, diagnostics, or Zigbee.
+4. [`hub/local_api.md`](hub/local_api.md) — only if you need config, diagnostics, or Zigbee.

@@ -10,17 +10,16 @@ in both directions:
 Both directions use the same layout, so an encoder and a decoder that disagree
 are wrong. Device: `gcs-sio32343h7` (SKU `GCS`).
 
-| Where it is implemented | File |
+| | |
 |---|---|
-| Encoder (Home Assistant) | `scripts.yaml` → `anthem_valve_hex_convert` |
-| **Decoder — authoritative** | This document — see [Word layout](#word-layout) |
+| **Implementation** | [`anthem_plus/valve_hex.py`](../../custom_components/kohler_anthem_plus/anthem_plus/valve_hex.py) — encode, decode, and the Fahrenheit ladder |
+| **Evidence** | this document |
 
-**This document is the reference implementation.** Where any other document or library
-disagrees with it, it wins — its constants (`VALVE_TEMPERATURE_BASE_C = 25.6`,
-`VALVE_TEMPERATURE_STEP_C = 0.1`, `VALVE_FLOW_PER_PERCENT = 2`, `OUTLET_MASK_BITS = 0x07`,
-`VALVE_PAUSE_FLAG = 0x40`) are the ones validated against the captures below. Two earlier
-decompile-derived readings contradicted them and are recorded in
-[Superseded readings](#superseded-readings).
+**This document is where the layout was established; `valve_hex.py` is where it runs.** Every
+claim below is checked against live MQTT captures, and where a decompile, an older note or an
+outside library disagrees with the captures, the captures win. That is how each of the
+[superseded readings](#superseded-readings) was caught — this project's own included. If this
+document and `valve_hex.py` ever disagree, one of them is a bug: say which, and fix it.
 
 ## Word layout
 
@@ -181,11 +180,21 @@ The device reports more values than it accepts:
 | `11` | — | 313 messages |
 | `10` | — | 2 messages |
 
-The high nibble identifies the valve. The low-nibble bits (`0x04` on valve1,
-`0x01` on both) are **not understood**. They do not correlate with warmup
-status, preset ID, system state, or the outlet mask — `01` and `05` both appear
-alongside mask `00` and mask `07`. Decoders should ignore byte 0; the outlet
-state is fully determined by byte 3.
+Every one of those five values falls out of the layout above, which is the cleanest
+confirmation of it in the corpus:
+
+| Byte 0 | Valve index | `atTemp` (`0x04`) | Temperature bit 8 (`0x01`) |
+|---|---|---|---|
+| `01` | primary | clear | set — 25.6 °C or above |
+| `05` | primary | **set** — at setpoint | set |
+| `00` | primary | clear | **clear** — below 25.6 °C |
+| `11` | secondary | clear | set |
+| `10` | secondary | clear | **clear** |
+
+⚠️ **Do not ignore byte 0.** An earlier revision of this document said the low nibble was "not
+understood" and that the outlet state is fully determined by byte 3. The second half is true;
+the first is not, and acting on it loses the temperature's high bits — which is exactly the
+8-bit misreading corrected in the next section.
 
 ## Bytes 0-1 — temperature is 16-bit
 
@@ -227,19 +236,14 @@ being corrupt.
 > high bit turns on.
 
 Writes are clamped to **48.8 °C (488 tenths)** because the Konnect app never sends above it,
-not because the encoding cannot carry more.
+not because the encoding cannot carry more. Whether the firmware enforces that cap or only the
+app does is untested — do not assume higher values are safe to write.
 
-The byte accepts up to `0xFF`, but the Konnect app's own decompile treats **`0xE8`
-(48.8 °C / 119.8 °F) as the maximum** it will send. Whether the firmware enforces that cap
-or merely the app does is untested — do not assume values above `0xE8` are safe to write.
-
-| Byte | °C | °F |
-|---|---|---|
-| `0x00` | 25.6 | 78.1 |
-| `0x47` | 32.7 | 90.9 |
-| `0x84` | 38.8 | 102.0 |
-| `0x90` | 40.0 | 104.0 |
-| `0xFF` | 51.1 | 124.0 |
+> A superseded revision printed a byte-to-degree table here running `0x00` = 25.6 °C to
+> `0xFF` = 51.1 °C, with Fahrenheit computed arithmetically. **Both axes of it are wrong** —
+> it reads byte 1 alone as the whole temperature, and Fahrenheit is a lookup table, not
+> arithmetic (next section). It is removed rather than corrected: the formula above is the
+> reference, and a table invites reading a single byte in isolation, which is the mistake.
 
 Kohler's REST API reports temperatures in Celsius regardless of the account's
 display unit, and so does this byte. Convert at the edge.
@@ -387,9 +391,11 @@ The outlet configuration's documented `flow 16–200` range is in **byte** units
   2, 0.10 on zone 1**. Asking the Anthem Plus panel for 100% produces valve byte **41**
   (20.5%) on zone 2 and **20** (10.0%) on zone 1, linearly across the whole slider.
 
-**Do not assume a HUB flow value equals the valve's.** Full measurement and the mechanism —
-both devices calibrate independently and both scale, in series — in
-[`../architecture.md`](../architecture.md#why-hub-flow-control-is-broken-double-calibration--measured-2026-08-14).
+**Do not assume a HUB flow value equals the valve's.** Full measurement in
+[`../architecture.md`](../architecture.md#hub-flow-control-is-throttled--effect-measured-mechanism-unknown).
+⚠️ **The effect is measured and reproduced; the mechanism is not known.** An earlier reading
+here — "both devices calibrate independently and both scale, in series" — was withdrawn when
+the throttling turned out to persist on a valve that had never been calibrated.
 
 ### How the ceiling is *observed*: the byte-2 dip
 
@@ -581,8 +587,8 @@ Valve 2's outlets are Home Assistant outlets 4–6 on a 6-outlet model; see
 > paused-with-assignment valve as *running*. Anything answering "is this outlet on" must
 > clear the assignment while paused; anything answering "what will it resume to" must not.
 >
-> The library's `ValveMode` enum misread both halves of this byte: `0x01` as a "SHOWER" mode
-> (it is the outlet-1 bit) and `0x40` as "preset-mode" (it is the pause flag).
+> Reading this byte as a mode enum misses both halves of it. That is the inherited misreading
+> recorded under [Superseded readings](#byte-3-a-valvemode-enum), along with what it breaks.
 
 ```python
 # decode: outlet N (1-6) is on
@@ -596,21 +602,7 @@ mask = (1 if outlet_a else 0) | (2 if outlet_b else 0) | (4 if outlet_c else 0)
 
 STOP and PAUSE are indistinguishable from the outlet bits alone — check
 `byte3 & 0x40` if an automation needs to tell a paused session from a stopped
-one. `mqtt_capture.py` exposes this as `valve1_paused` / `valve2_paused` in the
-state document.
-
-### Do not read byte 3 as a mode enum
-
-The `kohler-anthem` library treats this byte as a `ValveMode` enum — `0x00`
-OFF, `0x01` SHOWER, `0x40` STOP — and `custom_components/kohler/helpers.py`
-follows it. That model only *looks* right because `0x01` means outlet 1; it
-cannot represent `0x02`–`0x07`, all of which occur in normal use.
-
-The concrete consequence: `build_preset_valve_control()` keeps the preset's
-temp and flow bytes but hardcodes `ValveMode.SHOWER` as the last byte,
-discarding the preset's own outlet mask. Starting the "Default shower" preset
-(`Valve1="018448"`, `Valve2="05849c"` — masks `01` and `05`) through the
-integration would run outlet 1 only, and nothing on valve 2.
+one. `decode_word` surfaces it as `ValveWord.paused`.
 
 ## Presets pack outlets into byte 0, at different bit positions
 
@@ -734,11 +726,17 @@ The HUB's `SHOWER_VALVE_STS` for the same moment reported `[1,1,1,0,0,0]` and
 Encode, "outlets 1 and 3 at 104 °F and full flow":
 
 ```text
-104 °F → 40.0 °C → (40.0 - 25.6) * 10 = 144 = 0x90
-100%   → 0xC8
-1 + 4  → 0x05
+104 °F → 400 tenths        (h.z() lookup; see the Fahrenheit ladder above)
+         byte0 = (0 << 4) | (400 >> 8)      = 0x01    valve1, temperature bit 8
+         byte1 =  400 & 0xFF                = 0x90
+100%   → byte2 = 0xC8
+1 + 4  → byte3 = 0x05
 result → 0190C805
 ```
+
+The same word, read the retracted way — `(40.0 − 25.6) × 10 = 144 = 0x90` — happens to land on
+the same two bytes, because 104 °F is above 25.6 °C so the high bit is set either way. That is
+precisely why the 8-bit model survived as long as it did.
 
 ## Superseded readings
 
@@ -780,13 +778,17 @@ which decode correctly as masks (26 distinct mask→outlet pairings confirmed be
 clear, and it is how you tell PAUSE from STOP.
 
 The app may genuinely define such an enum internally; that is a fact about the app's source,
-not about the wire format. This misreading is the direct cause of the
-`build_preset_valve_control()` bug noted above.
+not about the wire format.
+
+**What it breaks, concretely.** A converter built on the enum keeps a preset's temperature and
+flow bytes but hardcodes the "shower" value as the last byte, discarding the preset's own
+outlet mask. On this system, starting the "Default shower" preset (`Valve1` `018448`,
+`Valve2` `05849c` — masks `01` and `05`) that way runs outlet 1 and nothing on valve 2.
 
 ## Verification
 
-Derived and checked against 315 `GCS_SOLO_STS` messages across the 18 raw
-capture logs in `log/`, correlated with the HUB's `SHOWER_VALVE_STS`:
+Derived and checked against 315 `GCS_SOLO_STS` messages across 18 raw capture files,
+correlated with the HUB's `SHOWER_VALVE_STS` in the same messages:
 
 | Field | Result |
 |---|---|

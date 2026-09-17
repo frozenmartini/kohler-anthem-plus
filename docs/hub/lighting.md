@@ -29,7 +29,7 @@ not the bulb's reset state, not range, and not a competing coordinator stealing 
 (§6), so "the coordinator never opened permit-join" and "the coordinator rejected the
 bulb" are indistinguishable from outside. A firmware guard is the owner's working
 hypothesis and is consistent with everything observed, but it is **not established** —
-see [What would actually settle it](#what-would-actually-settle-it).
+see [What would actually settle it](#7-what-would-actually-settle-it).
 
 ---
 
@@ -60,7 +60,7 @@ first).
 ## 2. The two controlled experiments
 
 Both used the same bulb, with the hub's scan driven directly via
-[`zigbee_pair.py`](#tooling) rather than the web UI.
+[`zigbee_pair.py`](#tooling--how-to-reproduce-this) rather than the web UI.
 
 ### 2a. Experiment 1 — touchlink reset
 

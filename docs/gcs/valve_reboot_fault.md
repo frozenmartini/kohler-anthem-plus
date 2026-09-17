@@ -438,7 +438,7 @@ the shared cause**, and the argument is withdrawn.
 
 The owner ran HUB flow control **with the first-gen touchscreen disconnected**, and the
 double-scaling still occurred — measured, linear, factor 0.20 on zone 2 and 0.10 on zone 1
-([`../architecture.md`](../architecture.md#why-hub-flow-control-is-broken-double-calibration--measured-2026-08-14)).
+([`../architecture.md`](../architecture.md#hub-flow-control-is-throttled--effect-measured-mechanism-unknown)).
 So the flow bug is unconditional whenever a HUB drives a calibrated valve; it has nothing to
 do with both interface ports being occupied.
 
@@ -458,9 +458,10 @@ for. That is the "flow is so weak" symptom which led to flow control being disab
 system-wide as the recommended workaround.
 
 If that is right, the long-standing "firmware 2.88 flow bug" is not a firmware defect at all
-— it is two calibration stages in series, appearing **only** on installs wired like this one.
-Mechanism and the one-shower test in
-[`../architecture.md`](../architecture.md#why-hub-flow-control-may-be-broken-double-calibration).
+— it appears **only** on installs wired like this one. The measurement and the one-shower test
+are in [`../architecture.md`](../architecture.md#hub-flow-control-is-throttled--effect-measured-mechanism-unknown); the
+"two calibration stages in series" explanation once given here was **withdrawn** when the
+throttling proved to persist on an uncalibrated valve.
 
 Two unexplained faults on one system, both with a plausible single cause in the topology, is
 a stronger position than either on its own.
