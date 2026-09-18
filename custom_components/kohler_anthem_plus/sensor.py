@@ -4,7 +4,9 @@ One headline entity, ``Status``, collapses what the valve is doing into a single
 dashboard needs one card rather than four booleans.
 
 Everything else here is diagnostic and **disabled by default**: useful when something looks
-wrong, noise otherwise. Enable them individually from the device page.
+wrong, noise otherwise. Enable them individually from the device page. The two
+``Connection Last Checked`` sensors are the exception — enabled but hidden, so that the
+history exists to look back through; unhide them from the device page.
 
 **No measured-temperature or measured-flow entities.** Bytes 4-6 of the status word carry
 live sensor feedback, and on this hardware they read zero in every message ever captured —
@@ -62,6 +64,7 @@ async def async_setup_entry(
         entities += [
             ValveStatusSensor(coordinator, valve),
             ValveLastUpdateSensor(coordinator, valve),
+            ValveConnectionLastCheckedSensor(coordinator, valve),
             ValveHexSensor(coordinator, valve, 1),
             OutletMaxRunTimeSensor(coordinator, valve, 1),
         ]
@@ -80,9 +83,12 @@ async def async_setup_entry(
     # One set per controller: each is its own device with its own state and — since a
     # second bathroom need not have the same valve — its own outlet layout.
     for controller in coordinator.controllers:
-        # Diagnostic, and about the controller's *reporting* rather than the water, so it is
-        # created for every controller — unlike everything gated below.
-        entities.append(ControllerLastUpdateSensor(coordinator, controller))
+        # Diagnostic, and about the controller's *reporting* rather than the water, so both
+        # are created for every controller — unlike everything gated below.
+        entities += [
+            ControllerLastUpdateSensor(coordinator, controller),
+            ControllerConnectionLastCheckedSensor(coordinator, controller),
+        ]
 
         if controller_water:
             entities += [
@@ -209,6 +215,42 @@ class ValveLastUpdateSensor(ValveDiagnosticSensor):
         if state is None or state.last_update is None:
             return None
         return datetime.fromtimestamp(state.last_update, tz=timezone.utc)
+
+
+class ValveConnectionLastCheckedSensor(ValveDiagnosticSensor):
+    """When the valve's cloud reachability was last verified.
+
+    The companion to ``binary_sensor`` "Valve Reachable Online", answering the one thing
+    that entity cannot: whether its verdict is fresh. ``last_changed`` will not do — it
+    moves when reachable/unreachable flips, not when a check ran, so a stable verdict looks
+    hours old however recently it was confirmed.
+
+    **Enabled and hidden by default**, unlike the rest of this file's diagnostics, matching
+    the reachability entity it belongs beside. A disabled entity records nothing, so
+    enabling it later starts its history from that moment; this one exists to be read
+    *backwards* after something looked wrong, which needs the rows already written.
+    """
+
+    _attr_name = "Connection Last Checked"
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_entity_registry_enabled_default = True
+    _attr_entity_registry_visible_default = False
+
+    def __init__(self, coordinator: KohlerAnthemPlusCoordinator, valve: Valve) -> None:
+        super().__init__(coordinator, valve)
+        self._attr_unique_id = f"{self._device_id}_connection_last_checked"
+
+    @property
+    def available(self) -> bool:
+        # Deliberately not the base class's `operational` gate: an unreachable device is
+        # exactly when the time of the last check matters, and the base would take this
+        # entity unavailable at that moment. Same reasoning as the reachability sensor.
+        return not self.coordinator._closing
+
+    @property
+    def native_value(self) -> datetime | None:
+        watch = self._valve.cloud_watch
+        return None if watch is None else watch.last_checked_at
 
 
 class ValveHexSensor(ValveDiagnosticSensor):
@@ -388,6 +430,36 @@ class ControllerLastUpdateSensor(ControllerDiagnosticSensor):
         if state is None or state.last_update is None:
             return None
         return datetime.fromtimestamp(state.last_update, tz=timezone.utc)
+
+
+class ControllerConnectionLastCheckedSensor(ControllerDiagnosticSensor):
+    """When the controller's cloud reachability was last verified.
+
+    The counterpart to `ValveConnectionLastCheckedSensor`; see it for why this one is
+    enabled-but-hidden and why it stays available while the device is not. Not redundant
+    with the valve's: the two devices are checked on their own schedules, so the pair is
+    what shows whether a problem is one device or the account.
+    """
+
+    _attr_name = "Connection Last Checked"
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_entity_registry_enabled_default = True
+    _attr_entity_registry_visible_default = False
+
+    def __init__(
+        self, coordinator: KohlerAnthemPlusCoordinator, controller: Controller
+    ) -> None:
+        super().__init__(coordinator, controller)
+        self._attr_unique_id = f"{self._device_id}_connection_last_checked"
+
+    @property
+    def available(self) -> bool:
+        return not self.coordinator._closing
+
+    @property
+    def native_value(self) -> datetime | None:
+        watch = self._controller.cloud_watch
+        return None if watch is None else watch.last_checked_at
 
 
 class ControllerStatusSensor(KohlerControllerEntity, SensorEntity):

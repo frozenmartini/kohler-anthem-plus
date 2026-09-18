@@ -84,6 +84,16 @@ class CloudConnectionWatch:
         )
 
     @property
+    def last_checked_at(self) -> datetime | None:
+        """The last reachability check, as an aware datetime for a TIMESTAMP sensor.
+
+        The same instant `attributes["last_checked"]` reports as a string. A sensor cannot
+        use that one: `SensorDeviceClass.TIMESTAMP` requires a `datetime` with tzinfo.
+        """
+        stamp = self._checked_at
+        return None if stamp is None else datetime.fromtimestamp(stamp, timezone.utc)
+
+    @property
     def attributes(self) -> dict[str, Any]:
         return {
             "cloud_connection": self._reported,
