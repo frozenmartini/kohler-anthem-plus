@@ -49,6 +49,7 @@ class CloudConnectionWatch:
         self.warmup_ready = False
         self.favorite_ready = False
         self.needs_reseed = True
+        self._outage_reported = False
         self.hostname: str | None = None
         self.links: dict[int, bool | None] = {1: None}
         self.links_stale = True
@@ -160,6 +161,7 @@ class CloudConnectionWatch:
         if first:
             _LOGGER.warning("Kohler %s %s is unreachable through the cloud", self._device_label, self._device.device_id)
             self.journal("device_disconnected", reason=reason)
+            self._outage_reported = True
         self._schedule_retry()
         self._notify()
 
@@ -352,9 +354,17 @@ class CloudConnectionWatch:
             self._retry_cancel()
             self._retry_cancel = None
         if self._backoff.since is not None:
-            self.journal("recovered")
-            # WARNING to match the "is unreachable" onset; see the note in `coordinator.py`.
-            _LOGGER.warning("Kohler %s connectivity recovered", self._device.device_id)
+            if self._outage_reported:
+                self.journal("recovered")
+                # WARNING to match the "is unreachable" onset; see the note in `coordinator.py`.
+                _LOGGER.warning("Kohler %s connectivity recovered", self._device.device_id)
+            else:
+                # `async_start` primes the backoff on every fresh watcher, because
+                # `needs_reseed` is true before the first seed, so the first successful
+                # check always lands here. Nothing was announced as lost, so announcing a
+                # recovery would tell every user their cloud came back at each Core restart.
+                _LOGGER.debug("Kohler %s connectivity settled; no outage had been announced", self._device.device_id)
+        self._outage_reported = False
         self._backoff.reset()
         self._next_check = None
 

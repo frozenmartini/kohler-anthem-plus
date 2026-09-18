@@ -133,6 +133,9 @@ class AnthemMqttStream:
         self._on_disconnect_cb = on_disconnect
         self._on_event = on_event
         self._recovery = RecoveryBackoff()
+        # Latched by the "disconnected" warning, so a recovery is only announced when a
+        # loss was. A first connect that fails arms `_recovery` without announcing anything.
+        self._disconnect_reported = False
         self._connection_waiter: asyncio.Future | None = None
         # Called on the owning loop when a reconnect fails because the stored credential was
         # *rejected* — not merely because Kohler was unreachable.
@@ -334,6 +337,7 @@ class AnthemMqttStream:
         self._finish_connect(client, ConnectionError("MQTT disconnected before setup completed"))
         if self._recovery.since is None:
             _LOGGER.warning("Kohler MQTT disconnected; reconnecting")
+            self._disconnect_reported = True
         if self._on_disconnect_cb:
             self._on_disconnect_cb()
         self._start_reconnect_task()
@@ -422,8 +426,16 @@ class AnthemMqttStream:
         if self._closing or not self.connected or client is not self._mqtt:
             return
         if self._recovery.since is not None:
-            # WARNING to match the "disconnected" onset; see the note in `coordinator.py`.
-            _LOGGER.warning("Kohler MQTT connection recovered")
+            if self._disconnect_reported:
+                # WARNING to match the "disconnected" onset; see the note in `coordinator.py`.
+                _LOGGER.warning("Kohler MQTT connection recovered")
+            else:
+                # `async_start` starts the reconnect owner when the *first* connect fails,
+                # and that path never reaches `_disconnected` — its warning needs a socket
+                # that was already up. Announcing a recovery here would tell every user
+                # their MQTT came back at each Core start.
+                _LOGGER.debug("Kohler MQTT connected; no disconnect had been announced")
+        self._disconnect_reported = False
         self._recovery.reset()
         self.last_error = None
         self.next_retry_at = None
