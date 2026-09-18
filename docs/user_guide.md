@@ -200,6 +200,7 @@ becomes `switch.anthem_plus_master_bath_shower` and `switch.anthem_valve_shower`
 | `Valve Reachable Online` / `System Controller Reachable` | respective device | Device reachability, separate from account MQTT — see [connectivity behavior](#when-a-device-drops-off-the-cloud) |
 | `Valve Connected to System Controller` | controller | Physical valve-port link; disabled and hidden by default |
 | `Last Update` | both | Timestamp of the most recent message |
+| `Connection Last Checked` | both | Timestamp of the last cloud reachability check. The companion to `Reachable Online`, which tells you *what* the last answer was but not *how fresh* it is |
 | `Report Log` | both | Switch; one-file bug-report capture — every raw MQTT message plus the integration's own decision records — see [The Report Log switch](#the-report-log-switch) |
 | `Zone N Hex` | valve | The current command word for that zone — copy it into `send_valve_hex` |
 | `Zone N Outlet M Max Run Time` | valve | That outlet's configured run-time ceiling, in seconds |
@@ -821,6 +822,7 @@ not prove the others are working.
 | MQTT Connection (both devices) | Enabled, hidden | Our shared push subscription is connected |
 | Valve Reachable Online | Enabled, hidden | Cloud or this valve's own MQTT reports it reachable |
 | System Controller Reachable | Enabled, hidden | Cloud/own MQTT, or a successful no-PIN local liveness check |
+| Connection Last Checked (both devices) | Enabled, hidden | When that device's reachability was last verified. A timestamp sensor, so `last_changed` is not needed to read it |
 | Valve Connected to System Controller | Disabled, hidden | The controller's physical valve-port link |
 | Valve 2 Connected to System Controller | Disabled, hidden | Created only after a second physical valve port has actually reported connected; retained thereafter |
 
@@ -842,8 +844,40 @@ Recovery checks run after **1 minute, then 2 minutes, then every 5 minutes**. Af
 they slow to every 15 minutes; after a day, hourly. MQTT gets one immediate reconnect
 attempt before that backoff. Cloud failures share an account recovery gate, and server
 `Retry-After` is respected. A device push or manual refresh can accelerate recovery.
-There is one onset/recovery log message and a long-outage informational message, not a
-warning every attempt. Rejected account credentials suspend retries and request reauthentication.
+Logging is paired: **a recovery is only announced if the loss was announced.** One warning
+when something goes, one when it comes back, a long-outage informational message if it stays
+away, and nothing per attempt. A restart is not an outage and says nothing at all — see
+[what you see](#what-you-see-power-loss-internet-loss-and-a-restart) below. Rejected account
+credentials suspend retries and request reauthentication.
+
+#### What you see: power loss, internet loss, and a restart
+
+Two diagnostics answer different questions, and the pair is what tells these cases apart.
+`MQTT Connection` is **our** link to Kohler; `Reachable Online` is **that device's**. One
+working does not imply the other.
+
+| What happened | MQTT Connection | Reachable Online | Logged |
+|---|---|---|---|
+| **Home Assistant restarted**, or the integration reloaded | Reconnects within seconds | Re-verified within seconds; `Connection Last Checked` moves to now | **Nothing.** Nothing was lost, so nothing is announced |
+| **Your internet, or Kohler's cloud, is unreachable** | Off, account-wide | Last answer preserved with `stale` / `last_error` | `Kohler cloud is not responding; it will be retried automatically`, and `Kohler MQTT disconnected; reconnecting`. One each on return |
+| **One device loses power**, or otherwise stops reporting to Kohler | Unaffected — still connected | Off for that device only; the other device is untouched | `Kohler <valve\|controller> <id> is unreachable through the cloud`, and `connectivity recovered` when it returns |
+
+So: **everything unavailable at once is your side or Kohler's; one device unavailable is that
+device.** Controls and operational readings go unavailable in both outage cases; diagnostic
+answers and Home Assistant-owned preferences stay readable, which is why the table above is
+still worth looking at during an outage.
+
+`Connection Last Checked` is what tells a *stale* answer from a *current* one. `Reachable
+Online` holds its last answer through a failed check rather than flipping to "unreachable" on
+one bad request, so during an outage it can read reachable while being hours old. The
+timestamp is the thing that says so. It is also why that entity stays **available while its
+device is not** — the moment you most want to know when the last check ran is the moment the
+device is down.
+
+⚠️ **A restart used to announce a recovery.** In releases before this one, a plain restart or
+reload logged `connectivity recovered` for every device and, on an unlucky boot, `MQTT
+connection recovered` as well — announcing a recovery from an outage that never happened. If
+you are reading back through older logs, those lines mean nothing was wrong.
 
 For a controller cloud failure, one local `get_hub_version_info` read can distinguish
 a locally alive controller from an unreachable one. It uses an unambiguous discovered
