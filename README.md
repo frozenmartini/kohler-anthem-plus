@@ -300,9 +300,10 @@ used. The reports folder lives inside the integration, so updating or reinstalli
 calibration, so a flow setting cannot be held accurately — not by this integration, and not by
 the Konnect app either.</li>
 <li><b>The API is undocumented</b> and Kohler can change it without notice.</li>
-<li><b>One installation tested.</b> A single K-28212 — six outlets, three and three — with a
-controller on firmware 2.88. Other models are supported on what the protocol says, not on anyone
-having run them.</li>
+<li><b>Three installations tested, not every model.</b> The author's K-28212 — six outlets,
+three and three — with a controller on firmware 2.88; a second six-outlet valve; and an account
+running two three-outlet valves. No account with more than one controller has run it. Other
+models are supported on what the protocol says, not on anyone having run them.</li>
 </ul>
 
 <p>This is an unofficial, community-built integration, reverse-engineered from Kohler's cloud

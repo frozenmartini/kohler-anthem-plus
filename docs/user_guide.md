@@ -964,18 +964,21 @@ Konnect app.
 
 ## Tested against
 
-**One installation.** A single K-28212 — 6 outlets, 3 + 3 across two zones — plus an Anthem
-Plus controller on firmware 2.88. Every finding in [``](./) is derived from and
-verified against that one system.
+**Three installations.** The author's — a single K-28212, 6 outlets, 3 + 3 across two zones,
+plus an Anthem Plus controller on firmware 2.88. A second six-outlet valve. And an account
+running two three-outlet valves, which is where multi-valve support was built and run.
+
+The protocol writeup in [`docs/`](./) is derived from and verified against the author's system,
+with the `gcs-usage` contract verified independently on the two-valve account.
 
 Other models and configurations are supported on the basis of what the protocol says, not on
 the basis of anyone having run them. If you have different hardware, reports are genuinely
-useful — particularly from a single-zone valve, or from a valve without a controller in front
-of it.
+useful — particularly from a valve with no controller in front of it, or from an account with
+more than one controller, which nobody has run.
 
 ## Documentation
 
-[``](./) is a full protocol reference, not just integration notes.
+[`docs/`](./) is a full protocol reference, not just integration notes.
 
 | Document | What's in it |
 |---|---|
