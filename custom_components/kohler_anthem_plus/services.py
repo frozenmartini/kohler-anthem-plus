@@ -164,12 +164,8 @@ _SERVICE_DESCRIPTION = (
 
 _CUSTOM_SHOWER_DESCRIPTION = (
     "Start the shower with the outlets and temperature you choose, sent to the valve as "
-    "one command. This is the reliable way to open an outlet and set its temperature from "
-    "a single automation step. Outlets you leave off are closed, and leaving every outlet "
-    "off stops the shower. On a valve with warm-up enabled the valve warms up first and "
-    "then pauses for two minutes, just as it always does; turn on \"No pausing warm-up\" "
-    "(beta) to have it carry on with your outlets and temperature the moment "
-    "that pause begins. WARNING: this can start water."
+    "one command — the reliable way to do it from an automation. Outlets left off are "
+    "closed; leaving every outlet off stops the shower. WARNING: this can start water."
 )
 # The static form shows Fahrenheit and the K-28212's outlets; the runtime override swaps in
 # the account's unit and range and drops the zones and outlets the valve does not have.
@@ -242,17 +238,18 @@ _FIELD_OUTLETS = {
         "selector": {"boolean": None},
     },
 }
-# "(beta)" in the name and "Beta" in the description are deliberate and mirrored in the docs
-# and release notes (owner, 2026-09-06): the resume has run on one valve, so the form says so.
+# The beta marking was dropped on 2026-09-21 (owner): four people have run `custom_shower`
+# with no reports of trouble. The resume itself is still one valve, twice, and nobody has
+# reported trying it, so the form invites reports rather than carrying a label. The count
+# itself stays in the user guide, which has room for the measurements; the form does not.
+# Mirrored in `services.yaml`; the release notes keep the wording they shipped with.
 _FIELD_KEEP_ON = {
-    "name": "No pausing warm-up (beta)",
+    "name": "No pausing warm-up",
     "required": True,
     "description": (
-        "Keeps the shower on after the valve's warm-up is finished. Beta, tested on one "
-        "valve so far. Only matters when the valve's warm-up is enabled. After warming "
-        "up, the valve pauses for two minutes, just as it always "
-        "does. With this on, the shower carries on with your outlets and temperature the "
-        "moment that pause begins. Off, the valve's two-minute pause runs as usual."
+        "Keeps the shower on when the valve's warm-up ends, instead of pausing for two "
+        "minutes to wait for you. Only matters when warm-up is enabled. The author has "
+        "tried this and it works; tell us if anything is not right."
     ),
     "selector": {"boolean": None},
 }
@@ -260,9 +257,8 @@ _FIELD_FLOW = {
     "name": "Flow",
     "required": False,
     "description": (
-        "Percentage of full flow, from 8 to 100. Leave it unset for full flow. The flow "
-        "set here holds only until someone presses the flow button on the touchscreen, "
-        "which takes over from then on."
+        "Percentage of full flow, 8 to 100. Unset means full flow. Pressing the flow "
+        "button on the touchscreen takes over from then on."
     ),
     "example": 100,
     "selector": {

@@ -79,7 +79,7 @@ the broker replays nothing when you connect, so the state has to come from somew
 * **One-command shower.** A `custom_shower` action: choose outlets and temperatures, and it
   goes to the valve as a single command — the form to use from an automation, because the valve
   cannot take two commands back to back. Optionally keeps the shower on past the valve's
-  warm-up pause (beta).
+  warm-up pause.
 * **Raw escape hatch.** A `send_valve_hex` service for anything the normal controls cannot do.
 * **Forensics built in.** The integration writes its own MQTT capture and analysis journals,
   which is how most of `docs/` was established in the first place.
@@ -415,7 +415,7 @@ temperature: the valve cannot take two commands back to back (see
 [Known limitations](#known-limitations)), and this sends one.
 
 In the automation editor, add an action, search for **Custom shower**, turn on the outlets,
-set the temperature, and optionally turn on **No pausing warm-up (beta)**. The same
+set the temperature, and optionally turn on **No pausing warm-up**. The same
 thing in YAML:
 
 ```yaml
@@ -424,7 +424,7 @@ data:
   device_id: 1a2b3c…          # only with more than one valve: the valve device's id
   zone1_temperature: 108      # in your account's unit; the slider covers 80–113 °F
   zone1_outlet_1: true        # outlets you leave out are closed
-  keep_on_after_warmup: true  # optional and beta, see below
+  keep_on_after_warmup: true  # optional, see below
 ```
 
 Every field the action takes, with what each one does when you leave it out:
@@ -444,7 +444,7 @@ data:
   zone2_outlet_2: false
   zone2_outlet_3: false
 
-  keep_on_after_warmup: true  # default false; beta, see below
+  keep_on_after_warmup: true  # default false; see below
   flow: 100                   # default 100; 8–100 % of full flow
 ```
 
@@ -464,7 +464,7 @@ What it does:
 * **Flow** is under *Advanced* and defaults to full flow, like every other command from Home
   Assistant. The flow you set holds only until someone presses the flow button on the
   touchscreen, which takes over from then on.
-* **No pausing warm-up (beta).** Keeps the shower on after the valve's warm-up is finished.
+* **No pausing warm-up.** Keeps the shower on after the valve's warm-up is finished.
   Only matters when the valve's warm-up is enabled. On such a valve every outlet command first
   runs the warm-up, and when the water is warm the valve **pauses** for two minutes, just as it
   always does — left alone, that pause ends the session. So on a warm-up-enabled valve a command
@@ -474,7 +474,7 @@ What it does:
   warm), if the warm-up ends in a stop rather than a pause, if someone takes over at the wall,
   or if any other command is sent from Home Assistant in the meantime. On the reference
   system the pause is how the warm-up ends — 30 of the 31 captured — so the check is on the
-  pause itself, never on the controller's warm-up flag. **Beta:** it has run on one valve, the
+  pause itself, never on the controller's warm-up flag. It has run on one valve, the
   reference K-28212, twice on 2026-09-06 — the pause arrived 35 s and 69 s after the command
   and the shower was back on 1.2 s and 0.8 s later. Please report how it behaves on yours.
 
@@ -706,7 +706,7 @@ automation:
         data:
           zone1_temperature: 108
           zone1_outlet_1: true
-          keep_on_after_warmup: true   # beta; only matters with the valve's warm-up on
+          keep_on_after_warmup: true   # only matters with the valve's warm-up on
 ```
 
 One action, one command to the valve. In the UI editor this is the **Custom shower** action

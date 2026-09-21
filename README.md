@@ -159,7 +159,7 @@ want, and the whole shower reaches the valve as one command.</p>
 <p>In the automation editor, search for <b>Kohler Anthem Plus: Custom shower</b>. Or,
 <code>kohler_anthem_plus.custom_shower</code> in YAML.</p>
 
-<p><b>Beta — No pausing warm-up.</b> Keep the shower on after the valve's warm-up is finished.
+<p><b>No pausing warm-up.</b> Keep the shower on after the valve's warm-up is finished.
 Your shower will no longer pause and wait for you to resume.</p>
 
 <table cellpadding="6" align="center">
