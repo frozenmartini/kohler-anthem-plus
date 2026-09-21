@@ -404,19 +404,36 @@ class KohlerAuth:
                 headers={"Content-Type": "application/x-www-form-urlencoded"},
                 timeout=aiohttp.ClientTimeout(30),
             ) as resp:
-                payload = await resp.json(content_type=None)
-                if resp.status != 200:
-                    detail = (
-                        payload.get("error_description")
-                        or payload.get("error")
-                        or f"HTTP {resp.status}"
-                    )
-                    _raise_for_b2c_error(str(detail))
-                    raise AuthError(f"Kohler token request failed: {detail}")
+                status = resp.status
+                # Parse defensively, as `client.py` does. A gateway in front of B2C answers
+                # a 502/503 with an HTML page, and an unguarded `resp.json()` raised
+                # `JSONDecodeError` — neither `AuthError` nor `ClientError`, so it escaped
+                # every caller's handling and left a config entry on "Failed to set up"
+                # with no retry, where `AuthUnavailable` would have been retried.
+                payload: Any
+                try:
+                    payload = await resp.json(content_type=None)
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    payload = None
         except aiohttp.ClientError as err:
             raise AuthUnavailable(
                 f"Network error during token request: {err}"
             ) from err
+
+        if not isinstance(payload, dict):
+            if status != 200:
+                raise AuthUnavailable(
+                    f"Kohler token endpoint returned HTTP {status} with no usable body"
+                )
+            raise AuthError("Kohler token endpoint returned an unreadable response.")
+        if status != 200:
+            detail = (
+                payload.get("error_description")
+                or payload.get("error")
+                or f"HTTP {status}"
+            )
+            _raise_for_b2c_error(str(detail))
+            raise AuthError(f"Kohler token request failed: {detail}")
 
         access_token = payload.get("access_token")
         refresh_token = payload.get("refresh_token") or self.refresh_token
