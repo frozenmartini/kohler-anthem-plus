@@ -98,9 +98,21 @@ from .cloud_watch import CloudConnectionWatch
 # writers shipped inside `anthem_plus/`, pinned on, so every install in the world ran them.
 # Now `async_setup` calls `_dev.async_install(self)` when the package is present and does
 # nothing when it is not; a release always takes the second path.
+#
+# ⚠️ `ImportError`, not `ModuleNotFoundError`. This package is still initialising when
+# `__init__.py` imports us, and `from . import _dev` against a partially initialised parent
+# raises plain `ImportError` ("cannot import name '_dev' … most likely due to a circular
+# import"), never the subclass. Catching the subclass let it escape and took the whole
+# package import down on every install without the overlay — issue #8, shipped in 0.4.5.
+# Do not narrow this back.
+#
+# The cost, accepted: a genuinely broken `_dev` on the one machine that has it is swallowed
+# too, silently disabling the capture instead of surfacing the error. Raising here would take
+# the integration down in a live house over a dev-only typo, which is worse; and the offline
+# suite imports `_dev` directly, so a broken overlay fails there loudly instead.
 try:
     from . import _dev
-except ModuleNotFoundError:  # every install but the author's
+except ImportError:  # every install but the author's
     _dev = None
 # For `__init__.py`: the old-capture-folder repair must never be offered on the one install
 # where that folder is still being written.
